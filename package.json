@@ -28,10 +28,13 @@
     "wait-on": "^7.0.1"
   },
   "dependencies": {
+    "date-fns": "^4.1.0",
     "electron-is-dev": "^3.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1"
+    "react-router-dom": "^7.8.2",
+    "react-scripts": "5.0.1",
+    "uuid": "^11.1.0"
   },
   "build": {
     "appId": "com.yourcompany.electronreactapp",
