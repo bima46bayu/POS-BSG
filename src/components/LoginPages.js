@@ -2,16 +2,21 @@ import React, { useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import POSPage from '../pages/POSPage';
 
-const LoginPage = () => {
+const LoginPage = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = () => {
-    // Handle login logic here
-    console.log('Login attempt:', { email, password });
-    setLoggedIn(true);
+    if (email && password) {
+      setError('');
+      console.log('Login attempt:', { email, password });
+      if (onLogin) onLogin();
+    } else {
+      setError('Email dan password wajib diisi!');
+    }
   };
 
   const handleKeyPress = (e) => {
@@ -20,9 +25,9 @@ const LoginPage = () => {
     }
   };
 
-  if (loggedIn) {
-    return <POSPage />;
-  }
+//   if (loggedIn) {
+//     return <POSPage />;
+//   }
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
@@ -112,6 +117,12 @@ const LoginPage = () => {
                 </button>
               </div>
             </div>
+                        {/* Error Message */}
+            {error && (
+              <div className="text-red-600 text-sm font-medium mt-2 mb-2 text-left">
+                {error}
+              </div>
+            )}
 
             {/* Sign In Button */}
             <button
