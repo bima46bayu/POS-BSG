@@ -53,7 +53,7 @@ const Payment = ({ total, onPayment, onCancel }) => {
                 Rp
             </span>
             <input
-                type="text"
+                type="number"
                 placeholder="Payment Amount"
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}

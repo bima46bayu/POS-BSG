@@ -56,11 +56,18 @@ const POSPage = () => {
   const handleCancel = useCallback(() => setCartItems([]), []);
   const handleSearch = useCallback((q) => console.log('Search:', q), []);
   const handleFilter = useCallback(() => console.log('Filter clicked'), []);
-  const handleScan = useCallback(() => console.log('Scanner activated'), []);
+//   const handleScan = useCallback(() => console.log('Scanner activated'), []);
 
   const subtotal = useMemo(() => cartItems.reduce((s, i) => s + i.price * i.quantity, 0), [cartItems]);
   const tax = useMemo(() => Math.round(subtotal * 0.11), [subtotal]);
   const total = subtotal + tax;
+
+  const handleScan = (code) => {
+    // contoh: cari produk dengan barcode/sku = code dan tambahkan ke cart
+    const p = products.find(x => x.barcode === code || x.sku === code);
+    if (p) handleAddToCart(p);
+    else alert(`Kode ${code} tidak ditemukan`);
+    };
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-50">

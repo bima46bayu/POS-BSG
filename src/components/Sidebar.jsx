@@ -111,7 +111,7 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout }) => {
                 key={item.id}
                 onClick={() => handleNavigate(item.id)}
                 className={`
-                  relative flex flex-col items-center justify-center w-14 h-14 rounded-xl transition-all duration-200
+                  relative flex flex-col items-center justify-center px-2 h-14 rounded-xl transition-all duration-200
                   ${isActive 
                     ? 'bg-blue-50 text-blue-600 shadow-sm' 
                     : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
@@ -134,7 +134,7 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout }) => {
         <div className="mt-auto pt-8">
           <button
             onClick={handleLogout}
-            className="flex flex-col items-center justify-center w-14 h-14 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200"
+            className="flex flex-col items-center justify-center px-2 h-14 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200"
           >
             <LogOut size={24} className="mb-1" />
             <span className="text-xs font-medium">Sign Out</span>
