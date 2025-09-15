@@ -28,16 +28,14 @@ jobs:
           if [ -d build ] && [ -f public/.htaccess ] && [ ! -f build/.htaccess ]; then cp public/.htaccess build/.htaccess; fi
           if [ -d dist ] && [ -f public/.htaccess ] && [ ! -f dist/.htaccess ]; then cp public/.htaccess dist/.htaccess; fi
 
-      # Commit SHA untuk v4.3.5 (contoh stabil)
-      # https://github.com/SamKirkland/FTP-Deploy-Action/releases/tag/v4.3.5
       - name: Upload via FTPS
-        uses: SamKirkland/FTP-Deploy-Action@d1b3a0e2b6a8e9b8d1c20b1a0c6fa9f3f0a2b1a7
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5   # <- pakai TAG ini, case-sensitive
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
-          local-dir: build/
-          server-dir: public_html/
+          local-dir: build/          # ganti ke dist/ kalau Vite
+          server-dir: public_html/   # atau public_html/app/
           dangerous-clean-slate: true
 
