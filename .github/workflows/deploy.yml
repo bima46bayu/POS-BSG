@@ -1,8 +1,8 @@
-name: Deploy CRA to Hostinger (FTP)
+name: Deploy React to Hostinger (FTPS)
 
 on:
   push:
-    branches: [ "main" ]   # ganti kalau branch kamu beda
+    branches: [ "main" ]
 
 jobs:
   build-and-deploy:
@@ -15,20 +15,26 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
-      - name: Install deps & Build (CRA)
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build   # CRA -> build/, Vite -> dist/
+
+      - name: Ensure .htaccess copied
         run: |
-          npm ci
-          npm run build       # CRA menghasilkan folder build/
+          if [ -d build ] && [ -f public/.htaccess ] && [ ! -f build/.htaccess ]; then cp public/.htaccess build/.htaccess; fi
+          if [ -d dist ] && [ -f public/.htaccess ] && [ ! -f dist/.htaccess ]; then cp public/.htaccess dist/.htaccess; fi
 
-      - name: Deploy via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4
+      - name: Upload via FTPS
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          protocol: ftp
-          local-dir: ./build          # penting: CRA => build/
-          server-dir: public_html/    # atau public_html/app/ bila pakai subfolder
-          dangerous-clean-slate: true # hapus isi lama biar bersih
+          protocol: ftps
+          local-dir: build/          # ganti ke dist/ kalau Vite
+          server-dir: public_html/   # atau public_html/app/
+          dangerous-clean-slate: true
