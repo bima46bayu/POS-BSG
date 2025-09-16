@@ -36,6 +36,6 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           local-dir: build/          # ganti ke dist/ kalau Vite
-          server-dir: public_html/   # atau public_html/app/
+          server-dir: ./   # atau public_html/app/
           dangerous-clean-slate: true
 
