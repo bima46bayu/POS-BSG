@@ -9,6 +9,7 @@ import { ShoppingCart, ChevronUp } from "lucide-react";
 
 import { getProducts, getProductBySKU } from "../api/products";
 import { getCategories, getSubCategories } from "../api/categories";
+import { toAbsoluteUrl } from "../api/client"; // sesuaikan path import-nya
 
 const PER_PAGE = 20;
 const TAX_RATE = 0.11;
@@ -18,7 +19,7 @@ const normalize = (p) => ({
   id: p.id ?? p.product_id ?? p.sku,
   name: p.name ?? p.product_name ?? p.nama ?? "Tanpa Nama",
   price: Number(p.price ?? p.unit_price ?? p.sale_price ?? 0),
-  image: p.image_url || p.image || p.thumbnail_url || p.photo_url || null,
+  image: toAbsoluteUrl(p.image_url || p.image || p.thumbnail_url || p.photo_url || null),
   stock: p.stock ?? p.qty ?? p.quantity ?? 0,
   sku: p.sku ?? p.barcode ?? null,
   category_id: p.category_id,
