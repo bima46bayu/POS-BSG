@@ -10,7 +10,7 @@ const ProductCard = memo(function ProductCard({
   className = "",
 }) {
   const priceText = useMemo(
-    () => (price ? price.toLocaleString("id-ID") : "0"),
+    () => Number(price || 0).toLocaleString("id-ID"),
     [price]
   );
   const outOfStock = Number(stock) <= 0;

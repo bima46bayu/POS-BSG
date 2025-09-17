@@ -9,24 +9,30 @@ import PurchasePage from './pages/PurchasePage';
 import HistoryPage from './pages/HistoryPage';
 import HomePage from './pages/HomePage';
 
+import { isLoggedIn, logoutRequest } from './api/auth'; // <— ADD
+
 function App() {
-  // Ambil status login dari localStorage saat pertama kali render
-  const [loggedIn, setLoggedIn] = useState(() => {
-    return localStorage.getItem('loggedIn') === 'true';
-  });
+  const [loggedIn, setLoggedIn] = useState(() => isLoggedIn());       // <— CHANGE
   const [currentPage, setCurrentPage] = useState('pos');
 
   const handleNavigate = (page) => setCurrentPage(page);
-  const handleLogout = () => {
+
+  const handleLogout = async () => {                                  // <— CHANGE
+    await logoutRequest();
     setLoggedIn(false);
-    localStorage.removeItem('loggedIn');
     setCurrentPage('pos');
   };
 
-  // Simpan status login ke localStorage setiap kali berubah
+  // Sinkron antar-tab & saat localStorage berubah (mis. interceptor 401 menghapus token)
   useEffect(() => {
-    localStorage.setItem('loggedIn', loggedIn);
-  }, [loggedIn]);
+    const onStorage = (e) => {
+      if (e.key === process.env.REACT_APP_STORAGE_KEY) {
+        setLoggedIn(isLoggedIn());
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   if (!loggedIn) {
     return <LoginPages onLogin={() => setLoggedIn(true)} />;
@@ -34,26 +40,13 @@ function App() {
 
   let PageComponent;
   switch (currentPage) {
-    case 'home':
-      PageComponent = <HomePage />; // Ganti dengan <HomePage /> jika ada
-      break;
-    case 'pos':
-      PageComponent = <POSPage />;
-      break;
-    case 'products':
-      PageComponent = <ProductPage />;
-      break;
-    case 'inventory':
-      PageComponent = <InventoryPage />;
-      break;
-    case 'purchase':
-      PageComponent = <PurchasePage />;
-      break;
-    case 'history':
-      PageComponent = <HistoryPage />;
-      break;
-    default:
-      PageComponent = <POSPage />;
+    case 'home': PageComponent = <HomePage />; break;
+    case 'pos': PageComponent = <POSPage />; break;
+    case 'products': PageComponent = <ProductPage />; break;
+    case 'inventory': PageComponent = <InventoryPage />; break;
+    case 'purchase': PageComponent = <PurchasePage />; break;
+    case 'history': PageComponent = <HistoryPage />; break;
+    default: PageComponent = <POSPage />;
   }
 
   return (

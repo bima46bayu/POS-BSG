@@ -16,26 +16,33 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"
 
       - name: Install deps
         run: npm ci
 
+      # Inject ENV ke proses build (CRA akan baca REACT_APP_* di sini)
       - name: Build
-        run: npm run build   # CRA -> build/, Vite -> dist/
+        env:
+          REACT_APP_API_BASE_URL: ${{ secrets.REACT_APP_API_BASE_URL }}
+          REACT_APP_STORAGE_KEY: ${{ secrets.REACT_APP_STORAGE_KEY }}
+          # Jika perlu NODE_ENV bisa ditentukan, tapi npm run build otomatis set production untuk CRA
+          # NODE_ENV: production
+        run: npm run build   # CRA -> output ke build/
 
+      # Copy .htaccess (opsional, untuk routing SPA agar /path di-refresh tidak 404)
       - name: Ensure .htaccess copied
         run: |
           if [ -d build ] && [ -f public/.htaccess ] && [ ! -f build/.htaccess ]; then cp public/.htaccess build/.htaccess; fi
-          if [ -d dist ] && [ -f public/.htaccess ] && [ ! -f dist/.htaccess ]; then cp public/.htaccess dist/.htaccess; fi
 
       - name: Upload via FTPS
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5   # <- pakai TAG ini, case-sensitive
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
-          local-dir: build/          # ganti ke dist/ kalau Vite
-          server-dir: ./   # atau public_html/app/
+          local-dir: build/
+          server-dir: ${{ secrets.FTP_SERVER_DIR || './' }}
+          # hati-hati: ini menghapus file di server-dir yang tidak ada di build/
           dangerous-clean-slate: true
-

@@ -1,107 +1,185 @@
 import React, { useEffect, useRef, useState } from "react";
+import {
+  Search as SearchIcon,
+  ChevronDown,
+  ChevronUp,
+  ScanLine
+} from "lucide-react";
 
-const SearchBar = ({ onSearch, onFilter, onScan }) => {
+export default function SearchBar({
+  onSearch,
+  onScan,
+  onFilterChange,
+  categories = [],
+  subCategories = [],
+  onPickCategory,
+}) {
   const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+
+  // filter local state
+  const [categoryId, setCategoryId] = useState("");
+  const [subCategoryId, setSubCategoryId] = useState("");
+  const [stockStatus, setStockStatus] = useState("any"); // any|available|out
+
+  // scanner
   const [scanActive, setScanActive] = useState(false);
   const [scanBuffer, setScanBuffer] = useState("");
   const hiddenInputRef = useRef(null);
   const timerRef = useRef(null);
 
-  // Fokuskan hidden input saat scan aktif
+  useEffect(() => { setSubCategoryId(""); }, [categoryId]);
+
+  // scanner focus
   useEffect(() => {
     if (scanActive) {
-      setScanBuffer("");
       const t = setTimeout(() => hiddenInputRef.current?.focus(), 0);
       return () => clearTimeout(t);
-    } else {
-      setScanBuffer("");
-      if (timerRef.current) clearTimeout(timerRef.current);
     }
+    setScanBuffer("");
+    if (timerRef.current) clearTimeout(timerRef.current);
   }, [scanActive]);
 
   const commitScan = () => {
     const code = scanBuffer.trim();
     if (code) onScan?.(code);
-    setScanActive(false);   // matikan mode scan setelah dapat kode
+    setScanActive(false);
     setScanBuffer("");
   };
-
   const handleHiddenKeyDown = (e) => {
-    // Enter/Tab biasanya dikirim di akhir oleh scanner
     if (e.key === "Enter" || e.key === "Tab") {
-      e.preventDefault();
-      commitScan();
-      return;
+      e.preventDefault(); commitScan(); return;
     }
-    // Ambil hanya karakter printable
-    if (e.key.length === 1) {
-      setScanBuffer((prev) => prev + e.key);
-    }
-    // Fallback: kalau scanner tidak kirim Enter, commit setelah jeda
+    if (e.key.length === 1) setScanBuffer((prev) => prev + e.key);
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      if (scanBuffer) commitScan();
-    }, 120);
+    timerRef.current = setTimeout(() => { if (scanBuffer) commitScan(); }, 120);
+  };
+
+  const filteredSubcats = subCategories.filter(
+    (s) => !categoryId || String(s.category_id) === String(categoryId)
+  );
+
+  const applyFilter = () => {
+    onFilterChange?.({
+      category_id: categoryId || undefined,
+      sub_category_id: subCategoryId || undefined,
+      stock_status: stockStatus,
+    });
+    setOpen(false);
   };
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
-        {/* Search manual (tetap jalan sendiri) */}
-        <div className="relative flex-1 min-w-[180px] sm:min-w-[240px]">
+      <div className="flex items-center gap-2 mb-4">
+        {/* Search pill */}
+        <div className="relative flex-1">
           <input
             type="text"
             value={q}
-            onChange={(e) => {
-              const v = e.target.value;
-              setQ(v);
-              onSearch?.(v);
-            }}
+            onChange={(e) => { setQ(e.target.value); onSearch?.(e.target.value); }}
             onKeyDown={(e) => e.key === "Enter" && onSearch?.(q)}
-            placeholder="Search category or product"
-            className="h-10 w-full pl-10 pr-3 rounded-full border border-gray-300 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            aria-label="Search products"
+            placeholder="Search product / SKU"
+            className="h-11 w-full pl-10 pr-4 rounded-full border border-gray-300 bg-white text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M21 21l-4.35-4.35M10 18a8 8 0 100-16 8 8 0 000 16z" />
-          </svg>
+          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
         </div>
 
-        {/* Filter */}
-        <button
-          type="button"
-          onClick={onFilter}
-          className="inline-flex items-center justify-center h-10 px-4 rounded-full border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 active:scale-[0.98] transition whitespace-nowrap"
-        >
-          Filter
-          <svg className="w-4 h-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
+        {/* Filter pill */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="h-11 inline-flex items-center gap-1 rounded-full px-4 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none"
+          >
+            Filter {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
 
-        {/* Toggle Scanner (gun) */}
+          {open && (
+            <div className="absolute right-0 mt-2 w-80 z-20 rounded-2xl border border-gray-200 bg-white shadow-xl p-4 space-y-3">
+              {/* Category */}
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Category</label>
+                <select
+                  className="w-full h-10 px-3 rounded-full border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={categoryId}
+                  onChange={(e) => {
+                    setCategoryId(e.target.value);
+                    onPickCategory?.(e.target.value || undefined);
+                  }}
+                >
+                  <option value="">All</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sub Category */}
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Sub Category</label>
+                <select
+                  className="w-full h-10 px-3 rounded-full border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={subCategoryId}
+                  onChange={(e) => setSubCategoryId(e.target.value)}
+                  disabled={!categoryId && filteredSubcats.length === 0}
+                >
+                  <option value="">All</option>
+                  {filteredSubcats.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Stock */}
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">Stock</label>
+                <div className="flex gap-2">
+                  {[
+                    { v: "any", t: "All" },
+                    { v: "available", t: "Available" },
+                    { v: "out", t: "Out of stock" },
+                  ].map((o) => (
+                    <button
+                      key={o.v}
+                      type="button"
+                      onClick={() => setStockStatus(o.v)}
+                      className={`h-9 px-3 rounded-full text-sm border ${
+                        stockStatus === o.v
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      {o.t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={applyFilter}
+                className="w-full h-10 rounded-full bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
+              >
+                Apply
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Scanner pill */}
         <button
           type="button"
           onClick={() => setScanActive((v) => !v)}
-          className={`inline-flex items-center justify-center h-10 px-4 rounded-full text-sm font-semibold transition whitespace-nowrap focus:outline-none
+          className={`h-11 inline-flex items-center gap-2 rounded-full px-4 border text-sm font-medium transition
             ${scanActive
-              ? "bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] border border-blue-600"
-              : "border border-gray-300 text-gray-500 bg-white hover:bg-gray-50"}`}
-          aria-pressed={scanActive}
+              ? "bg-blue-600 text-white border-blue-600"
+              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"}`}
         >
+          <ScanLine className="h-4 w-4" />
           {scanActive ? "Scanning…" : "Scanner"}
-          <svg className="w-4 h-4 ml-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M4 7V5a1 1 0 011-1h2M20 7V5a1 1 0 00-1-1h-2M4 17v2a1 1 0 001 1h2M20 17v2a1 1 0 01-1 1h-2M7 12h10" />
-          </svg>
         </button>
       </div>
 
-      {/* Hidden input khusus gun scanner */}
+      {/* Hidden input untuk scanner */}
       {scanActive && (
         <input
           ref={hiddenInputRef}
@@ -115,6 +193,4 @@ const SearchBar = ({ onSearch, onFilter, onScan }) => {
       )}
     </>
   );
-};
-
-export default SearchBar;
+}
