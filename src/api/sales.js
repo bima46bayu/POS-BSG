@@ -21,3 +21,9 @@ export async function createSale(payload) {
   const { data } = await api.post("/api/sales", payload);
   return data;
 }
+
+export async function getSale(id) {
+  const { data } = await api.get(`/api/sales/${id}`);
+  return data; // pastikan backend mengembalikan { id, code, created_at, cashier, customer_name, items, subtotal, discount, tax, total, paid, change, payments: [...] }
+}
+

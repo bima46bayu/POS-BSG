@@ -1,59 +1,75 @@
+// OrderSummary.jsx (drop-in)
 import React, { useMemo } from "react";
+
+const money = (n) => `Rp${Number(n || 0).toLocaleString("id-ID")}`;
 
 export default function OrderSummary({
   items = [],
-  subtotal,       // number | undefined
-  tax = 0,        // number (rupiah)
-  discount = 0,   // number (rupiah)
-  total,          // number | undefined (jika tak ada, dihitung)
-  taxRate = 0.11, // Untuk label "Tax (11%)"
+  discount: discountHeader = 0,   // Rp (diskon header)
+  tax = 0,                        // Rp
+  taxRate = 0,                    // label saja
+  subtotal,                       // optional override
+  total,                          // optional override
 }) {
-  // Hitung subtotal dari items bila prop subtotal tidak diberikan
-  const itemsSubtotal = useMemo(() => {
-    if (typeof subtotal === "number") return subtotal;
-    return items.reduce(
-      (s, i) => s + (Number(i.price) || 0) * (Number(i.quantity) || 0),
-      0
-    );
-  }, [items, subtotal]);
+  const { itemsGross, itemDiscountTotal, itemsNetSubtotal } = useMemo(() => {
+    let gross = 0, discItems = 0;
+    for (const it of items) {
+      const price = Number(it.price || 0);
+      const qty   = Number(it.quantity || 0);
+      const type  = it.discount_type || "rp"; // 'rp' | '%'
+      const val   = Number(it.discount_value || 0);
+      const discPerUnit = Math.min(price, type === "%" ? (price * val) / 100 : val);
+      gross     += price * qty;
+      discItems += discPerUnit * qty;
+    }
+    return {
+      itemsGross: gross,
+      itemDiscountTotal: discItems,
+      itemsNetSubtotal: Math.max(0, gross - discItems),
+    };
+  }, [items]);
 
-  // Hitung grand total bila prop total tidak diberikan
+  const shownSubtotal = typeof subtotal === "number" ? subtotal : itemsNetSubtotal;
+  const headerDisc = Number(discountHeader || 0);
+  const grandDiscount = itemDiscountTotal + headerDisc;
+
   const grandTotal = useMemo(() => {
     if (typeof total === "number") return total;
-    return Math.max(0, Number(itemsSubtotal) + Number(tax || 0) - Number(discount || 0));
-  }, [total, itemsSubtotal, tax, discount]);
+    return Math.max(0, shownSubtotal - headerDisc + Number(tax || 0));
+  }, [total, shownSubtotal, headerDisc, tax]);
 
   return (
     <div className="mt-4">
       <h3 className="text-lg font-semibold text-gray-900 mb-3">Order Summary</h3>
 
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-gray-500">Subtotal</span>
-        <span className="text-gray-500">
-          Rp{Number(itemsSubtotal).toLocaleString("id-ID")}
-        </span>
-      </div>
+      <Row label="Subtotal item" value={itemsGross} />
+      <Row label="Item Discount" value={-itemDiscountTotal} red />
+      {/* <Row label="Subtotal (net)" value={shownSubtotal} /> */}
+      {/* <Row label={`Tax${taxRate ? ` (${Math.round(taxRate * 100)}%)` : ""}`} value={tax} /> */}
+      <Row label="Discount Transaction" value={-headerDisc} red />
 
-      <div className="flex items-center justify-between text-sm mt-1">
-        <span className="text-gray-500">Tax ({Math.round(taxRate * 100)}%)</span>
-        <span className="text-gray-500">
-          Rp{Number(tax).toLocaleString("id-ID")}
-        </span>
-      </div>
+      {/* GRAND DISCOUNT (Item + Header) */}
+      {/* <Row label="Grand Discount" value={-grandDiscount} red /> */}
 
-      <div className="flex items-center justify-between text-sm mt-1">
-        <span className="text-gray-500">Discount</span>
-        <span className={Number(discount) ? "text-red-600 font-medium" : "text-gray-400"}>
-          -Rp{Number(discount || 0).toLocaleString("id-ID")}
+      {/* GRAND TOTAL besar */}
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-gray-600">Total</span>
+        <span className="text-2xl font-bold text-blue-600">
+          {money(grandTotal)}
         </span>
       </div>
+    </div>
+  );
+}
 
-      <div className="flex items-center justify-between text-sm mt-4">
-        <span className="text-gray-500">Total</span>
-        <span className="font-semibold text-blue-600">
-          Rp{Number(grandTotal).toLocaleString("id-ID")}
-        </span>
-      </div>
+function Row({ label, value, red, muted, bold }) {
+  const n = Number(value || 0);
+  return (
+    <div className="flex items-center justify-between text-sm mt-1">
+      <span className={muted ? "text-gray-400" : "text-gray-500"}>{label}</span>
+      <span className={`${red ? "text-red-600" : "text-gray-700"} ${bold ? "font-semibold" : ""}`}>
+        {money(n)}
+      </span>
     </div>
   );
 }

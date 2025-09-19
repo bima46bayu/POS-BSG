@@ -6,7 +6,7 @@ const METHODS = [
   { value: "card", label: "Card", icon: CreditCard },
   { value: "ewallet", label: "E-Wallet", icon: Wallet },
   { value: "transfer", label: "Bank Transfer", icon: Landmark },
-  { value: "qris", label: "QRIS", icon: QrCode },
+  { value: "QRIS", label: "QRIS", icon: QrCode },
 ];
 
 /**
@@ -99,7 +99,7 @@ export default function Payment({ subtotal, tax, onPayment, onCancel, loading, o
               ${discountType ? "border-blue-500 text-blue-600 bg-white" : "border-gray-300 text-gray-400 bg-gray-50"}
             `}
           >
-            <option value="">Type</option>
+            {/* <option value="">Type</option> */}
             <option value="percent">%</option>
             <option value="amount">Rp</option>
           </select>
@@ -131,7 +131,7 @@ export default function Payment({ subtotal, tax, onPayment, onCancel, loading, o
             onChange={(e) => setCustomer(e.target.value)}
             className="w-full h-11 appearance-none border rounded-full px-4 pr-9 text-sm bg-white border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="">-- Select Customer Type --</option>
+            {/* <option value="">-- Select Customer Type --</option> */}
             <option value="General">General</option>
             <option value="Retail">Retail</option>
             <option value="Corporate">Corporate</option>

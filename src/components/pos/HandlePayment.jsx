@@ -1,4 +1,5 @@
 import React, { useCallback } from "react";
+import toast from "react-hot-toast";
 
 // ...
 const handlePayment = useCallback(
@@ -15,7 +16,7 @@ const handlePayment = useCallback(
     total, // grand total dari Payment (boleh tidak dikirim)
   }) => {
     if (!items.length) {
-      alert("Cart is empty.");
+      toast.error("Cart is empty.");
       return;
     }
 
@@ -30,7 +31,7 @@ const handlePayment = useCallback(
         : Math.max(0, subtotalCalc + taxCalc - discountCalc);
 
     if (payment_method === "cash" && Number(paid_amount) < finalTotal) {
-      alert("Cash received is less than total.");
+      toast.error("Cash received is less than total.");
       return;
     }
 

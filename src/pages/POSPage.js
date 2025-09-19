@@ -6,13 +6,14 @@ import OrderDetails from "../components/pos/OrderDetails";
 import MobileOrderSheet from "../components/pos/MobileOrderSheet";
 import SaleSubmitter from "../components/pos/SaleSubmitter";
 import { ShoppingCart, ChevronUp } from "lucide-react";
+import toast from "react-hot-toast";
 
 import { getProducts, getProductBySKU } from "../api/products";
 import { getCategories, getSubCategories } from "../api/categories";
-import { toAbsoluteUrl } from "../api/client"; // sesuaikan path import-nya
+import { toAbsoluteUrl } from "../api/client";
 
 const PER_PAGE = 20;
-const TAX_RATE = 0.11;
+const TAX_RATE = 0;
 
 // Normalizer: samakan bentuk data product untuk FE
 const normalize = (p) => ({
@@ -67,7 +68,7 @@ export default function POSPage() {
         out_of_stock: filters.stock_status === "out" ? 1 : undefined,
       };
       const res = await getProducts(params);
-      return res; // { items, meta } atau { items: [], meta: {} }
+      return res;
     },
     getNextPageParam: (lastPage) => {
       const m = lastPage?.meta;
@@ -98,8 +99,19 @@ export default function POSPage() {
     setCartItems((prev) => {
       const exist = prev.find((i) => i.id === product.id);
       return exist
-        ? prev.map((i) => (i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i))
-        : [...prev, { ...product, quantity: 1 }];
+        ? prev.map((i) =>
+            i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
+          )
+        : [
+            ...prev,
+            {
+              ...product,
+              quantity: 1,
+              // default discount per item
+              discount_type: "%",       // 'rp' | '%'
+              discount_value: 0,         // number
+            },
+          ];
     });
   }, []);
 
@@ -117,6 +129,14 @@ export default function POSPage() {
     );
   }, []);
 
+  const handleUpdateDiscount = useCallback((id, { discount_type, discount_value }) => {
+    setCartItems((prev) =>
+      prev.map((it) =>
+        it.id === id ? { ...it, discount_type, discount_value } : it
+      )
+    );
+  }, []);
+
   const handleRemoveItem = useCallback((id) => {
     setCartItems((prev) => prev.filter((i) => i.id !== id));
   }, []);
@@ -129,21 +149,29 @@ export default function POSPage() {
     async (code) => {
       try {
         const p = await getProductBySKU(code);
-        if (!p) return alert(`Kode ${code} tidak ditemukan`);
+        if (!p) return toast.error(`Kode ${code} tidak ditemukan`);
         handleAddToCart(normalize(p));
       } catch (e) {
         console.error(e);
-        alert("Scanner error. Coba lagi.");
+        toast.error("Scanner error. Coba lagi.");
       }
     },
     [handleAddToCart]
   );
 
-  // ===== Totals (subtotal before tax, tax 11%, total) =====
-  const subtotalItems = useMemo(
-    () => cartItems.reduce((s, i) => s + (i.price || 0) * (i.quantity || 0), 0),
-    [cartItems]
-  );
+  // ===== Totals dengan diskon per-item =====
+  const subtotalItems = useMemo(() => {
+    return cartItems.reduce((s, i) => {
+      const price = Number(i.price || 0);
+      const qty   = Number(i.quantity || 0);
+      const type  = i.discount_type || "rp";
+      const val   = Number(i.discount_value || 0);
+      const discNominal = Math.min(price, type === "%" ? (price * val) / 100 : val);
+      const netUnit = Math.max(0, price - discNominal);
+      return s + netUnit * qty;
+    }, 0);
+  }, [cartItems]);
+
   const tax = useMemo(() => Math.round(subtotalItems * TAX_RATE), [subtotalItems]);
   const total = subtotalItems + tax;
 
@@ -195,10 +223,10 @@ export default function POSPage() {
         <OrderDetails
           items={cartItems}
           onUpdateQuantity={handleUpdateQuantity}
+          onUpdateDiscount={handleUpdateDiscount}   
           onRemoveItem={handleRemoveItem}
         />
 
-        {/* Payment + Summary + Mutation ada di dalam SaleSubmitter */}
         <SaleSubmitter
           items={cartItems}
           subtotal={subtotalItems}
@@ -206,7 +234,7 @@ export default function POSPage() {
           total={total}
           onSuccess={(res) => {
             setCartItems([]);
-            alert(`Transaction success! Code: ${res?.code || res?.id || "-"}`);
+            toast.success(`Transaction success! Code: ${res?.code || res?.id || "-"}`);
           }}
           onCancel={() => setCartItems([])}
           showSummary={true}
@@ -237,8 +265,8 @@ export default function POSPage() {
         onClose={() => setSheetOpen(false)}
         items={cartItems}
         onUpdateQuantity={handleUpdateQuantity}
+        onUpdateDiscount={handleUpdateDiscount}   
         onRemoveItem={handleRemoveItem}
-        // SaleSubmitter dirender di dalam sheet (lihat file komponen)
         subtotal={subtotalItems}
         tax={tax}
         total={total}

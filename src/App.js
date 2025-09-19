@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import { Toaster } from 'react-hot-toast'; 
 import LoginPages from './components/LoginPages';
 import Sidebar from './components/Sidebar';
 import POSPage from './pages/POSPage';
@@ -60,6 +61,7 @@ function App() {
       <div className="flex-1 md:ml-24">
         {PageComponent}
       </div>
+      <Toaster position="top-right" />
     </div>
   );
 }

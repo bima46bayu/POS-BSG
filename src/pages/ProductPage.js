@@ -1,4 +1,7 @@
 import React from 'react';
+import { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
+
 
 const ProductsPage = () => {
   return (
@@ -8,7 +11,7 @@ const ProductsPage = () => {
       {/* Tambahkan fitur POS di sini */}
       <button
         className="bg-blue-600 text-white px-6 py-2 rounded-lg shadow hover:bg-blue-700 transition"
-        onClick={() => alert('Transaksi dimulai!')}
+        onClick={() => toast.success('Transaksi dimulai!')}
       >
         Mulai Transaksi
       </button>

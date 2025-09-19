@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { DataTable } from '../components/data-table';
 import { Calendar, Download, Filter, X, Edit, Trash2, Plus, Package } from 'lucide-react';
+import { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
+
 
 const PurchasePage = () => {
   const [currentPage, setCurrentPage] = useState(1);
@@ -266,7 +269,7 @@ const PurchasePage = () => {
     //   purchaseNumber: selectedPurchase.purchaseNumber
     // });
 
-    alert(`Stock added: ${selectedPurchase.amount} units of ${selectedPurchase.productName}`);
+    toast.success(`Stock added: ${selectedPurchase.amount} units of ${selectedPurchase.productName}`);
 
     setShowGRConfirmation(false);
     setSelectedPurchase(null);

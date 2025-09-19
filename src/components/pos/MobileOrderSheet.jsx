@@ -2,19 +2,20 @@ import React, { useEffect } from "react";
 import { X, ShoppingCart } from "lucide-react";
 import OrderDetails from "./OrderDetails";
 import SaleSubmitter from "./SaleSubmitter";
+import toast from "react-hot-toast";
 
 export default function MobileOrderSheet({
   open,
   onClose,
-  items,
+  items = [],
   onUpdateQuantity,
+  onUpdateDiscount = () => {},   // <-- tambah ini
   onRemoveItem,
   subtotal,
   tax,
   total,
   onClearCart,
 }) {
-  // lock body scroll saat sheet terbuka
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -58,6 +59,7 @@ export default function MobileOrderSheet({
             <OrderDetails
               items={items}
               onUpdateQuantity={onUpdateQuantity}
+              onUpdateDiscount={onUpdateDiscount}   // <-- sekarang defined
               onRemoveItem={onRemoveItem}
             />
 
@@ -69,7 +71,7 @@ export default function MobileOrderSheet({
               onSuccess={(res) => {
                 onClose?.();
                 onClearCart?.();
-                alert(`Transaction success! Code: ${res?.code || res?.id || "-"}`);
+                toast.success(`Transaction success! Code: ${res?.code || res?.id || "-"}`);
               }}
               onCancel={onClearCart}
               showSummary={true}
