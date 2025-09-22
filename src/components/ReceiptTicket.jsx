@@ -121,12 +121,12 @@ export default function ReceiptTicket({ saleId, store, printableId = "receipt-pr
         <Hr />
 
         {/* Ringkasan */}
-        <Row label="Subtotal (gross)" value={fmtIDR(itemsGross)} muted />
-        <Row label="Item Discount" value={`-${fmtIDR(itemDiscountTotal)}`} red />
+        <Row label="Subtotal" value={fmtIDR(itemsGross)} muted />
+        <Row label="Diskon Item" value={`-${fmtIDR(itemDiscountTotal)}`} red />
         {/* <Row label="Subtotal (net)" value={fmtIDR(computedSubtotalNet)} /> */}
         {svc ? <Row label="Service Charge" value={fmtIDR(svc)} /> : null}
-        <Row label="Tax" value={fmtIDR(tax)} />
-        <Row label="Discount Transaction" value={`-${fmtIDR(headerDisc)}`} red />
+        <Row label="Pajak" value={fmtIDR(tax)} />
+        <Row label="Diskon Transaksi" value={`-${fmtIDR(headerDisc)}`} red />
         <Hr />
         <Row label="Total" value={fmtIDR(total || grandTotal)} bold />
 

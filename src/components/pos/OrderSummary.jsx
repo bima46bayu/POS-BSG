@@ -42,7 +42,7 @@ export default function OrderSummary({
     <div className="mt-4">
       <h3 className="text-lg font-semibold text-gray-900 mb-3">Order Summary</h3>
 
-      <Row label="Subtotal item" value={itemsGross} />
+      <Row label="Subtotal Item" value={itemsGross} />
       <Row label="Item Discount" value={-itemDiscountTotal} red />
       {/* <Row label="Subtotal (net)" value={shownSubtotal} /> */}
       {/* <Row label={`Tax${taxRate ? ` (${Math.round(taxRate * 100)}%)` : ""}`} value={tax} /> */}
