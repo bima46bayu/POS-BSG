@@ -16,3 +16,4 @@ export async function getSubCategories(category_id) {
 export function listCategories(params = { per_page: 100 }) {
   return api.get("/api/categories", { params });
 }
+

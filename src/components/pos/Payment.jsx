@@ -26,7 +26,7 @@ export default function Payment({ subtotal, tax, onPayment, onCancel, loading, o
   const [note, setNote] = useState("");
 
   // Discount state
-  const [discountType, setDiscountType] = useState("");   // "percent" | "amount" | ""
+  const [discountType, setDiscountType] = useState("percent");   // "percent" | "amount" | ""
   const [discountValue, setDiscountValue] = useState(""); // string
 
   // Hitung diskon (Rp) dari subtotal

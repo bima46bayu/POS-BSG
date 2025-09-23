@@ -30,7 +30,7 @@ import {
   createProductWithImages,
 } from "../api/products";
 import AddProduct from "../components/products/AddProduct";
-import { listCategories } from "../api/categories";
+import { getCategories, getSubCategories } from "../api/categories";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 
 const PER_PAGE = 10;
@@ -84,8 +84,8 @@ export default function ProductPage() {
 
   // filter UI
   const [showFilters, setShowFilters] = useState(false);
-  const btnRef = useRef(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef(null);
 
   // DRAFT filters (untuk input UI; commit saat Apply)
   const [draftSearchTerm, setDraftSearchTerm] = useState("");
@@ -117,17 +117,74 @@ export default function ProductPage() {
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // preload categories (+ derive subCategories)
+  // === PRELOAD: categories + subCategories (fallback) ===
   useEffect(() => {
     let cancel = false;
-    listCategories()
-      .then((r) => {
+
+    (async () => {
+      // helper ambil data aman (array) dari berbagai bentuk response
+      const toArray = (res) => {
+        const payload = res?.data ?? res;
+        if (Array.isArray(payload)) return payload;
+        if (Array.isArray(payload?.data)) return payload.data;
+        return [];
+      };
+
+      try {
+        // 1) Ambil kategori
+        const catRes = await getCategories();
         if (cancel) return;
-        const list = r?.data?.data || r?.data || [];
-        setCategories(list);
-        setSubCategories(normalizeSubCategories(list));
-      })
-      .catch(() => {});
+        const catList = toArray(catRes);
+        setCategories(catList);
+
+        // 2) Coba turunkan sub dari struktur kategori
+        const subsFromCats = normalizeSubCategories(catList);
+        if (subsFromCats.length) {
+          setSubCategories(subsFromCats);
+          return;
+        }
+
+        // 3) Fallback: pukul endpoint subcategories langsung (tanpa filter)
+        try {
+          const subRes = await getSubCategories();
+          if (cancel) return;
+          const rawSubs = toArray(subRes);
+          const normalizedSubs = rawSubs.map((s) => ({
+            id: s.id,
+            name: s.name,
+            category_id:
+              s.category_id ?? s.categoryId ?? s.parent_id ?? s.parentId ?? null,
+          }));
+          setSubCategories(normalizedSubs);
+        } catch {
+          setSubCategories([]); // tetap jalan tanpa sub
+        }
+      } catch {
+        // kalau kategori gagal, coba minimal ambil sub agar AddProduct masih bisa punya opsi
+        try {
+          const subRes = await getSubCategories();
+          if (cancel) return;
+          const rawSubs =
+            Array.isArray(subRes?.data?.data)
+              ? subRes.data.data
+              : Array.isArray(subRes?.data)
+              ? subRes.data
+              : Array.isArray(subRes)
+              ? subRes
+              : [];
+          const normalizedSubs = rawSubs.map((s) => ({
+            id: s.id,
+            name: s.name,
+            category_id:
+              s.category_id ?? s.categoryId ?? s.parent_id ?? s.parentId ?? null,
+          }));
+          setSubCategories(normalizedSubs);
+        } catch {
+          setSubCategories([]);
+        }
+      }
+    })();
+
     return () => {
       cancel = true;
     };
