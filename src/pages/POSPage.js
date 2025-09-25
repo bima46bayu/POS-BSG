@@ -107,9 +107,8 @@ export default function POSPage() {
             {
               ...product,
               quantity: 1,
-              // default discount per item
-              discount_type: "%",       // 'rp' | '%'
-              discount_value: 0,         // number
+              discount_type: "%",     // 'rp' | '%'
+              discount_value: 0,      // number
             },
           ];
     });
@@ -190,7 +189,8 @@ export default function POSPage() {
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-50">
       {/* Main Content */}
-      <main className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-20 md:pb-0">
+      {/* FIX: jadikan main sebagai baseline z-stack */}
+      <main className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-20 md:pb-0 relative z-0">
         <div className="max-w-6xl mx-auto">
           <SearchBar
             onSearch={handleSearch}
@@ -217,13 +217,17 @@ export default function POSPage() {
       </main>
 
       {/* Desktop order panel */}
-      <aside className="hidden md:block order-2 w-full md:w-[340px] lg:w-[400px] xl:w-[480px]
-                        bg-white border-t md:border-t-0 md:border-l border-gray-200
-                        p-4 sm:p-5 md:p-6 overflow-y-auto md:sticky md:top-0 md:h-screen">
+      {/* FIX: naikkan z-index supaya panel & isinya (popup) di atas grid produk */}
+      <aside
+        className="hidden md:block order-2 w-full md:w-[340px] lg:w-[400px] xl:w-[480px]
+                   bg-white border-t md:border-t-0 md:border-l border-gray-200
+                   p-4 sm:p-5 md:p-6 overflow-y-auto md:sticky md:top-0 md:h-screen
+                   relative z-10"
+      >
         <OrderDetails
           items={cartItems}
           onUpdateQuantity={handleUpdateQuantity}
-          onUpdateDiscount={handleUpdateDiscount}   
+          onUpdateDiscount={handleUpdateDiscount}
           onRemoveItem={handleRemoveItem}
         />
 
@@ -265,7 +269,7 @@ export default function POSPage() {
         onClose={() => setSheetOpen(false)}
         items={cartItems}
         onUpdateQuantity={handleUpdateQuantity}
-        onUpdateDiscount={handleUpdateDiscount}   
+        onUpdateDiscount={handleUpdateDiscount}
         onRemoveItem={handleRemoveItem}
         subtotal={subtotalItems}
         tax={tax}

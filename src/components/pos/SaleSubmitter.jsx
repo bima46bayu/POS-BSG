@@ -1,3 +1,4 @@
+// src/components/pos/SaleSubmitter.jsx
 import React, { useMemo, useCallback, useState } from "react";
 import { createSale } from "../../api/sales";
 import OrderSummary from "./OrderSummary";
@@ -6,11 +7,16 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import ReceiptTicket from "../ReceiptTicket";
 import toast from "react-hot-toast";
 
-// ==== print helper: print node by id ====
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+
+/* =======================
+   Print helper (window.print)
+   ======================= */
 function printNodeById(id = "receipt-print-area") {
   const el = document.getElementById(id);
   if (!el) return;
-  const w = window.open("", "_blank", "noopener,noreferrer,width=480");
+  const w = window.open("", "_blank", "noopener,noreferrer,width=480"); console.log("Popup created:", w);
   if (!w) return;
   w.document.open();
   w.document.write(`
@@ -22,7 +28,7 @@ function printNodeById(id = "receipt-print-area") {
           body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
         </style>
       </head>
-      <body>${el.innerHTML}</body>
+      <body>${el.outerHTML}</body>
     </html>
   `);
   w.document.close();
@@ -31,6 +37,40 @@ function printNodeById(id = "receipt-print-area") {
   w.close();
 }
 
+/* =======================
+   Export to PDF helper
+   ======================= */
+async function exportReceiptToPdf(id = "receipt-print-area", mode = "download") {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
+  const imgData = canvas.toDataURL("image/png");
+
+  const pageWidthMm = 80;
+  const marginX = 4;
+  const marginY = 12;
+  const usableWidthMm = pageWidthMm - marginX * 2;
+  const pageHeightMm = (canvas.height * usableWidthMm) / canvas.width;
+
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: [pageWidthMm, pageHeightMm + marginY * 2],
+  });
+
+  pdf.addImage(imgData, "PNG", marginX, marginY, usableWidthMm, pageHeightMm);
+
+  if (mode === "download") {
+    pdf.save("receipt.pdf");
+  } else if (mode === "preview") {
+    window.open(pdf.output("bloburl"), "_blank");
+  }
+}
+
+/* =======================
+   Main Component
+   ======================= */
 export default function SaleSubmitter({
   items = [],
   subtotal,
@@ -44,27 +84,26 @@ export default function SaleSubmitter({
     () =>
       typeof subtotal === "number"
         ? subtotal
-        : items.reduce((s, i) => s + (i.price || 0) * (i.quantity || 0), 0),
+        : items.reduce((s, i) => s + (Number(i.price || 0) * Number(i.quantity || 0)), 0),
     [items, subtotal]
   );
   const taxSafe = useMemo(() => (typeof tax === "number" ? tax : 0), [tax]);
 
-  // Sinkron dari <Payment/> agar OrderSummary bisa tampil Discount + Total
   const [discountAmount, setDiscountAmount] = useState(0);
   const [grandTotal, setGrandTotal] = useState(subtotalSafe + taxSafe);
 
-  // ===== Popup states =====
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [pendingPayment, setPendingPayment] = useState(null); // payload dari Payment sebelum konfirmasi
+  const [pendingPayment, setPendingPayment] = useState(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [reprintAskOpen, setReprintAskOpen] = useState(false);
-  const [saleId, setSaleId] = useState(null); // ID untuk ReceiptTicket (GET /sales/:id)
+  const [saleId, setSaleId] = useState(null);
 
   const queryClient = useQueryClient();
+
   const saleMutation = useMutation({
     mutationFn: createSale,
     onSuccess: (res) => {
-      // Patch stok cache "products"
+      // patch stok cepat di cache products
       queryClient.setQueriesData({ queryKey: ["products"] }, (old) => {
         if (!old) return old;
         const sold = new Map(
@@ -84,22 +123,34 @@ export default function SaleSubmitter({
         };
         return old.pages ? { ...old, pages: old.pages.map(patchPage) } : patchPage(old);
       });
+
+      // refresh list
       queryClient.invalidateQueries({ queryKey: ["products"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["sales"], exact: false });
 
-      // ambil id sale dari response createSale (sesuai payload API-mu)
-      const createdId =
-        res?.id ?? res?.sale_id ?? res?.data?.id ?? null;
+      const createdId = res?.id ?? res?.sale_id ?? res?.data?.id ?? null;
       setSaleId(createdId);
+      if (createdId) {
+        queryClient.invalidateQueries({ queryKey: ["sale", createdId] });
+      }
 
-      // buka popup struk, tutup konfirmasi
       setReceiptOpen(true);
       setConfirmOpen(false);
 
       onSuccess?.(res);
     },
+    onError: (err) => {
+      const msg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        (typeof err?.response?.data === "string" ? err.response.data : null) ||
+        err?.message ||
+        "Gagal membuat transaksi";
+      console.error("Create sale failed:", err?.response || err);
+      toast.error(msg);
+    },
   });
 
-  // STEP 1: dari Payment → tampilkan konfirmasi (jangan langsung mutate)
   const handlePayment = useCallback(
     (payloadFromPayment) => {
       if (!items.length) return toast.error("Cart is empty.");
@@ -109,68 +160,101 @@ export default function SaleSubmitter({
     [items]
   );
 
-  // STEP 2: user klik "Ya, Bayar" → jalankan mutasi
   const confirmAndSubmit = () => {
     const p = pendingPayment;
     if (!p) return;
 
-    // Hitung subtotal dari items (pakai diskon per-item)
+    // Hitung subtotal & siapkan items
     let subtotalCalc = 0;
-    const itemsPayload = items.map((i) => {
-      const price = Number(i.price || 0);
-      const type  = i.discount_type || 'rp';
-      const val   = Number(i.discount_value || 0);
-      const discNominal = Math.min(price, type === '%' ? (price * val) / 100 : val); // per unit
-      const net   = Math.max(0, price - discNominal);
-      const qty   = Number(i.quantity || 0);
-      subtotalCalc += net * qty;
+    let itemsPayload;
+    try {
+      itemsPayload = items.map((i) => {
+        const price = Number(i.price || 0);
+        const type = (i.discount_type || "rp").toLowerCase(); // '%', 'rp'
+        const val = Number(i.discount_value || 0);
 
-      return {
-        product_id: i.product_id ?? i.id,
-        qty,
-        unit_price: price,
-        discount_nominal: Math.round(discNominal * 100) / 100, // per unit
-      };
-    });
+        const discPerUnit =
+          type === "%" ? (price * val) / 100 : val;
+        const discNominalSafe = Math.max(0, Math.min(price, discPerUnit));
+        const net = Math.max(0, price - discNominalSafe);
+
+        const qty = Number(i.quantity || 0);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error("Ada item dengan quantity <= 0 atau bukan angka");
+        }
+
+        subtotalCalc += net * qty;
+
+        return {
+          product_id: i.product_id ?? i.id,
+          qty,
+          unit_price: Math.round(price * 100) / 100,
+          discount_nominal: Math.round(discNominalSafe * 100) / 100, // per unit
+        };
+      });
+    } catch (e) {
+      return toast.error(e.message || "Item tidak valid");
+    }
 
     const taxCalc = Number(taxSafe || 0);
-    const discountHeader = Number(p.discount_amount || 0);
-    const totalCalc = typeof p.total === "number"
-      ? p.total
-      : Math.max(0, subtotalCalc - discountHeader + taxCalc);
+    const headerDisc = Number(p.discount_amount || 0);
+
+    const totalCalc =
+      typeof p.total === "number"
+        ? p.total
+        : Math.max(0, subtotalCalc - headerDisc + taxCalc);
 
     if (p.payment_method === "cash" && Number(p.paid_amount) < totalCalc) {
       return toast.error("Cash received is less than total.");
     }
 
+    const paid = Math.round(Number(p.paid_amount || 0) * 100) / 100;
+    const change = Math.max(0, Math.round((paid - totalCalc) * 100) / 100);
+
+    // Normalisasi discount_type header
+    const normDiscountType =
+      (p.discount_type || "").toLowerCase() === "%" ? "percent"
+      : (p.discount_type || "").toLowerCase() === "rp" ? "amount"
+      : null;
+
+    // Payload "kompatibel" dengan backend lama
     const payload = {
       customer_name: p.customer_name || null,
 
-      // header ringkasan
-      discount: Math.round(discountHeader * 100) / 100,      // Rp (header)
-      service_charge: 0,                                     // belum ada UI → set 0
-      tax: Math.round(taxCalc * 100) / 100,                  // kirim nominal (atau kirim tax_percent kalau kamu pakai %)
-      // NOTE: 'subtotal' & 'total' akan dihitung ulang di server; tidak wajib dikirim.
+      // field tipikal yang sering divalidasi backend
+      subtotal: Math.round(subtotalCalc * 100) / 100,
+      discount: Math.round(headerDisc * 100) / 100,
+      tax: Math.round(taxCalc * 100) / 100,
+      total: Math.round(totalCalc * 100) / 100,
+      paid,
+      change,
+      status: "completed", // sesuaikan jika backend pakai 'paid'/'completed'
 
+      // detail item
       items: itemsPayload,
-      payments: [{
-        method: p.payment_method === "qris" ? "QRIS" : p.payment_method, // guard
-        amount: Math.round(Number(p.paid_amount || 0) * 100) / 100,
-        reference: p.reference || null,
-      }],
+
+      // kalau backend mendukung multi-payment, ini ikut terkirim
+      payments: [
+        {
+          method:
+            p.payment_method?.toLowerCase() === "qris" ? "QRIS" : p.payment_method,
+          amount: paid,
+          reference: p.reference || null,
+        },
+      ],
+
+      // metadata opsional / kompatibilitas
+      payment_method:
+        p.payment_method?.toLowerCase() === "qris" ? "QRIS" : p.payment_method,
       note: p.note || null,
 
-      // info audit opsional
-      discount_type: p.discount_type || null,
+      discount_type: normDiscountType, // 'percent' | 'amount' | null
       discount_value: Number(p.discount_value || 0),
     };
 
-    // kirim
     saleMutation.mutate(payload);
   };
 
-
-  // STEP 3: cetak & tawarkan reprint
   const handlePrint = () => {
     printNodeById("receipt-print-area");
     setReprintAskOpen(true);
@@ -192,7 +276,7 @@ export default function SaleSubmitter({
       <Payment
         subtotal={subtotalSafe}
         tax={taxSafe}
-        onPayment={handlePayment} // → konfirmasi dulu
+        onPayment={handlePayment}
         onCancel={onCancel}
         loading={saleMutation.isLoading}
         onSummaryChange={({ discountAmount, total }) => {
@@ -201,7 +285,7 @@ export default function SaleSubmitter({
         }}
       />
 
-      {/* ===== Popup Konfirmasi ===== */}
+      {/* Konfirmasi */}
       {confirmOpen && pendingPayment && (
         <Modal onClose={() => setConfirmOpen(false)}>
           <div className="p-4">
@@ -221,36 +305,36 @@ export default function SaleSubmitter({
               <button
                 className="flex-1 h-10 bg-blue-600 text-white rounded-full"
                 onClick={confirmAndSubmit}
+                disabled={saleMutation.isLoading}
               >
-                Ya, Bayar
+                {saleMutation.isLoading ? "Memproses..." : "Ya, Bayar"}
               </button>
             </div>
           </div>
         </Modal>
       )}
 
-      {/* ===== Popup Struk (ambil data via API by saleId) ===== */}
+      {/* Popup Struk */}
       {receiptOpen && (
         <Modal onClose={() => setReceiptOpen(false)}>
           <div className="p-4">
             <h3 className="text-lg font-semibold mb-2">Transaction Success</h3>
 
-            {/* Struk dari API: GET api/sales/:id */}
-            <ReceiptTicket
-              saleId={saleId}
-              store={{
-                name: "INSTAFACTORY",
-                address: "Taman Tekno BSD City, Sektor XI No.56 Blok A2, Setu, Kec. Setu, Kota Tangerang Selatan, Banten 15314",
-                phone: "0812-3456-7890",
-              }}
-            />
+            {/* Biarkan ReceiptTicket ambil data detailnya dengan saleId */}
+            <ReceiptTicket saleId={saleId} />
 
-            <div className="flex gap-2 mt-3">
+            <div className="flex flex-wrap gap-2 mt-3">
               <button
-                className="flex-1 h-10 border rounded-full"
+                className="flex-1 h-10 border rounded-full border-red-600 text-red-600"
                 onClick={() => setReceiptOpen(false)}
               >
                 Close
+              </button>
+              <button
+                className="flex-1 h-10 border border-blue-600 text-blue-600 rounded-full"
+                onClick={() => exportReceiptToPdf("receipt-print-area", "preview")}
+              >
+                Preview PDF
               </button>
               <button
                 className="flex-1 h-10 bg-blue-600 text-white rounded-full"
@@ -263,7 +347,7 @@ export default function SaleSubmitter({
         </Modal>
       )}
 
-      {/* ===== Popup Reprint? ===== */}
+      {/* Reprint */}
       {reprintAskOpen && (
         <Modal onClose={() => setReprintAskOpen(false)}>
           <div className="p-4">
@@ -280,9 +364,7 @@ export default function SaleSubmitter({
               </button>
               <button
                 className="flex-1 h-10 bg-blue-600 text-white rounded-full"
-                onClick={() => {
-                  printNodeById("receipt-print-area");
-                }}
+                onClick={() => printNodeById("receipt-print-area")}
               >
                 Yes, Print Again
               </button>
@@ -294,7 +376,9 @@ export default function SaleSubmitter({
   );
 }
 
-// ==== Modal minimalis (tanpa lib, pakai Tailwind) ====
+/* =======================
+   Modal (inline)
+   ======================= */
 function Modal({ children, onClose }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center">

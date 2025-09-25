@@ -65,3 +65,40 @@ export async function createProductWithImages(body, signal) {
   }
   return product;
 }
+
+export async function updateProduct(id, body, signal) {
+  if (!id) throw new Error("Missing product id");
+
+  const toNull = (v) => (v === "" || v === undefined ? null : v);
+  const toNum  = (v) => Number(v || 0);
+
+  const payload = {
+    name: body.name ?? "",
+    price: toNum(body.price),
+    stock: toNum(body.stock),
+    sku: body.sku ?? "",
+    description: toNull(body.description),
+    category_id: body.category_id ? Number(body.category_id) : null,
+    sub_category_id: body.sub_category_id ? Number(body.sub_category_id) : null,
+  };
+
+  // debug sementara
+  console.log("[PUT /products/"+id+"] payload:", payload);
+
+  const { data } = await api.put(`/api/products/${id}`, payload, { signal });
+  return data?.data || data;
+}
+
+// ===== UPDATE + (opsional) UPLOAD IMAGES =====
+export async function updateProductWithImages(id, body, signal) {
+  // 1) update data dasar
+  const product = await updateProduct(id, body, signal);
+
+  // 2) kalau ada gambar baru, upload satu per satu (endpoint-mu single file)
+  if (Array.isArray(body.images) && body.images.length) {
+    for (const file of body.images) {
+      await uploadProductImage(id, file);
+    }
+  }
+  return product;
+}

@@ -28,8 +28,10 @@ import {
   uploadProductImage,
   deleteProduct,
   createProductWithImages,
+  updateProductWithImages, // <--- import update
 } from "../api/products";
 import AddProduct from "../components/products/AddProduct";
+import UpdateProduct from "../components/products/UpdateProduct"; // <--- import modal edit
 import { getCategories, getSubCategories } from "../api/categories";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 
@@ -111,6 +113,7 @@ export default function ProductPage() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [fileToUpload, setFileToUpload] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false); // <--- baru
 
   // confirm delete
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -323,7 +326,8 @@ export default function ProductPage() {
 
   // handlers
   const handleEdit = useCallback((row) => {
-    console.log("edit", row.id);
+    setSelectedProduct(row);
+    setShowEdit(true);
   }, []);
 
   const openUpload = useCallback((row) => {
@@ -398,6 +402,23 @@ export default function ProductPage() {
       } catch (e) {
         console.error(e);
         toast.error("Gagal membuat produk");
+      }
+    },
+    [refetch]
+  );
+
+  // update product
+  const handleUpdate = useCallback(
+    async (payload) => {
+      try {
+        await updateProductWithImages(payload.id, payload);
+        toast.success("Produk berhasil diperbarui");
+        setShowEdit(false);
+        setSelectedProduct(null);
+        refetch();
+      } catch (e) {
+        console.error(e);
+        toast.error("Gagal memperbarui produk");
       }
     },
     [refetch]
@@ -773,6 +794,21 @@ export default function ProductPage() {
         categories={categories}
         subCategories={subCategories}
       />
+
+      {/* Edit Product (popup) */}
+      {showEdit && selectedProduct && (
+        <UpdateProduct
+          open={showEdit}
+          onClose={() => {
+            setShowEdit(false);
+            setSelectedProduct(null);
+          }}
+          onSubmit={handleUpdate}
+          categories={categories}
+          subCategories={subCategories}
+          product={selectedProduct}
+        />
+      )}
 
       {/* Upload Image Modal */}
       {showUploadModal && selectedProduct && (

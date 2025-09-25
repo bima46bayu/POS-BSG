@@ -1,311 +1,505 @@
-import React, { useState } from 'react';
-import { DataTable } from '../components/data-table';
-import { useTable } from '../hooks/useTable';
-import { Calendar, Download, Filter, X } from 'lucide-react';
+// src/pages/HistoryPage.jsx
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DataTable } from "../components/data-table";
+import { Calendar, Filter, X } from "lucide-react";
+import toast from "react-hot-toast";
+import { getSales, getSale } from "../api/sales";                  // list & detail sales
+import SaleDetailModal from "../components/sales/SaleDetailModal"; // modal detail (sudah kamu punya)
+import ReceiptTicket from "../components/ReceiptTicket";           // sumber struk
 
-const HistoryPage = () => {
-  const [showFilters, setShowFilters] = useState(false);
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
+const PER_PAGE = 10;
+const PRINT_AREA_ID = "receipt-print-area-history";
 
-  // Sample data sesuai dengan gambar
-  const sampleData = [
-    {
-      transactionNumber: 'POS-20250909-0001',
-      tanggal: '09 Sep 2025 09:44',
-      customer: 'General',
-      subTotal: 'Rp100.000',
-      pay: 'Rp100.000',
-      change: '0',
-      paymentMethod: 'Cash',
-    },
-    {
-      transactionNumber: 'POS-20250909-0002',
-      tanggal: '09 Sep 2025 10:15',
-      customer: 'General',
-      subTotal: 'Rp150.000',
-      pay: 'Rp150.000',
-      change: '0',
-      paymentMethod: 'QRIS',
-    },
-    {
-      transactionNumber: 'POS-20250909-0003',
-      tanggal: '09 Sep 2025 11:30',
-      customer: 'General',
-      subTotal: 'Rp75.000',
-      pay: 'Rp75.000',
-      change: '0',
-      paymentMethod: 'E-Wallet',
-    },
-    {
-      transactionNumber: 'POS-20250909-0004',
-      tanggal: '09 Sep 2025 12:45',
-      customer: 'General',
-      subTotal: 'Rp200.000',
-      pay: 'Rp200.000',
-      change: '0',
-      paymentMethod: 'Card',
-    },
-    {
-      transactionNumber: 'POS-20250909-0005',
-      tanggal: '09 Sep 2025 13:20',
-      customer: 'General',
-      subTotal: 'Rp120.000',
-      pay: 'Rp120.000',
-      change: '0',
-      paymentMethod: 'Transfer',
-    },
-    // Tambahkan lebih banyak data untuk testing pagination
-    ...Array.from({ length: 20 }, (_, i) => ({
-      transactionNumber: `POS-20250909-${String(i + 6).padStart(4, '0')}`,
-      tanggal: '09 Sep 2025 14:00',
-      customer: 'General',
-      subTotal: 'Rp100.000',
-      pay: 'Rp100.000',
-      change: '0',
-      paymentMethod: i % 2 === 0 ? 'Cash' : 'QRIS',
-    }))
-  ];
-
-  const {
-    data: tableData,
-    currentPage,
-    totalPages,
-    setCurrentPage,
-    searchTerm,
-    handleSearch,
-    sortConfig,
-    handleSort,
-    filters,
-    handleFilter,
-    resetFilters,
-    startIndex,
-    endIndex,
-    totalItems
-  } = useTable(sampleData, {
-    itemsPerPage: 10,
-    searchFields: ['transactionNumber', 'customer', 'paymentMethod']
+const toNumber = (v) => (v == null ? 0 : Number(v));
+const formatIDR = (v) =>
+  Number(v ?? 0).toLocaleString("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
   });
 
-  const columns = [
-    {
-      key: 'transactionNumber',
-      label: 'Transaction Number',
-      sticky: 'left',
-      sortable: true,
-      minWidth: '200px',
-      className: 'font-medium text-gray-900'
-    },
-    {
-      key: 'tanggal',
-      label: 'Tanggal',
-      sortable: true,
-      minWidth: '150px',
-      render: (value) => (
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-gray-400" />
-          <span>{value}</span>
-        </div>
-      )
-    },
-    {
-      key: 'customer',
-      label: 'Customer',
-      sortable: true,
-      minWidth: '120px'
-    },
-    {
-      key: 'subTotal',
-      label: 'Sub Total',
-      align: 'right',
-      minWidth: '120px',
-      className: 'font-medium text-gray-900',
-      sortable: true
-    },
-    {
-      key: 'pay',
-      label: 'Pay',
-      align: 'right',
-      minWidth: '120px',
-      className: 'font-medium text-gray-900',
-      sortable: true
-    },
-    {
-      key: 'change',
-      label: 'Change',
-      align: 'right',
-      minWidth: '100px'
-    },
-    {
-      key: 'paymentMethod',
-      label: 'Payment Method',
-      minWidth: '140px',
-      render: (value) => {
-        const getPaymentMethodStyle = (method) => {
-          const styles = {
-            'Cash': 'bg-green-100 text-green-800 border-green-200',
-            'QRIS': 'bg-orange-100 text-orange-800 border-orange-200',
-            'E-Wallet': 'bg-purple-100 text-purple-800 border-purple-200',
-            'Card': 'bg-blue-100 text-blue-800 border-blue-200',
-            'Transfer': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-          };
-          return styles[method] || 'bg-gray-100 text-gray-800 border-gray-200';
-        };
+const formatDateTime = (s) => {
+  if (!s) return "-";
+  try {
+    const d = new Date(s);
+    return d.toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return s;
+  }
+};
 
-        return (
-          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${getPaymentMethodStyle(value)}`}>
-            {value}
-          </span>
-        );
-      }
-    },
-    {
-      key: 'actions',
-      label: 'Action',
-      sticky: 'right',
-      align: 'center',
-      minWidth: '120px',
-      render: (value, row) => (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handlePrintStruk(row)}
-            className="inline-flex items-center px-3 py-1.5 bg-blue-500 text-white text-xs font-medium rounded-lg hover:bg-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors"
-          >
-            Print Struk
-          </button>
-        </div>
-      )
+// Normalisasi nama metode agar konsisten
+const normalizeMethod = (m) => String(m || "").trim().toUpperCase();
+
+export default function HistoryPage() {
+  // data & meta
+  const [rows, setRows] = useState([]);
+  const [meta, setMeta] = useState({
+    current_page: 1,
+    last_page: 1,
+    per_page: PER_PAGE,
+    total: 0,
+  });
+  const [loading, setLoading] = useState(false);
+
+  // query state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+
+  // filters
+  const [showFilters, setShowFilters] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [dateRange, setDateRange] = useState({ start: "", end: "" });
+
+  // detail modal
+  const [showDetail, setShowDetail] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedSale, setSelectedSale] = useState(null);
+  const [saleDetail, setSaleDetail] = useState(null);
+
+  // filter popover pos
+  const btnRef = useRef(null);
+  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
+
+  // build params
+  const params = useMemo(() => {
+    const p = { page: currentPage, per_page: PER_PAGE };
+    if (searchTerm.trim()) p.search = searchTerm.trim();
+    if (paymentMethod) p.payment_method = paymentMethod; // kalau BE dukung filter ini
+    if (dateRange.start) p.date_from = dateRange.start;
+    if (dateRange.end) p.date_to = dateRange.end;
+    if (sortKey) {
+      p.sort = sortKey;
+      p.dir = sortDir;
     }
-  ];
+    return p;
+  }, [currentPage, searchTerm, paymentMethod, dateRange.start, dateRange.end, sortKey, sortDir]);
 
-  const handlePrintStruk = (row) => {
-    console.log('Print struk for:', row.transactionNumber);
-  };
+  // fetch list
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    getSales(params, controller.signal)
+      .then(({ items, meta }) => {
+        setRows(items || []);
+        setMeta(
+          meta || {
+            current_page: 1,
+            last_page: 1,
+            per_page: PER_PAGE,
+            total: items?.length || 0,
+          }
+        );
+      })
+      .catch((err) => {
+        const isCanceled = err?.name === "CanceledError" || err?.code === "ERR_CANCELED";
+        if (!isCanceled) toast.error("Gagal memuat history transaksi");
+      })
+      .finally(() => setLoading(false));
 
-  const handleExport = () => {
-    // Implementasi export data
-    console.log('Export data');
-  };
+    return () => controller.abort();
+  }, [params]);
 
-  const FilterComponent = () => (
-    <div className="relative">
-      <button
-        onClick={() => setShowFilters(!showFilters)}
-        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-      >
-        <Filter className="w-4 h-4" />
-        Filter
-        {Object.keys(filters).length > 0 && (
-          <span className="ml-1 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full">
-            {Object.keys(filters).length}
-          </span>
-        )}
-      </button>
-
-      {showFilters && (
-        <div className="absolute right-0 mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
-          <div className="p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-medium text-gray-900">Filters</h3>
-              <button
-                onClick={() => setShowFilters(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Payment Method
-                </label>
-                <select
-                  value={filters.paymentMethod || ''}
-                  onChange={(e) => handleFilter('paymentMethod', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">All Methods</option>
-                  <option value="Cash">Cash</option>
-                  <option value="QRIS">QRIS</option>
-                  <option value="E-Wallet">E-Wallet</option>
-                  <option value="Card">Card</option>
-                  <option value="Transfer">Transfer</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Date Range
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    type="date"
-                    value={dateRange.start}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <input
-                    type="date"
-                    value={dateRange.end}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200">
-              <button
-                onClick={resetFilters}
-                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
-              >
-                Clear All
-              </button>
-              <button
-                onClick={() => setShowFilters(false)}
-                className="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors"
-              >
-                Apply Filters
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+  const handleSort = useCallback(
+    (key) => {
+      if (!key) return;
+      if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      else {
+        setSortKey(key);
+        setSortDir("asc");
+      }
+      setCurrentPage(1);
+    },
+    [sortKey]
   );
 
-  const ActionButtons = () => (
-    <button
-      onClick={handleExport}
-      className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-    >
-      <Download className="w-4 h-4" />
-      Export
-    </button>
+  // open detail (fetch detail untuk modal)
+  const openDetail = useCallback(async (row) => {
+    setSelectedSale(row);
+    setDetailLoading(true);
+    setShowDetail(true);
+    try {
+      const id = row.id;
+      const detail = await getSale(id);
+      setSaleDetail(detail);
+    } catch {
+      toast.error("Gagal memuat detail transaksi");
+      setShowDetail(false);
+      setSelectedSale(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  // cetak struk pakai ReceiptTicket tersembunyi (mirip SaleSubmitter)
+  const printStruk = useCallback(() => {
+    const el = document.getElementById(PRINT_AREA_ID);
+    if (!el) return toast.error("Struk belum siap");
+
+    const w = window.open("", "_blank", "noopener,noreferrer,width=480");
+    if (!w) return toast.error("Popup diblokir oleh browser");
+
+    w.document.open();
+    w.document.write(`
+      <html>
+        <head>
+          <title>Receipt</title>
+          <style>
+            @page { size: 80mm auto; margin: 6mm; }
+            body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+          </style>
+        </head>
+        <body>${el.innerHTML}</body>
+      </html>
+    `);
+    w.document.close();
+    w.focus();
+    w.print();
+    w.close();
+  }, []);
+
+  // columns
+  const columns = useMemo(
+    () => [
+      {
+        key: "code",
+        label: "Transaction Number",
+        sticky: "left",
+        sortable: true,
+        minWidth: "200px",
+        className: "font-medium text-gray-900",
+        render: (v, row) => v || row.number || row.transactionNumber || "-",
+      },
+      {
+        key: "created_at",
+        label: "Tanggal",
+        sortable: true,
+        minWidth: "170px",
+        render: (v, row) => (
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-gray-400" />
+            <span>{formatDateTime(v || row.tanggal)}</span>
+          </div>
+        ),
+      },
+      {
+        key: "customer_name",
+        label: "Customer",
+        sortable: true,
+        minWidth: "140px",
+        render: (v, row) => v || row.customer || "General",
+      },
+      {
+        key: "subtotal",
+        label: "Sub Total",
+        align: "right",
+        minWidth: "140px",
+        className: "font-medium text-gray-900",
+        sortable: true,
+        render: (v, row) => formatIDR(v ?? row.subTotal),
+      },
+      {
+        key: "paid",
+        label: "Pay",
+        align: "right",
+        minWidth: "140px",
+        className: "font-medium text-gray-900",
+        sortable: true,
+        render: (v, row) => {
+          // kalau list sudah bawa payments, jumlahkan amount; else pakai v
+          const paidFromPayments = Array.isArray(row.payments)
+            ? row.payments.reduce((s, p) => s + toNumber(p.amount), 0)
+            : null;
+          return formatIDR(paidFromPayments ?? v ?? row.pay ?? row.paid_amount);
+        },
+      },
+      {
+        key: "change",
+        label: "Change",
+        align: "right",
+        minWidth: "120px",
+        render: (v, row) => formatIDR(v ?? row.change),
+      },
+      {
+        key: "payment_method",
+        label: "Payment Method",
+        minWidth: "180px",
+        render: (value, row) => {
+          // Prioritas dari sale_payments
+          const methodsFromPayments =
+            Array.isArray(row.payments) && row.payments.length
+              ? [...new Set(row.payments.map((p) => normalizeMethod(p.method)))]
+              : null;
+
+          // Fallback jika list tidak bawa payments
+          const single = value || row.payment_method || row.method || "-";
+          const methods = methodsFromPayments || [normalizeMethod(single)];
+
+          const styleMap = {
+            CASH: "bg-green-100 text-green-800 border-green-200",
+            QRIS: "bg-orange-100 text-orange-800 border-orange-200",
+            "E-WALLET": "bg-purple-100 text-purple-800 border-purple-200",
+            EWALLET: "bg-purple-100 text-purple-800 border-purple-200",
+            CARD: "bg-blue-100 text-blue-800 border-blue-200",
+            TRANSFER: "bg-yellow-100 text-yellow-800 border-yellow-200",
+          };
+
+          return (
+            <div className="flex flex-wrap gap-1">
+              {methods.map((m, i) => (
+                <span
+                  key={`${m}-${i}`}
+                  className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${
+                    styleMap[m] || "bg-gray-100 text-gray-800 border-gray-200"
+                  }`}
+                >
+                  {m}
+                </span>
+              ))}
+            </div>
+          );
+        },
+      },
+      {
+        key: "actions",
+        label: "Action",
+        sticky: "right",
+        align: "center",
+        minWidth: "160px",
+        render: (value, row) => (
+          <button
+            onClick={() => openDetail(row)}
+            className="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
+          >
+            Tampilkan Detail
+          </button>
+        ),
+      },
+    ],
+    [openDetail]
   );
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <DataTable
-        data={tableData}
+        data={rows}
         columns={columns}
         title="Transaction History"
         searchable={true}
         searchTerm={searchTerm}
-        onSearchChange={handleSearch}
-        sortConfig={sortConfig}
+        onSearchChange={(term) => {
+          setSearchTerm(term);
+          setCurrentPage(1);
+        }}
+        sortConfig={{ key: sortKey, direction: sortDir }}
         onSort={handleSort}
-        currentPage={currentPage}
-        totalPages={totalPages}
+        currentPage={meta.current_page || 1}
+        totalPages={meta.last_page || 1}
         onPageChange={setCurrentPage}
-        startIndex={startIndex}
-        endIndex={endIndex}
-        totalItems={totalItems}
-        filterComponent={<FilterComponent />}
-        actions={<ActionButtons />}
+        startIndex={((meta.current_page || 1) - 1) * (meta.per_page || PER_PAGE)}
+        endIndex={Math.min(
+          (meta.current_page || 1) * (meta.per_page || PER_PAGE),
+          meta.total || rows.length
+        )}
+        totalItems={meta.total ?? rows.length}
+        filterComponent={
+          <FilterComponent
+            btnRef={btnRef}
+            showFilters={showFilters}
+            setShowFilters={setShowFilters}
+            popoverPos={popoverPos}
+            setPopoverPos={setPopoverPos}
+            paymentMethod={paymentMethod}
+            setPaymentMethod={setPaymentMethod}
+            dateRange={dateRange}
+            setDateRange={setDateRange}
+            setCurrentPage={setCurrentPage}
+          />
+        }
+        actions={null}
+        loading={loading}
       />
+
+      {/* DETAIL MODAL */}
+      {showDetail && (
+        <SaleDetailModal
+          open={showDetail}
+          onClose={() => {
+            setShowDetail(false);
+            setSelectedSale(null);
+            setSaleDetail(null);
+          }}
+          sale={selectedSale}
+          detail={saleDetail}
+          loading={detailLoading}
+          onPrint={printStruk}
+        />
+      )}
+
+      {/* AREA STRUK TERSEMBUNYI (dirender saat modal terbuka) */}
+      {showDetail && selectedSale?.id && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: "-99999px",
+            top: 0,
+            width: 0,
+            height: 0,
+            overflow: "hidden",
+            pointerEvents: "none",
+            opacity: 0,
+          }}
+        >
+          <ReceiptTicket saleId={selectedSale.id} printableId={PRINT_AREA_ID} />
+        </div>
+      )}
     </div>
   );
-};
+}
 
-export default HistoryPage;
+/* =================== Filter Component (LOCAL) =================== */
+function FilterComponent({
+  btnRef,
+  showFilters,
+  setShowFilters,
+  popoverPos,
+  setPopoverPos,
+  paymentMethod,
+  setPaymentMethod,
+  dateRange,
+  setDateRange,
+  setCurrentPage,
+}) {
+  return (
+    <div className="relative w-full">
+      <button
+        ref={btnRef}
+        onClick={() => {
+          if (!showFilters) {
+            const el = btnRef.current;
+            if (el) {
+              const r = el.getBoundingClientRect();
+              const gap = 8;
+              const width = 320;
+              const left = Math.min(Math.max(r.right - width, 8), window.innerWidth - width - 8);
+              const top = Math.min(r.bottom + gap, window.innerHeight - 8);
+              setPopoverPos({ top, left });
+            }
+          }
+          setShowFilters((s) => !s);
+        }}
+        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+      >
+        <Filter className="w-4 h-4" />
+        Filter
+        {(paymentMethod || dateRange.start || dateRange.end) && (
+          <span className="ml-1 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full">
+            {(paymentMethod ? 1 : 0) + (dateRange.start ? 1 : 0) + (dateRange.end ? 1 : 0)}
+          </span>
+        )}
+      </button>
+
+      {showFilters && <div className="fixed inset-0 z-40" onMouseDown={() => setShowFilters(false)} />}
+
+      {showFilters && (
+        <div
+          className="fixed z-50 w-80 bg-white rounded-lg shadow-lg border border-gray-200"
+          style={{ top: popoverPos.top, left: popoverPos.left }}
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">Filters</h3>
+            <button
+              onClick={() => setShowFilters(false)}
+              className="text-gray-400 hover:text-gray-600"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {/* Payment Method */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Payment Method
+              </label>
+              <select
+                value={paymentMethod}
+                onChange={(e) => {
+                  setPaymentMethod(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="appearance-none w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 hover:border-blue-500 bg-white"
+              >
+                <option value="">All</option>
+                <option value="Cash">Cash</option>
+                <option value="QRIS">QRIS</option>
+                <option value="E-Wallet">E-Wallet</option>
+                <option value="Card">Card</option>
+                <option value="Transfer">Transfer</option>
+              </select>
+            </div>
+
+            {/* Date Range */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Date Range
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="date"
+                  value={dateRange.start}
+                  onChange={(e) => {
+                    setDateRange((p) => ({ ...p, start: e.target.value }));
+                    setCurrentPage(1);
+                  }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="date"
+                  value={dateRange.end}
+                  onChange={(e) => {
+                    setDateRange((p) => ({ ...p, end: e.target.value }));
+                    setCurrentPage(1);
+                  }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+            <button
+              onClick={() => {
+                setPaymentMethod("");
+                setDateRange({ start: "", end: "" });
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
+            >
+              Clear All
+            </button>
+            <button
+              onClick={() => setShowFilters(false)}
+              className="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600"
+            >
+              Apply Filters
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
