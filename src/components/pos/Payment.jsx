@@ -20,7 +20,7 @@ const METHODS = [
  */
 export default function Payment({ subtotal, tax, onPayment, onCancel, loading, onSummaryChange }) {
   const [method, setMethod] = useState("cash");
-  const [customer, setCustomer] = useState("");
+  const [customer, setCustomer] = useState("General");
   const [paid, setPaid] = useState("");
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");

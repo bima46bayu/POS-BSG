@@ -7,6 +7,10 @@ import { getMyProfile } from "../api/users";
 const toNumber = (v) => (v == null ? 0 : Number(String(v).replace(/[^0-9.-]/g, "")));
 const fmtIDR = (n) => Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 
+// 👇 ambil store dari berbagai shape yang mungkin
+const pickStore = (obj) =>
+  obj?.storeLocation || obj?.store_location || obj?.store || null;
+
 export default function ReceiptTicket({ saleId, store: storeProp, printableId = "receipt-print-area" }) {
   const { data: sale, isLoading, isError, error } = useQuery({
     queryKey: ["sale", saleId],
@@ -15,7 +19,7 @@ export default function ReceiptTicket({ saleId, store: storeProp, printableId = 
   });
 
   const { data: me } = useQuery({
-    queryKey: ["me-store"],
+    queryKey: ["me"],
     queryFn: () => getMyProfile(),
     staleTime: 5 * 60 * 1000,
   });
@@ -23,9 +27,12 @@ export default function ReceiptTicket({ saleId, store: storeProp, printableId = 
   if (isLoading) return <div className="p-4 text-sm text-gray-600">Memuat struk…</div>;
   if (isError)   return <div className="p-4 text-sm text-red-600">Gagal memuat struk: {String(error?.message || "unknown")}</div>;
 
-  // sumber store: props override > profil user
-  const profileStore = me?.store || {};
-  const store = storeProp || profileStore;
+  // prioritas: cabang kasir saat transaksi → prop override → profil user
+  const saleStore = pickStore(sale?.cashier);
+  const propStore = storeProp ? { name: storeProp.name, address: storeProp.address, phone: storeProp.phone } : null;
+  const meStore   = pickStore(me);
+
+  const loc = saleStore || propStore || meStore || null;
 
   const code = sale?.code || sale?.id;
   const cashier = sale?.cashier?.name || "—";
@@ -48,7 +55,7 @@ export default function ReceiptTicket({ saleId, store: storeProp, printableId = 
     const unitPrice = toNumber(it?.unit_price ?? it?.price ?? 0);
     const netUnit = toNumber(it?.net_unit_price ?? 0);
     const discNom = toNumber(it?.discount_nominal ?? (unitPrice && netUnit ? unitPrice - netUnit : 0));
-    const lineTotal = toNumber(it?.line_total ?? it?.subtotal ?? (Math.max(0, (unitPrice - discNom)) * qty));
+    const lineTotal = toNumber(it?.line_total ?? it?.subtotal ?? Math.max(0, unitPrice - discNom) * qty);
 
     itemsGross += unitPrice * qty;
     itemDiscountTotal += Math.min(unitPrice, discNom) * qty;
@@ -67,11 +74,11 @@ export default function ReceiptTicket({ saleId, store: storeProp, printableId = 
       `}</style>
 
       <div id={printableId} className="bg-white text-black mx-auto px-2" style={{ width: 280, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, lineHeight: 1.35 }}>
-        {/* Header toko (milik user) */}
+        {/* Header toko */}
         <div className="text-center py-1">
-          <div className="font-bold uppercase tracking-wide">{store?.name || "TOKO"}</div>
-          {store?.address && <div className="text-[11px] text-gray-700">{store.address}</div>}
-          {store?.phone && <div className="text-[11px] text-gray-700">Telp: {store.phone}</div>}
+          <div className="font-bold uppercase tracking-wide">{loc?.name || "TOKO"}</div>
+          {loc?.address && <div className="text-[11px] text-gray-700">{loc.address}</div>}
+          {loc?.phone && <div className="text-[11px] text-gray-700">Telp: {loc.phone}</div>}
         </div>
 
         <div className="border-t border-dashed border-gray-400 my-2" />
@@ -117,7 +124,7 @@ export default function ReceiptTicket({ saleId, store: storeProp, printableId = 
             <Row key={p.id ?? `${p.method}-${p.amount}`} label={`Bayar (${p.method})`} value={fmtIDR(toNumber(p.amount))} />
           ))
         ) : (
-          <Row label="Bayar" value={fmtIDR(toNumber(sale?.paid))} />
+          <Row label="Bayar" value={fmtIDR(toNumber(paid))} />
         )}
         <Row label="Kembali" value={fmtIDR(change)} />
 
