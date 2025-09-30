@@ -9,6 +9,7 @@ import PurchaseDetailDrawer from "../components/purchase/PurchaseDetailDrawer";
 import GRModal from "../components/purchase/GRModal";
 import SupplierBreakdownDrawer from "../components/purchase/SupplierBreakdownDrawer";
 import { approvePurchase, cancelPurchase } from "../api/purchases";
+import AddPurchaseModal from "../components/purchase/AddPurchaseModal";
 
 export default function PurchasePage() {
   const qc = useQueryClient();
@@ -39,12 +40,14 @@ export default function PurchasePage() {
 
   const actions = useMemo(() => ({ onDetail, onGR, onApprove, onCancel }), []);
 
+  const [addOpen, setAddOpen] = useState(false);
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="flex items-center justify-between mb-6">
         <WizardTabs step={step} onStep={setStep} />
         <FilterBar value={search} onChange={(v) => { setSearch(v); setPage(1); }} filters={filters} setFilters={setFilters}
-          onAdd={() => toast("Open Create Draft modal")} onExport={() => toast("Export CSV")} />
+          onAdd={() => setAddOpen(true)} onExport={() => toast("Export CSV")} />
       </div>
 
       {step === 0 ? (
@@ -84,6 +87,9 @@ export default function PurchasePage() {
 
       {/* GR Modal */}
       <GRModal open={grOpen} onClose={() => setGrOpen(false)} purchaseId={grPurchaseId} />
+
+      {/* Add Purchase Modal */}
+      <AddPurchaseModal open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   );
 }
