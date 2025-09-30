@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { listPurchases, getPurchase } from "../../api/purchases";
-import { DataTable } from "../../components/data-table";
+import { DataTable } from "../data-table";
 
 function aggregateByProduct(purchaseDetails) {
   const map = new Map();

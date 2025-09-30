@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import WizardTabs from "../components/purchase/WizardTabs";
@@ -27,18 +27,67 @@ export default function PurchasePage() {
   const [supplierDrawerOpen, setSupplierDrawerOpen] = useState(false);
   const [supplierData, setSupplierData] = useState(null);
 
-  const approveMut = useMutation({ mutationFn: (id) => approvePurchase(id), onSuccess: () => { toast.success("PO approved"); qc.invalidateQueries({ queryKey: ["purchases"] }); } });
-  const cancelMut  = useMutation({ mutationFn: (id) => cancelPurchase(id),  onSuccess: () => { toast.success("PO cancelled"); qc.invalidateQueries({ queryKey: ["purchases"] }); } });
+  // ===== Helpers: remain & rule GR =====
+  const getRemainCount = useCallback((row) => {
+    if (!row) return 0;
+    if (row.total_remain != null) return Number(row.total_remain);
+    if (Array.isArray(row.items)) {
+      return row.items.reduce((sum, it) => {
+        const order = Number(it.qty_order ?? 0);
+        const received = Number(it.qty_received ?? 0);
+        return sum + Math.max(0, order - received);
+      }, 0);
+    }
+    if (row.remain != null) return Number(row.remain);
+    const order = Number(row.qty_order ?? 0);
+    const received = Number(row.qty_received ?? 0);
+    return Math.max(0, order - received);
+  }, []);
 
-  const onDetail  = (row) => { setDrawerPurchaseId(row.id); setDrawerOpen(true); };
-  const onGR      = (row) => {
-    if (row.status !== "approved") return toast.error("PO belum di-approve. Approve dulu untuk melakukan GR.");
-    setGrPurchaseId(row.id); setGrOpen(true);
+  const canGR = useCallback((row) => {
+    const status = String(row?.status || "").toLowerCase();
+    if (["cancelled", "canceled"].includes(status)) return false;
+    // IZINKAN GR di approved ATAU partially_received
+    const allowed = ["approved", "partially_received"];
+    if (!allowed.includes(status)) return false;
+    return getRemainCount(row) > 0;
+  }, [getRemainCount]);
+
+  const approveMut = useMutation({
+    mutationFn: (id) => approvePurchase(id),
+    onSuccess: () => {
+      toast.success("PO approved");
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+    },
+  });
+
+  const cancelMut = useMutation({
+    mutationFn: (id) => cancelPurchase(id),
+    onSuccess: () => {
+      toast.success("PO cancelled");
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+    },
+  });
+
+  const onDetail = (row) => {
+    setDrawerPurchaseId(row.id);
+    setDrawerOpen(true);
   };
-  const onApprove = (row) => approveMut.mutate(row.id);
-  const onCancel  = (row) => cancelMut.mutate(row.id);
 
-  const actions = useMemo(() => ({ onDetail, onGR, onApprove, onCancel }), []);
+  const onGR = (row) => {
+    if (!canGR(row)) {
+      const remain = getRemainCount(row);
+      if (remain <= 0) return toast.error("Tidak ada sisa yang bisa di-GR.");
+      return toast.error("PO belum memenuhi syarat GR (harus Approved/Partially Received).");
+    }
+    setGrPurchaseId(row.id);
+    setGrOpen(true);
+  };
+
+  const onApprove = (row) => approveMut.mutate(row.id);
+  const onCancel = (row) => cancelMut.mutate(row.id);
+
+  const actions = useMemo(() => ({ onDetail, onGR, onApprove, onCancel }), []); // eslint-disable-line
 
   const [addOpen, setAddOpen] = useState(false);
 
@@ -46,8 +95,17 @@ export default function PurchasePage() {
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="flex items-center justify-between mb-6">
         <WizardTabs step={step} onStep={setStep} />
-        <FilterBar value={search} onChange={(v) => { setSearch(v); setPage(1); }} filters={filters} setFilters={setFilters}
-          onAdd={() => setAddOpen(true)} onExport={() => toast("Export CSV")} />
+        <FilterBar
+          value={search}
+          onChange={(v) => {
+            setSearch(v);
+            setPage(1);
+          }}
+          filters={filters}
+          setFilters={setFilters}
+          onAdd={() => setAddOpen(true)}
+          onExport={() => toast("Export CSV")}
+        />
       </div>
 
       {step === 0 ? (
@@ -57,6 +115,9 @@ export default function PurchasePage() {
           page={page}
           setPage={setPage}
           {...actions}
+          // tombol GR di list = HIJAU jika masih ada sisa (remain>0) pada status yang diizinkan
+          canGR={canGR}
+          getRemainCount={getRemainCount}
           onSort={(key) => console.log("sort:", key)}
         />
       ) : (
@@ -65,7 +126,12 @@ export default function PurchasePage() {
           filters={filters}
           page={page}
           setPage={setPage}
-          onOpenSupplierBreakdown={(row) => { setSupplierData(row); setSupplierDrawerOpen(true); }}
+          onOpenSupplierBreakdown={(row) => {
+            setSupplierData(row);
+            setSupplierDrawerOpen(true);
+          }}
+          canGR={canGR}
+          getRemainCount={getRemainCount}
         />
       )}
 
@@ -74,19 +140,30 @@ export default function PurchasePage() {
         open={supplierDrawerOpen}
         onClose={() => setSupplierDrawerOpen(false)}
         data={supplierData}
-        onOpenPo={(poId) => { setSupplierDrawerOpen(false); setDrawerPurchaseId(poId); setDrawerOpen(true); }}
+        onOpenPo={(poId) => {
+          setSupplierDrawerOpen(false);
+          setDrawerPurchaseId(poId);
+          setDrawerOpen(true);
+        }}
       />
 
-      {/* Detail Drawer - selalu bisa dibuka meski masih draft */}
+      {/* Detail Drawer */}
       <PurchaseDetailDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         purchaseId={drawerPurchaseId}
-        onReceiveItem={({ purchaseId }) => { setGrPurchaseId(purchaseId); setGrOpen(true); }}
+        onReceiveItem={({ purchaseId }) => {
+          setGrPurchaseId(purchaseId);
+          setGrOpen(true);
+        }}
       />
 
       {/* GR Modal */}
-      <GRModal open={grOpen} onClose={() => setGrOpen(false)} purchaseId={grPurchaseId} />
+      <GRModal
+        open={grOpen}
+        onClose={() => setGrOpen(false)}
+        purchaseId={grPurchaseId}
+      />
 
       {/* Add Purchase Modal */}
       <AddPurchaseModal open={addOpen} onClose={() => setAddOpen(false)} />

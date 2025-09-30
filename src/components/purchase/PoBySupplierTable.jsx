@@ -5,8 +5,34 @@ import React, { useMemo } from "react";
 import { Calendar, Package } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { listPurchases } from "../../api/purchases";
-import { DataTable } from "../../components/data-table";
+import { DataTable } from "../data-table";
 import Pill from "./Pill";
+
+// helper angka aman
+const num = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+// hitung sisa (remain) aman dari NaN
+function getRemainCount(row) {
+  if (!row) return 0;
+  if (row.total_remain != null) return Number(row.total_remain);
+
+  if (Array.isArray(row.items)) {
+    return row.items.reduce((sum, it) => {
+      const order = num(it.qty_order) ?? 0;
+      const received = num(it.qty_received) ?? 0;
+      return sum + Math.max(0, order - received);
+    }, 0);
+  }
+
+  if (row.remain != null) return Number(row.remain);
+
+  const order = num(row.qty_order) ?? 0;
+  const received = num(row.qty_received) ?? 0;
+  return Math.max(0, order - received);
+}
 
 export default function PoBySupplierTable({
   search,
@@ -66,21 +92,18 @@ export default function PoBySupplierTable({
         key: "status",
         label: "Status",
         minWidth: "140px",
-        render: (v) => (
-          <Pill
-            variant={
-              v?.includes("received")
-                ? "success"
-                : v === "approved"
-                ? "default"
-                : v === "cancelled"
-                ? "danger"
-                : "warn"
-            }
-          >
-            {v}
-          </Pill>
-        ),
+        render: (v) => {
+          const val = String(v ?? "").toLowerCase();
+          const variant =
+            val.includes("received")
+              ? "success"
+              : val === "approved"
+              ? "default"
+              : val === "cancelled" || val === "canceled"
+              ? "danger"
+              : "warn";
+          return <Pill variant={variant}>{v}</Pill>;
+        },
       },
       {
         key: "grand_total",
@@ -102,15 +125,30 @@ export default function PoBySupplierTable({
         label: "Action",
         sticky: "right",
         align: "center",
-        minWidth: "280px",
+        minWidth: "320px",
         render: (_, row) => {
-          const isDraft = row.status === "draft";
-          const isApproved = row.status === "approved";
-          const isCancelled = row.status === "cancelled";
+          const status = String(row?.status || "").toLowerCase();
+          const isDraft = status === "draft";
+          const isApproved = status === "approved";
+          const isPartially = status === "partially_received";
+          const isCancelled = status === "cancelled" || status === "canceled";
 
-          const showApprove = isDraft; // hanya saat draft
-          const showCancel = isDraft; // hanya saat draft
-          const canGR = isApproved; // GR hanya saat approved
+          const remain = getRemainCount(row);
+
+          // aturan baru: GR HIJAU jika status approved/partially_received & remain > 0
+          const canGR = !isCancelled && (isApproved || isPartially) && remain > 0;
+
+          const showApprove = isDraft;  // tetap seperti aturanmu semula
+          const showCancel = isDraft;   // tetap seperti aturanmu semula
+
+          // tooltip GR yang lebih jelas
+          const grTitle = isCancelled
+            ? "PO dibatalkan"
+            : remain <= 0
+            ? "Sudah diterima semua"
+            : isDraft
+            ? "Approve PO terlebih dahulu"
+            : "Goods Receipt";
 
           return (
             <div className="flex items-center justify-center gap-1">
@@ -123,7 +161,7 @@ export default function PoBySupplierTable({
                 Detail
               </button>
 
-              {/* Approve & Cancel hanya ketika draft */}
+              {/* Approve & Cancel (sesuai logic semula) */}
               {showApprove && (
                 <button
                   onClick={() => onApprove?.(row)}
@@ -143,22 +181,16 @@ export default function PoBySupplierTable({
                 </button>
               )}
 
-              {/* GR: ditampilkan selalu, tapi disabled jika belum approved atau cancelled */}
+              {/* GR: selalu tampil; hijau kalau canGR, abu2 kalau tidak */}
               <button
-                onClick={() => onGR?.(row)}
+                onClick={() => (canGR ? onGR?.(row) : null)}
                 disabled={!canGR}
                 className={`px-3 h-8 inline-flex items-center justify-center rounded-lg ${
                   canGR
                     ? "bg-green-600 text-white hover:bg-green-700"
                     : "bg-gray-300 text-gray-600 cursor-not-allowed"
                 }`}
-                title={
-                  isCancelled
-                    ? "PO dibatalkan"
-                    : isDraft
-                    ? "Approve PO terlebih dahulu"
-                    : "Goods Receipt"
-                }
+                title={grTitle}
               >
                 <Package className="w-4 h-4 mr-1" /> GR
               </button>

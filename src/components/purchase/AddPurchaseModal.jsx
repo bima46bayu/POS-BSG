@@ -7,7 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 
 import { createPurchase } from "../../api/purchases";
-import { listSuppliers } from "../../api/masters";
+import { listSuppliers } from "../../api/master";
 import { getProducts } from "../../api/products"; // <= pakai file kamu
 
 // util kecil
