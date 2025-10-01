@@ -144,12 +144,25 @@ export default function POSPage() {
   const handleSearch = useCallback((text) => setQ(text), []);
   const handleFilterChange = useCallback((f) => setFilters(f), []);
   const handlePickCategory = useCallback((catId) => setPickedCategory(catId || undefined), []);
+
   const handleScan = useCallback(
     async (code) => {
       try {
-        const p = await getProductBySKU(code);
-        if (!p) return toast.error(`Kode ${code} tidak ditemukan`);
+        const cleanCode = code.trim().toUpperCase();
+        const p = await getProductBySKU(cleanCode);
+        
+        if (!p) {
+          return toast.error(`Kode ${cleanCode} tidak ditemukan`);
+        }
+        
+        // Optional: Validasi SKU match (extra safety)
+        if (p.sku?.toUpperCase() !== cleanCode) {
+          console.warn(`SKU mismatch: expected ${cleanCode}, got ${p.sku}`);
+          return toast.error(`Produk tidak ditemukan`);
+        }
+        
         handleAddToCart(normalize(p));
+        toast.success(`${p.name} ditambahkan ke cart`);
       } catch (e) {
         console.error(e);
         toast.error("Scanner error. Coba lagi.");

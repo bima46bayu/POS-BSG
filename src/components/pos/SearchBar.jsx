@@ -20,39 +20,95 @@ export default function SearchBar({
   // filter local state
   const [categoryId, setCategoryId] = useState("");
   const [subCategoryId, setSubCategoryId] = useState("");
-  const [stockStatus, setStockStatus] = useState("any"); // any|available|out
+  const [stockStatus, setStockStatus] = useState("any");
 
   // scanner
   const [scanActive, setScanActive] = useState(false);
   const [scanBuffer, setScanBuffer] = useState("");
   const hiddenInputRef = useRef(null);
   const timerRef = useRef(null);
+  const focusCheckIntervalRef = useRef(null);
 
   useEffect(() => { setSubCategoryId(""); }, [categoryId]);
 
-  // scanner focus
+  // Auto-pause saat filter dropdown dibuka
   useEffect(() => {
-    if (scanActive) {
-      const t = setTimeout(() => hiddenInputRef.current?.focus(), 0);
-      return () => clearTimeout(t);
+    if (open && scanActive) {
+      // Clear interval saat dropdown buka
+      if (focusCheckIntervalRef.current) {
+        clearInterval(focusCheckIntervalRef.current);
+      }
     }
-    setScanBuffer("");
-    if (timerRef.current) clearTimeout(timerRef.current);
-  }, [scanActive]);
+  }, [open, scanActive]);
+
+  // Focus management & auto re-focus
+  useEffect(() => {
+    if (scanActive && !open) {
+      // Initial focus
+      const t = setTimeout(() => hiddenInputRef.current?.focus(), 0);
+      
+      // Setup interval untuk auto re-focus
+      focusCheckIntervalRef.current = setInterval(() => {
+        if (hiddenInputRef.current && document.activeElement !== hiddenInputRef.current) {
+          // Cek apakah user sedang mengetik di input/textarea lain
+          const activeEl = document.activeElement;
+          const isTypingInForm = 
+            activeEl?.tagName === 'INPUT' ||
+            activeEl?.tagName === 'TEXTAREA' ||
+            activeEl?.tagName === 'SELECT';
+          
+          // Hanya re-focus jika user TIDAK sedang mengetik di form lain
+          if (!isTypingInForm) {
+            hiddenInputRef.current.focus();
+          }
+        }
+      }, 300);
+      
+      return () => {
+        clearTimeout(t);
+        if (focusCheckIntervalRef.current) {
+          clearInterval(focusCheckIntervalRef.current);
+        }
+      };
+    } else {
+      // Clear buffer dan interval saat tidak aktif
+      setScanBuffer("");
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (focusCheckIntervalRef.current) {
+        clearInterval(focusCheckIntervalRef.current);
+      }
+    }
+  }, [scanActive, open]);
 
   const commitScan = () => {
     const code = scanBuffer.trim();
-    if (code) onScan?.(code);
-    setScanActive(false);
+    if (code) {
+      onScan?.(code);
+    }
     setScanBuffer("");
+    
+    // Re-focus setelah scan
+    if (scanActive) {
+      setTimeout(() => hiddenInputRef.current?.focus(), 50);
+    }
   };
+
   const handleHiddenKeyDown = (e) => {
     if (e.key === "Enter" || e.key === "Tab") {
-      e.preventDefault(); commitScan(); return;
+      e.preventDefault();
+      if (timerRef.current) clearTimeout(timerRef.current);
+      commitScan();
+      return;
     }
-    if (e.key.length === 1) setScanBuffer((prev) => prev + e.key);
+    
+    if (e.key.length === 1) {
+      setScanBuffer((prev) => prev + e.key);
+    }
+    
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => { if (scanBuffer) commitScan(); }, 120);
+    timerRef.current = setTimeout(() => {
+      commitScan();
+    }, 100);
   };
 
   const filteredSubcats = subCategories.filter(
@@ -96,7 +152,6 @@ export default function SearchBar({
 
           {open && (
             <div className="absolute right-0 mt-2 w-80 z-20 rounded-2xl border border-gray-200 bg-white shadow-xl p-4 space-y-3">
-              {/* Category */}
               <div>
                 <label className="block text-xs text-gray-600 mb-1">Category</label>
                 <select
@@ -114,7 +169,6 @@ export default function SearchBar({
                 </select>
               </div>
 
-              {/* Sub Category */}
               <div>
                 <label className="block text-xs text-gray-600 mb-1">Sub Category</label>
                 <select
@@ -130,7 +184,6 @@ export default function SearchBar({
                 </select>
               </div>
 
-              {/* Stock */}
               <div>
                 <label className="block text-xs text-gray-600 mb-1">Stock</label>
                 <div className="flex gap-2">
@@ -179,8 +232,16 @@ export default function SearchBar({
         </button>
       </div>
 
+      {/* Hint saat scanner active */}
+      {/* {scanActive && (
+        <div className="mb-3 text-xs text-blue-700 bg-blue-50 p-2 rounded flex items-center gap-2 border border-blue-200">
+          <ScanLine className="h-4 w-4" />
+          <span>Scanner ready - scan barcode anytime</span>
+        </div>
+      )} */}
+
       {/* Hidden input untuk scanner */}
-      {scanActive && (
+      {scanActive && !open && (
         <input
           ref={hiddenInputRef}
           type="text"
