@@ -13,28 +13,63 @@ import html2canvas from "html2canvas";
 /* =======================
    Print helper (window.print)
    ======================= */
-function printNodeById(id = "receipt-print-area") {
+async function printNodeById(id = "receipt-print-area") {
   const el = document.getElementById(id);
   if (!el) return;
-  const w = window.open("", "_blank", "noopener,noreferrer,width=480"); console.log("Popup created:", w);
-  if (!w) return;
-  w.document.open();
-  w.document.write(`
+
+  const canvas = await html2canvas(el, { 
+    scale: 2, 
+    backgroundColor: "#ffffff" 
+  });
+  
+  const imgData = canvas.toDataURL("image/png");
+  
+  // Buat iframe tersembunyi
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "absolute";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "none";
+  
+  document.body.appendChild(iframe);
+  
+  const iframeDoc = iframe.contentWindow.document;
+  
+  iframeDoc.open();
+  iframeDoc.write(`
     <html>
       <head>
-        <title>Receipt</title>
+        <title>Print Receipt</title>
         <style>
           @page { size: 80mm auto; margin: 6mm; }
-          body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+          body { margin: 0; padding: 0; }
+          img { width: 80mm; display: block; }
         </style>
       </head>
-      <body>${el.outerHTML}</body>
+      <body>
+        <img src="${imgData}">
+      </body>
     </html>
   `);
-  w.document.close();
-  w.focus();
-  w.print();
-  w.close();
+  iframeDoc.close();
+  
+  // Tunggu gambar load, lalu print
+  iframe.onload = () => {
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        
+        // Hapus iframe setelah print selesai
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 1000);
+      } catch (e) {
+        console.error("Print error:", e);
+        document.body.removeChild(iframe);
+      }
+    }, 250);
+  };
 }
 
 /* =======================
@@ -87,6 +122,7 @@ export default function SaleSubmitter({
         : items.reduce((s, i) => s + (Number(i.price || 0) * Number(i.quantity || 0)), 0),
     [items, subtotal]
   );
+
   const taxSafe = useMemo(() => (typeof tax === "number" ? tax : 0), [tax]);
 
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -97,6 +133,18 @@ export default function SaleSubmitter({
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [reprintAskOpen, setReprintAskOpen] = useState(false);
   const [saleId, setSaleId] = useState(null);
+  
+  React.useEffect(() => {
+    const handleAfterPrint = () => {
+      // Force update semua state untuk re-attach listeners
+      setConfirmOpen(prev => prev);
+      setReceiptOpen(prev => prev);
+      setReprintAskOpen(prev => prev);
+    };
+
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
 
   const queryClient = useQueryClient();
 

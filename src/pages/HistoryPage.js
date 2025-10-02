@@ -3,12 +3,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DataTable } from "../components/data-table";
 import { Calendar, Filter, X } from "lucide-react";
 import toast from "react-hot-toast";
-import { getSales, getSale } from "../api/sales";                  // list & detail sales
-import SaleDetailModal from "../components/sales/SaleDetailModal"; // modal detail (sudah kamu punya)
-import ReceiptTicket from "../components/ReceiptTicket";           // sumber struk
+import { getSales, getSale } from "../api/sales";
+import SaleDetailModal from "../components/sales/SaleDetailModal";
 
 const PER_PAGE = 10;
-const PRINT_AREA_ID = "receipt-print-area-history";
 
 const toNumber = (v) => (v == null ? 0 : Number(v));
 const formatIDR = (v) =>
@@ -73,7 +71,7 @@ export default function HistoryPage() {
   const params = useMemo(() => {
     const p = { page: currentPage, per_page: PER_PAGE };
     if (searchTerm.trim()) p.search = searchTerm.trim();
-    if (paymentMethod) p.payment_method = paymentMethod; // kalau BE dukung filter ini
+    if (paymentMethod) p.payment_method = paymentMethod;
     if (dateRange.start) p.date_from = dateRange.start;
     if (dateRange.end) p.date_to = dateRange.end;
     if (sortKey) {
@@ -139,33 +137,6 @@ export default function HistoryPage() {
     }
   }, []);
 
-  // cetak struk pakai ReceiptTicket tersembunyi (mirip SaleSubmitter)
-  const printStruk = useCallback(() => {
-    const el = document.getElementById(PRINT_AREA_ID);
-    if (!el) return toast.error("Struk belum siap");
-
-    const w = window.open("", "_blank", "noopener,noreferrer,width=480");
-    if (!w) return toast.error("Popup diblokir oleh browser");
-
-    w.document.open();
-    w.document.write(`
-      <html>
-        <head>
-          <title>Receipt</title>
-          <style>
-            @page { size: 80mm auto; margin: 6mm; }
-            body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-          </style>
-        </head>
-        <body>${el.innerHTML}</body>
-      </html>
-    `);
-    w.document.close();
-    w.focus();
-    w.print();
-    w.close();
-  }, []);
-
   // columns
   const columns = useMemo(
     () => [
@@ -214,7 +185,6 @@ export default function HistoryPage() {
         className: "font-medium text-gray-900",
         sortable: true,
         render: (v, row) => {
-          // kalau list sudah bawa payments, jumlahkan amount; else pakai v
           const paidFromPayments = Array.isArray(row.payments)
             ? row.payments.reduce((s, p) => s + toNumber(p.amount), 0)
             : null;
@@ -233,13 +203,11 @@ export default function HistoryPage() {
         label: "Payment Method",
         minWidth: "180px",
         render: (value, row) => {
-          // Prioritas dari sale_payments
           const methodsFromPayments =
             Array.isArray(row.payments) && row.payments.length
               ? [...new Set(row.payments.map((p) => normalizeMethod(p.method)))]
               : null;
 
-          // Fallback jika list tidak bawa payments
           const single = value || row.payment_method || row.method || "-";
           const methods = methodsFromPayments || [normalizeMethod(single)];
 
@@ -337,30 +305,8 @@ export default function HistoryPage() {
             setSelectedSale(null);
             setSaleDetail(null);
           }}
-          sale={selectedSale}
-          detail={saleDetail}
-          loading={detailLoading}
-          onPrint={printStruk}
+          sale={saleDetail || selectedSale}
         />
-      )}
-
-      {/* AREA STRUK TERSEMBUNYI (dirender saat modal terbuka) */}
-      {showDetail && selectedSale?.id && (
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            left: "-99999px",
-            top: 0,
-            width: 0,
-            height: 0,
-            overflow: "hidden",
-            pointerEvents: "none",
-            opacity: 0,
-          }}
-        >
-          <ReceiptTicket saleId={selectedSale.id} printableId={PRINT_AREA_ID} />
-        </div>
       )}
     </div>
   );

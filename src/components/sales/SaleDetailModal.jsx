@@ -2,6 +2,7 @@
 import React, { useCallback, useMemo } from "react";
 import ReceiptTicket from "../ReceiptTicket";
 import { X } from "lucide-react";
+import html2canvas from "html2canvas";
 
 const fmtIDR = (v) =>
   Number(v ?? 0).toLocaleString("id-ID", {
@@ -13,39 +14,67 @@ const fmtIDR = (v) =>
 export default function SaleDetailModal({ open, onClose, sale }) {
   const areaId = useMemo(() => `receipt-print-area-${sale?.id ?? "unknown"}`, [sale?.id]);
 
-  // print helper (sama seperti SaleSubmitter)
-  const printTicket = useCallback(() => {
+  // print helper dengan canvas + iframe
+  const printTicket = useCallback(async () => {
     const el = document.getElementById(areaId);
-    if (!el) return alert("Area struk tidak ditemukan.");
+    if (!el) return;
 
-    const w = window.open("", "_blank", "noopener,noreferrer,width=480")
-    console.log("Popup created:", w);
-    if (!w) return console.warn("Popup blocked by browser");
-
-    w.document.open();
-    w.document.write(`
+    const canvas = await html2canvas(el, { 
+      scale: 2, 
+      backgroundColor: "#ffffff" 
+    });
+    
+    const imgData = canvas.toDataURL("image/png");
+    
+    // Buat iframe tersembunyi
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "absolute";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    
+    document.body.appendChild(iframe);
+    
+    const iframeDoc = iframe.contentWindow.document;
+    
+    iframeDoc.open();
+    iframeDoc.write(`
       <html>
         <head>
-          <title>Receipt</title>
+          <title>Print Receipt</title>
           <style>
             @page { size: 80mm auto; margin: 6mm; }
-            body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+            body { margin: 0; padding: 0; }
+            img { width: 80mm; display: block; }
           </style>
         </head>
-        <body>${el.innerHTML}</body>
+        <body>
+          <img src="${imgData}">
+        </body>
       </html>
     `);
-    w.document.close();
-    w.focus();
-    w.print();
-    w.close();
+    iframeDoc.close();
+    
+    iframe.onload = () => {
+      setTimeout(() => {
+        try {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+          
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 1000);
+        } catch (e) {
+          console.error("Print error:", e);
+          document.body.removeChild(iframe);
+        }
+      }, 250);
+    };
   }, [areaId]);
-
-  if (!open || !sale) return null;
 
   // ringkasan
   const subtotal = sale.subtotal ?? 0;
-  const discount = sale.discount ?? 0; // diskon transaksi (header)
+  const discount = sale.discount ?? 0;
   const tax = sale.tax ?? 0;
   const total = sale.total ?? (subtotal - discount + tax);
   const paid = sale.paid ?? 0;
@@ -93,7 +122,7 @@ export default function SaleDetailModal({ open, onClose, sale }) {
               </div>
             </div>
 
-            {/* Tabel item dengan diskon per unit dari discount_nominal */}
+            {/* Tabel item */}
             <div className="border rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
@@ -113,12 +142,9 @@ export default function SaleDetailModal({ open, onClose, sale }) {
                         it.name || it.product_name || it?.product?.name || it.sku || `Item ${idx + 1}`;
                       const qty = Number(it.qty ?? it.quantity ?? 1);
                       const unit = Number(it.unit_price ?? it.price ?? 0);
-                      const discU = Number(it.discount_nominal ?? 0); // <— dari DB
-                      const netU =
-                        Number(it.net_unit_price ?? (unit - discU < 0 ? 0 : unit - discU));
-                      const lineTotal = Number(
-                        it.line_total ?? it.subtotal ?? Math.max(0, netU) * qty
-                      );
+                      const discU = Number(it.discount_nominal ?? 0);
+                      const netU = Number(it.net_unit_price ?? (unit - discU < 0 ? 0 : unit - discU));
+                      const lineTotal = Number(it.line_total ?? it.subtotal ?? Math.max(0, netU) * qty);
 
                       return (
                         <tr key={idx} className="border-t">
