@@ -6,6 +6,7 @@ import Payment from "./Payment";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import ReceiptTicket from "../ReceiptTicket";
 import toast from "react-hot-toast";
+import { createPortal } from "react-dom";
 
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
@@ -363,63 +364,70 @@ export default function SaleSubmitter({
       )}
 
       {/* Popup Struk */}
-      {receiptOpen && (
-        <Modal onClose={() => setReceiptOpen(false)}>
-          <div className="p-4">
-            <h3 className="text-lg font-semibold mb-2">Transaction Success</h3>
+{receiptOpen && (
+  <Modal onClose={() => setReceiptOpen(false)} z={10000} dimmed={reprintAskOpen}>
+    <div className="p-4 pb-20">
+      <h3 className="text-lg font-semibold mb-2">Transaction Success</h3>
 
-            {/* Biarkan ReceiptTicket ambil data detailnya dengan saleId */}
-            <ReceiptTicket saleId={saleId} />
+      <div className="max-h-[60vh] overflow-auto rounded-lg bg-gray-50 p-3">
+        <ReceiptTicket saleId={saleId} />
+      </div>
 
-            <div className="flex flex-wrap gap-2 mt-3">
-              <button
-                className="flex-1 h-10 border rounded-full border-red-600 text-red-600"
-                onClick={() => setReceiptOpen(false)}
-              >
-                Close
-              </button>
-              <button
-                className="flex-1 h-10 border border-blue-600 text-blue-600 rounded-full"
-                onClick={() => exportReceiptToPdf("receipt-print-area", "preview")}
-              >
-                Preview PDF
-              </button>
-              <button
-                className="flex-1 h-10 bg-blue-600 text-white rounded-full"
-                onClick={handlePrint}
-              >
-                Print
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      {/* Footer tombol selalu di bawah */}
+      <div className="sticky bottom-0 left-0 right-0 bg-white border-t mt-4">
+        <div className="flex gap-3 justify-end p-4">
+          <button
+            className="flex-1 h-11 rounded-full border border-red-600 text-red-600 font-medium hover:bg-red-50 transition"
+            onClick={() => setReceiptOpen(false)}
+          >
+            Close
+          </button>
+          <button
+            className="flex-1 h-11 rounded-full border border-blue-600 text-blue-600 font-medium hover:bg-blue-50 transition"
+            onClick={() => exportReceiptToPdf("receipt-print-area", "preview")}
+          >
+            Preview PDF
+          </button>
+          <button
+            className="flex-1 h-11 rounded-full bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
+            onClick={handlePrint}
+          >
+            Print
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </Modal>
+)}
 
       {/* Reprint */}
-      {reprintAskOpen && (
-        <Modal onClose={() => setReprintAskOpen(false)}>
-          <div className="p-4">
-            <h3 className="text-lg font-semibold mb-2">Print Again?</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Apakah Anda ingin mencetak salinan struk tambahan?
-            </p>
-            <div className="flex gap-2">
-              <button
-                className="flex-1 h-10 border rounded-full"
-                onClick={() => setReprintAskOpen(false)}
-              >
-                No
-              </button>
-              <button
-                className="flex-1 h-10 bg-blue-600 text-white rounded-full"
-                onClick={() => printNodeById("receipt-print-area")}
-              >
-                Yes, Print Again
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+{reprintAskOpen && (
+  <Modal onClose={() => setReprintAskOpen(false)} z={11000}>
+    <div className="p-4">
+      <h3 className="text-lg font-semibold mb-2">Print Again?</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Apakah Anda ingin mencetak salinan struk tambahan?
+      </p>
+      <div className="flex gap-2">
+        <button
+          className="flex-1 h-10 border rounded-full"
+          onClick={() => setReprintAskOpen(false)}
+        >
+          No
+        </button>
+        <button
+          className="flex-1 h-10 bg-blue-600 text-white rounded-full"
+          onClick={() => printNodeById("receipt-print-area")}
+        >
+          Yes, Print Again
+        </button>
+      </div>
+    </div>
+  </Modal>
+)}
+
+
     </div>
   );
 }
@@ -427,13 +435,38 @@ export default function SaleSubmitter({
 /* =======================
    Modal (inline)
    ======================= */
-function Modal({ children, onClose }) {
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-xl w-[min(560px,92vw)]">
-        {children}
+function Modal({ children, onClose, z = 2147483000, showOverlay = true }) {
+  React.useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  const node = (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: z }}
+      className="flex items-center justify-center overflow-y-auto py-6 md:py-10"
+    >
+      {showOverlay && (
+        <div
+          onClick={onClose}
+          style={{ position: "fixed", inset: 0, zIndex: z }}
+          className="bg-black/40"
+        />
+      )}
+      <div
+        style={{ position: "relative", zIndex: z + 1 }}
+        className="bg-white rounded-2xl shadow-xl w-[min(560px,92vw)]
+                   max-h-[calc(100vh-3rem)] md:max-h-[85vh] overflow-hidden"
+        role="dialog" aria-modal="true"
+      >
+        <div className="overflow-y-auto">{children}</div>
       </div>
     </div>
   );
+
+  return createPortal(node, document.body);
 }
+
+
+

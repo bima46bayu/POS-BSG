@@ -11,6 +11,7 @@ export const api = axios.create({
   timeout: 20000,
 });
 
+// REQUEST INTERCEPTOR: Attach token
 api.interceptors.request.use((config) => {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) {
@@ -24,12 +25,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// RESPONSE INTERCEPTOR: Handle 401
 api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err?.response?.status === 401) {
+      // Hapus auth data
       localStorage.removeItem(STORAGE_KEY);
-      // biarkan App yang handle redirect/login
+      
+      // ✅ TAMBAHAN: Trigger storage event untuk sync antar tab
+      window.dispatchEvent(new Event("storage"));
+      
+      // ✅ TAMBAHAN: Redirect ke halaman login
+      window.location.href = "/";
     }
     return Promise.reject(err);
   }

@@ -142,8 +142,8 @@ export default function GRModal({ open, onClose, purchaseId }) {
       <div className="bg-white rounded-xl w-full max-w-3xl">
         <div className="p-5 border-b flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="p-2 bg-green-100 rounded-full">
-              <Package className="w-5 h-5 text-green-700" />
+            <div className="p-2 bg-blue-100 rounded-full">
+              <Package className="w-5 h-5 text-blue-700" />
             </div>
             <div>
               <div className="text-base font-semibold">Goods Receipt</div>
@@ -279,7 +279,7 @@ export default function GRModal({ open, onClose, purchaseId }) {
             disabled={mutation.isLoading || !hasValidInput}
             className={
               "px-4 py-2 text-white rounded disabled:opacity-60 " +
-              (totalRemain > 0 ? "bg-green-600 hover:bg-green-700" : "bg-gray-400")
+              (totalRemain > 0 ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-400")
             }
             title={
               remainRows.length === 0

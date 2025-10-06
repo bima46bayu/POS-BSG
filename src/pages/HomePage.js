@@ -81,119 +81,212 @@ async function fetchSubCategories(signal){
 
 /* ========== PDF Export Function ========== */
 async function exportToPDF(data, filters, aggRange) {
-  const htmlContent = `
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Sales Report</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; padding: 40px; background: white; }
-          h1 { color: #1e293b; font-size: 28px; margin-bottom: 10px; }
-          .subtitle { color: #64748b; font-size: 14px; margin-bottom: 30px; }
-          .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
-          .kpi-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; }
-          .kpi-title { color: #64748b; font-size: 12px; margin-bottom: 8px; }
-          .kpi-value { color: #1e293b; font-size: 24px; font-weight: bold; margin-bottom: 5px; }
-          .kpi-trend { color: #64748b; font-size: 11px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-          th { background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-          td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; color: #1e293b; }
-          .section-title { font-size: 16px; font-weight: bold; color: #1e293b; margin: 30px 0 15px 0; }
-          .text-right { text-align: right; }
-        </style>
-      </head>
-      <body>
-        <h1>📊 Sales Report - Dashboard POS</h1>
-        <div class="subtitle">Periode: ${formatDate(filters.from)} - ${formatDate(filters.to)}</div>
-        
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-title">Total Revenue</div>
-            <div class="kpi-value">${IDR(aggRange.revenue)}</div>
-            <div class="kpi-trend">vs periode sebelumnya</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-title">Total Transaksi</div>
-            <div class="kpi-value">${aggRange.tx.toLocaleString("id-ID")}</div>
-            <div class="kpi-trend">vs periode sebelumnya</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-title">Average Order Value</div>
-            <div class="kpi-value">${IDR(aggRange.aov)}</div>
-            <div class="kpi-trend">rata-rata per transaksi</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-title">Total Diskon</div>
-            <div class="kpi-value">${IDR(aggRange.discounts)}</div>
-            <div class="kpi-trend">${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon</div>
-          </div>
-        </div>
+  // Check if libraries are loaded
+  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+    alert('Library PDF belum ter-load. Pastikan html2canvas dan jsPDF sudah di-include.');
+    return;
+  }
 
-        <div class="section-title">📈 Kategori Terlaris</div>
-        <table>
-          <thead>
+  // Create temporary container
+  const tempContainer = document.createElement('div');
+  tempContainer.id = 'pdf-export-container';
+  tempContainer.style.cssText = `
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 794px;
+    background: white;
+    padding: 40px;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  `;
+  
+  tempContainer.innerHTML = `
+    <div style="color: #1e293b;">
+      <!-- Header -->
+      <div style="background: linear-gradient(135deg, #2563EB 0%, #1e40af 100%); color: white; padding: 40px; text-align: center; margin: -40px -40px 30px -40px; border-radius: 0;">
+        <div style="font-size: 14px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 10px; opacity: 0.9;">DASHBOARD POS</div>
+        <div style="font-size: 32px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.5px;">Laporan Penjualan</div>
+        <div style="font-size: 16px; margin-bottom: 20px; opacity: 0.95;">Analisis Performa & Statistik Transaksi</div>
+        <div style="font-size: 14px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.3); opacity: 0.9;">
+          Periode: ${formatDate(filters.from)} - ${formatDate(filters.to)}
+        </div>
+      </div>
+
+      <!-- KPI Cards -->
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 40px;">
+        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
+          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">TOTAL REVENUE</div>
+          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${IDR(aggRange.revenue)}</div>
+          <div style="color: #64748b; font-size: 11px;">Pendapatan keseluruhan</div>
+        </div>
+        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
+          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">TOTAL TRANSAKSI</div>
+          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${aggRange.tx.toLocaleString("id-ID")}</div>
+          <div style="color: #64748b; font-size: 11px;">Jumlah transaksi</div>
+        </div>
+        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
+          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">AVG ORDER VALUE</div>
+          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${IDR(aggRange.aov)}</div>
+          <div style="color: #64748b; font-size: 11px;">Rata-rata per transaksi</div>
+        </div>
+        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
+          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">TOTAL DISKON</div>
+          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${IDR(aggRange.discounts)}</div>
+          <div style="color: #64748b; font-size: 11px;">${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon</div>
+        </div>
+      </div>
+
+      <!-- Kategori Terlaris -->
+      <div style="margin-bottom: 40px;">
+        <div style="font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #2563EB;">
+          Kategori Terlaris
+        </div>
+        <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
+          <thead style="background: linear-gradient(to bottom, #f8fafc, #f1f5f9);">
             <tr>
-              <th>#</th>
-              <th>Kategori</th>
-              <th class="text-right">Qty</th>
-              <th class="text-right">Transaksi</th>
-              <th class="text-right">Revenue</th>
-              <th class="text-right">Share</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0; width: 50px;">#</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Kategori</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Qty</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Transaksi</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Revenue</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Share</th>
             </tr>
           </thead>
           <tbody>
             ${aggRange.topCategories.slice(0, 10).map((cat, idx) => `
               <tr>
-                <td>${idx + 1}</td>
-                <td>${cat.name}</td>
-                <td class="text-right">${cat.qty.toLocaleString("id-ID")}</td>
-                <td class="text-right">${cat.txCount.toLocaleString("id-ID")}</td>
-                <td class="text-right">${IDR(cat.revenue)}</td>
-                <td class="text-right">${cat.share.toFixed(1)}%</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #2563EB; font-weight: 700;">${idx + 1}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; font-weight: 600;">${cat.name}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${cat.qty.toLocaleString("id-ID")}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${cat.txCount.toLocaleString("id-ID")}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right; font-weight: 600;">${IDR(cat.revenue)}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${cat.share.toFixed(1)}%</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
+      </div>
 
-        <div class="section-title">🏷️ Produk Terlaris</div>
-        <table>
-          <thead>
+      <!-- Produk Terlaris -->
+      <div style="margin-bottom: 40px;">
+        <div style="font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #2563EB;">
+          Produk Terlaris
+        </div>
+        <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
+          <thead style="background: linear-gradient(to bottom, #f8fafc, #f1f5f9);">
             <tr>
-              <th>#</th>
-              <th>Produk</th>
-              <th class="text-right">Qty</th>
-              <th class="text-right">Revenue</th>
-              <th class="text-right">Share</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0; width: 50px;">#</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Produk</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Qty</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Revenue</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Share</th>
             </tr>
           </thead>
           <tbody>
             ${aggRange.topProducts.slice(0, 10).map((prod, idx) => `
               <tr>
-                <td>${idx + 1}</td>
-                <td>${prod.name}</td>
-                <td class="text-right">${prod.qty.toLocaleString("id-ID")}</td>
-                <td class="text-right">${IDR(prod.revenue)}</td>
-                <td class="text-right">${prod.share.toFixed(1)}%</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #2563EB; font-weight: 700;">${idx + 1}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; font-weight: 600;">${prod.name}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${prod.qty.toLocaleString("id-ID")}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right; font-weight: 600;">${IDR(prod.revenue)}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${prod.share.toFixed(1)}%</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
+      </div>
 
-        <div style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; color: #94a3b8; font-size: 12px;">
-          Generated on ${new Date().toLocaleString("id-ID")} | Dashboard POS
+      <!-- Metode Pembayaran -->
+      <div style="margin-bottom: 40px;">
+        <div style="font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #2563EB;">
+          Metode Pembayaran
         </div>
-      </body>
-    </html>
+        <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
+          <thead style="background: linear-gradient(to bottom, #f8fafc, #f1f5f9);">
+            <tr>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Metode</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Jumlah</th>
+              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Persentase</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${aggRange.paymentMix.map((pay) => {
+              const percentage = aggRange.revenue > 0 ? (pay.amount / aggRange.revenue * 100) : 0;
+              return `
+                <tr>
+                  <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; font-weight: 600;">${pay.method}</td>
+                  <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right; font-weight: 600;">${IDR(pay.amount)}</td>
+                  <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${percentage.toFixed(1)}%</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer -->
+      <div style="margin-top: 60px; padding-top: 25px; border-top: 2px solid #e2e8f0; text-align: center;">
+        <div style="color: #64748b; font-size: 11px; margin-bottom: 8px;">
+          Laporan dibuat pada: ${new Date().toLocaleString("id-ID", { 
+            day: "2-digit", 
+            month: "long", 
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit"
+          })}
+        </div>
+        <div style="color: #2563EB; font-size: 13px; font-weight: 700;">Dashboard POS - Analytics Report</div>
+      </div>
+    </div>
   `;
 
-  const printWindow = window.open('', '_blank');
-  printWindow.document.write(htmlContent);
-  printWindow.document.close();
-  
-  setTimeout(() => {
-    printWindow.print();
-  }, 500);
+  document.body.appendChild(tempContainer);
+
+  try {
+    const canvas = await html2canvas(tempContainer, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      logging: false,
+      useCORS: true,
+    });
+
+    const imgData = canvas.toDataURL("image/png");
+    const pageWidthMm = 210;
+    const pageHeightMm = 297;
+    const marginMm = 10;
+    const imgWidthMm = pageWidthMm - (marginMm * 2);
+    const imgHeightMm = (canvas.height * imgWidthMm) / canvas.width;
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    let heightLeft = imgHeightMm;
+    let position = marginMm;
+
+    pdf.addImage(imgData, "PNG", marginMm, position, imgWidthMm, imgHeightMm);
+    heightLeft -= (pageHeightMm - marginMm * 2);
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeightMm + marginMm;
+      pdf.addPage();
+      pdf.addImage(imgData, "PNG", marginMm, position, imgWidthMm, imgHeightMm);
+      heightLeft -= (pageHeightMm - marginMm * 2);
+    }
+
+    window.open(pdf.output("bloburl"), "_blank");
+    
+  } catch (error) {
+    console.error("Error generating PDF:", error);
+    alert("Gagal membuat PDF. Pastikan library html2canvas dan jsPDF sudah ter-load.");
+  } finally {
+    if (document.body.contains(tempContainer)) {
+      document.body.removeChild(tempContainer);
+    }
+  }
 }
 
 /* ========== Components ========== */

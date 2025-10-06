@@ -9,12 +9,12 @@ import {
   LogOut,
   Menu,
   X,
+  PackageCheck, // ⬅️ ikon baru untuk GR
 } from 'lucide-react';
 
 const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [] }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Close mobile menu when screen gets larger
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) setIsMobileMenuOpen(false);
@@ -23,30 +23,28 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Daftar menu fix (tanpa flag visible; kontrol tampil via allowedPages)
   const menuItems = [
     { id: 'home',      label: 'Home',     icon: Home },
     { id: 'pos',       label: 'POS',      icon: CreditCard },
     { id: 'products',  label: 'Product',  icon: Package },
     { id: 'inventory', label: 'Inventory',icon: Archive },
     { id: 'purchase',  label: 'Purchase', icon: ShoppingCart },
-    { id: 'history',   label: 'History',  icon: Clock },
+    { id: 'gr',        label: 'GR',       icon: PackageCheck },
+    { id: 'history',   label: 'History',  icon: Clock }, // ⬅️ menu baru
   ];
 
-  // Jika allowedPages tidak dikirim, fallback: tampilkan semua
   const allowedList = allowedPages && allowedPages.length
     ? allowedPages
     : menuItems.map(i => i.id);
 
   const allowedSet = useMemo(() => new Set(allowedList), [allowedList]);
-
   const visibleItems = useMemo(
     () => menuItems.filter(item => allowedSet.has(item.id)),
     [menuItems, allowedSet]
   );
 
   const handleNavigate = (pageId) => {
-    if (!allowedSet.has(pageId)) return; // cegah akses yang tidak diizinkan
+    if (!allowedSet.has(pageId)) return;
     onNavigate(pageId);
     setIsMobileMenuOpen(false);
   };
@@ -58,7 +56,7 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
 
   return (
     <>
-      {/* Mobile Hamburger Button */}
+      {/* Mobile Hamburger */}
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         className={`
@@ -73,14 +71,12 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
 
       {/* Desktop Sidebar */}
       <div className="hidden md:flex w-24 bg-white shadow-lg flex-col items-center py-6 border-r border-gray-200 h-screen fixed top-0 left-0 z-30">
-        {/* Logo */}
         <div className="mb-8">
           <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
             <div className="bg-blue-600 text-white px-1.5 py-0.5 rounded text-xs font-bold">BSG</div>
           </div>
         </div>
 
-        {/* Menu Items */}
         <nav className="flex flex-col space-y-4 flex-1">
           {visibleItems.map((item) => {
             const Icon = item.icon;
@@ -108,7 +104,6 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
           })}
         </nav>
 
-        {/* Sign Out */}
         <div className="mt-auto pt-8">
           <button
             onClick={handleLogout}
@@ -128,7 +123,6 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
             onClick={() => setIsMobileMenuOpen(false)}
           />
         )}
-
         <div
           className={`
             fixed top-0 left-0 h-full w-72 bg-white shadow-2xl z-50 transform transition-transform duration-300 ease-in-out
@@ -137,7 +131,6 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
           role="dialog"
           aria-modal="true"
         >
-          {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -148,7 +141,6 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
                 <p className="text-sm text-gray-500">SHITPOS</p>
               </div>
             </div>
-
             <button
               onClick={() => setIsMobileMenuOpen(false)}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -158,12 +150,10 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
             </button>
           </div>
 
-          {/* Menu Items */}
           <nav className="p-4">
             {visibleItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentPage === item.id;
-
               return (
                 <button
                   key={item.id}
@@ -183,7 +173,6 @@ const Sidebar = ({ currentPage, onNavigate, userRole, onLogout, allowedPages = [
             })}
           </nav>
 
-          {/* Sign Out */}
           <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-gray-50">
             <button
               onClick={handleLogout}

@@ -1,226 +1,233 @@
-// =============================
 // src/components/purchase/PoBySupplierTable.jsx
-// =============================
 import React, { useMemo } from "react";
-import { Calendar, Package } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { listPurchases } from "../../api/purchases";
-import { DataTable } from "../data-table";
-import Pill from "./Pill";
+import { useQueries } from "@tanstack/react-query";
+import { listPurchases, getPurchase } from "../../api/purchases";
+import DataTable from "../data-table/DataTable";
+import { Check, X as XIcon, Eye, Calendar, Loader2 } from "lucide-react";
 
-// helper angka aman
-const num = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const formatIDR = (v) =>
+  Number(v ?? 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+const formatDateTime = (s) =>
+  s
+    ? new Date(s).toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "-";
 
-// hitung sisa (remain) aman dari NaN
-function getRemainCount(row) {
-  if (!row) return 0;
-  if (row.total_remain != null) return Number(row.total_remain);
+// ===== NEW: normalisasi status dan style =====
+function normalizeStatus(raw) {
+  const s = String(raw || "").trim().toLowerCase();
 
-  if (Array.isArray(row.items)) {
-    return row.items.reduce((sum, it) => {
-      const order = num(it.qty_order) ?? 0;
-      const received = num(it.qty_received) ?? 0;
-      return sum + Math.max(0, order - received);
-    }, 0);
-  }
-
-  if (row.remain != null) return Number(row.remain);
-
-  const order = num(row.qty_order) ?? 0;
-  const received = num(row.qty_received) ?? 0;
-  return Math.max(0, order - received);
+  if (s === "approved") return "approved";
+  if (s.includes("cancel")) return "cancelled"; // cancelled/canceled
+  if (["closed", "received", "completed", "done", "finished"].includes(s)) return "closed";
+  if (["partial", "partially_received", "in_progress", "progress"].includes(s)) return "partial_gr";
+  if (s === "pending") return "pending";
+  // default fallback
+  return "draft";
 }
+
+const STATUS_STYLE = {
+  closed: "bg-gray-100 text-gray-800 border-gray-200",
+  pending: "bg-gray-100 text-gray-800 border-gray-200",
+  partial_gr: "bg-amber-100 text-amber-800 border-amber-200",
+  approved: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  cancelled: "bg-rose-100 text-rose-800 border-rose-200",
+  draft: "bg-blue-100 text-blue-800 border-blue-200",
+};
 
 export default function PoBySupplierTable({
   search,
   filters,
   page,
   setPage,
-  onDetail,
-  onGR,
-  onApprove,
-  onCancel,
-  onSort,
+  onApprovePO,
+  onCancelPO,
+  onDetailPO,
+  actingId,
+  fetchDetail = true,
 }) {
-  const params = { ...filters, search, page };
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["purchases", params],
-    queryFn: () => listPurchases(params),
-    keepPreviousData: true,
+  const { data: list, isLoading: listLoading } =
+    useQueries({
+      queries: [
+        {
+          queryKey: ["purchases", { ...filters, search, page }],
+          queryFn: () => listPurchases({ ...filters, search, page }),
+          keepPreviousData: true,
+        },
+      ],
+    })[0] || {};
+
+  const baseRows = Array.isArray(list) ? list : list?.data || [];
+  const metaFromList = (!Array.isArray(list) && list?.meta) || null;
+
+  const detailQueries = useQueries({
+    queries: fetchDetail
+      ? baseRows.map((po) => ({
+          queryKey: ["purchase", po.id],
+          queryFn: () => getPurchase(po.id),
+        }))
+      : [],
   });
 
-  // Normalize response
-  const rows = Array.isArray(data) ? data : data?.data || [];
-  const currentPage = Array.isArray(data) ? 1 : data?.current_page || 1;
-  const total = Array.isArray(data) ? rows.length : data?.total || rows.length;
-  const perPage = Array.isArray(data) ? rows.length : data?.per_page || 10;
-  const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const isLoadingDetails = fetchDetail ? detailQueries.some((q) => q.isLoading) : false;
+  const rows = useMemo(
+    () => (fetchDetail ? detailQueries.map((q, i) => q.data || baseRows[i]).filter(Boolean) : baseRows),
+    [fetchDetail, detailQueries, baseRows]
+  );
+
+  const getTotals = (row) => {
+    let qtyOrder = num(row.qty_order);
+    let totalPrice = row.grand_total ?? row.total ?? row.total_price ?? row.subtotal ?? null;
+    if (Array.isArray(row.items)) {
+      qtyOrder = row.items.reduce((s, it) => s + num(it.qty_order), 0);
+      if (totalPrice == null) totalPrice = row.items.reduce((s, it) => s + num(it.price) * num(it.qty_order), 0);
+    }
+    return { qtyOrder, totalPrice: totalPrice ?? 0 };
+  };
 
   const columns = useMemo(
     () => [
       {
         key: "purchase_number",
-        label: "PO Number",
+        header: "PO NUMBER",
+        width: "150px",
         sticky: "left",
-        sortable: true,
-        minWidth: "180px",
-        className: "font-medium text-gray-900",
+        tdClassName: "px-2 py-1.5",
+        thClassName: "px-2 py-2",
+        cell: (r) => r.purchase_number || `PO#${r.id}`,
       },
       {
-        key: "order_date",
-        label: "Order Date",
-        sortable: true,
-        minWidth: "150px",
-        render: (v) => (
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-gray-400" />
-            <span>{v}</span>
+        key: "created_at",
+        header: "TANGGAL DIBUAT",
+        width: "160px",
+        tdClassName: "px-2 py-1.5",
+        thClassName: "px-2 py-2",
+        cell: (r) => (
+          <div className="flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-gray-400" />
+            {formatDateTime(r.created_at)}
           </div>
         ),
       },
       {
-        key: "supplier.name",
-        label: "Supplier",
-        sortable: false,
-        minWidth: "160px",
-        render: (_, row) => row?.supplier?.name || "-",
+        key: "supplier",
+        header: "SUPPLIER",
+        width: "180px",
+        tdClassName: "px-2 py-1.5",
+        thClassName: "px-2 py-2",
+        cell: (r) => r?.supplier?.name || (r.supplier_id ? `#${r.supplier_id}` : "-"),
+      },
+      {
+        key: "total_price",
+        header: "TOTAL HARGA",
+        width: "120px",
+        align: "right",
+        tdClassName: "px-2 py-1.5",
+        thClassName: "px-2 py-2",
+        cell: (r) => formatIDR(getTotals(r).totalPrice),
+      },
+      {
+        key: "qty_order",
+        header: "TOTAL ORDER",
+        width: "90px",
+        align: "right",
+        tdClassName: "px-2 py-1.5",
+        thClassName: "px-2 py-2",
+        cell: (r) => getTotals(r).qtyOrder.toLocaleString("id-ID"),
       },
       {
         key: "status",
-        label: "Status",
-        minWidth: "140px",
-        render: (v) => {
-          const val = String(v ?? "").toLowerCase();
-          const variant =
-            val.includes("received")
-              ? "success"
-              : val === "approved"
-              ? "default"
-              : val === "cancelled" || val === "canceled"
-              ? "danger"
-              : "warn";
-          return <Pill variant={variant}>{v}</Pill>;
+        header: "STATUS",
+        width: "120px",
+        tdClassName: "px-2 py-1.5",
+        thClassName: "px-2 py-2",
+        cell: (r) => {
+          const st = normalizeStatus(r?.status);
+          return (
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${STATUS_STYLE[st] || STATUS_STYLE.draft}`}>
+              {st}
+            </span>
+          );
         },
       },
       {
-        key: "grand_total",
-        label: "Grand Total",
-        align: "right",
-        minWidth: "140px",
-        render: (v) => (
-          <span className="font-medium">
-            {Number(v || 0).toLocaleString("id-ID", {
-              style: "currency",
-              currency: "IDR",
-              maximumFractionDigits: 0,
-            })}
-          </span>
-        ),
-      },
-      {
-        key: "actions",
-        label: "Action",
+        key: "__actions",
+        header: "AKSI",
         sticky: "right",
+        width: "190px",
         align: "center",
-        minWidth: "320px",
-        render: (_, row) => {
-          const status = String(row?.status || "").toLowerCase();
-          const isDraft = status === "draft";
-          const isApproved = status === "approved";
-          const isPartially = status === "partially_received";
-          const isCancelled = status === "cancelled" || status === "canceled";
-
-          const remain = getRemainCount(row);
-
-          // aturan baru: GR HIJAU jika status approved/partially_received & remain > 0
-          const canGR = !isCancelled && (isApproved || isPartially) && remain > 0;
-
-          const showApprove = isDraft;  // tetap seperti aturanmu semula
-          const showCancel = isDraft;   // tetap seperti aturanmu semula
-
-          // tooltip GR yang lebih jelas
-          const grTitle = isCancelled
-            ? "PO dibatalkan"
-            : remain <= 0
-            ? "Sudah diterima semua"
-            : isDraft
-            ? "Approve PO terlebih dahulu"
-            : "Goods Receipt";
+        thClassName: "px-2 py-2",
+        tdClassName: "px-0 py-0",
+        cell: (r) => {
+          const st = normalizeStatus(r?.status);
+          const isDraft = st === "draft" || st === "pending";
+          const busy = actingId === r.id;
 
           return (
-            <div className="flex items-center justify-center gap-1">
-              {/* Detail selalu ada */}
+            <div className="sticky right-0 bg-white border-l border-gray-200 flex items-center justify-center gap-1 px-2 py-1.5">
+              {isDraft && (
+                <>
+                  <button
+                    onClick={() => onApprovePO?.(r)}
+                    disabled={busy}
+                    className="px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    title="Approve"
+                  >
+                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => onCancelPO?.(r)}
+                    disabled={busy}
+                    className="px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    title="Tolak"
+                  >
+                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XIcon className="w-3.5 h-3.5" />}
+                  </button>
+                </>
+              )}
               <button
-                onClick={() => onDetail?.(row)}
-                className="px-3 h-8 inline-flex items-center justify-center border rounded-lg bg-white hover:bg-gray-50"
+                onClick={() => onDetailPO?.(r)}
+                className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
                 title="Detail"
               >
-                Detail
-              </button>
-
-              {/* Approve & Cancel (sesuai logic semula) */}
-              {showApprove && (
-                <button
-                  onClick={() => onApprove?.(row)}
-                  className="px-3 h-8 inline-flex items-center justify-center rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                  title="Approve"
-                >
-                  Approve
-                </button>
-              )}
-              {showCancel && (
-                <button
-                  onClick={() => onCancel?.(row)}
-                  className="px-3 h-8 inline-flex items-center justify-center rounded-lg bg-red-600 text-white hover:bg-red-700"
-                  title="Cancel"
-                >
-                  Cancel
-                </button>
-              )}
-
-              {/* GR: selalu tampil; hijau kalau canGR, abu2 kalau tidak */}
-              <button
-                onClick={() => (canGR ? onGR?.(row) : null)}
-                disabled={!canGR}
-                className={`px-3 h-8 inline-flex items-center justify-center rounded-lg ${
-                  canGR
-                    ? "bg-green-600 text-white hover:bg-green-700"
-                    : "bg-gray-300 text-gray-600 cursor-not-allowed"
-                }`}
-                title={grTitle}
-              >
-                <Package className="w-4 h-4 mr-1" /> GR
+                <Eye className="w-3.5 h-3.5" />
               </button>
             </div>
           );
         },
       },
     ],
-    [onDetail, onApprove, onCancel, onGR]
+    [actingId, onApprovePO, onCancelPO, onDetailPO]
   );
 
-  if (isLoading) return <div className="p-6">Loading...</div>;
-  if (isError) return <div className="p-6 text-red-600">Failed to load purchases.</div>;
+  const meta = useMemo(() => {
+    if (metaFromList) return metaFromList;
+    return { current_page: page || 1, last_page: page || 1, per_page: rows.length, total: rows.length };
+  }, [metaFromList, page, rows.length]);
 
   return (
-    <DataTable
-      data={rows}
-      columns={columns}
-      title="Purchase Orders"
-      searchable={false}
-      searchTerm={search}
-      onSearchChange={() => {}}
-      sortConfig={{ key: null, direction: "asc" }}
-      onSort={onSort}
-      currentPage={currentPage}
-      totalPages={totalPages}
-      onPageChange={setPage}
-      startIndex={(currentPage - 1) * perPage + 1}
-      endIndex={Math.min(currentPage * perPage, total)}
-      totalItems={total}
-    />
+    <div className="bg-white border border-gray-200 rounded-lg">
+      <div className="w-full overflow-x-auto overscroll-x-contain">
+        <div className="min-w-full inline-block align-middle">
+          <DataTable
+            columns={columns}
+            data={rows}
+            loading={listLoading || isLoadingDetails}
+            meta={meta}
+            currentPage={meta.current_page}
+            onPageChange={setPage}
+            stickyHeader
+            getRowKey={(r, i) => r.id ?? r.purchase_number ?? i}
+            className="text-[13px]"
+          />
+        </div>
+      </div>
+    </div>
   );
 }

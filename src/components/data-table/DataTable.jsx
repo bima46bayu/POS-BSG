@@ -1,167 +1,238 @@
-import React from 'react';
-import DataTableHeader from './DataTableHeader';
-import DataTableBody from './DataTableBody';
-import Pagination from './Pagination';
-import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import React from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
-const DataTable = ({
-  data = [],
+/**
+ * DataTable (headerless)
+ *
+ * Props:
+ * - columns: Array<{
+ *     key: string,
+ *     header: string | ReactNode,
+ *     accessor?: (row) => any,        // default: row[key]
+ *     cell?: (row) => ReactNode,
+ *     align?: 'left'|'center'|'right',
+ *     width?: string,                  // e.g. '140px'
+ *     sticky?: 'left'|'right',
+ *     className?: string,
+ *   }>
+ * - data: any[]
+ * - loading?: boolean
+ * - emptyText?: string
+ *
+ * - sortKey?: string|null
+ * - sortDir?: 'asc'|'desc'
+ * - onSort?: (key) => void
+ *
+ * - meta?: { current_page, last_page, per_page, total }
+ * - currentPage?: number
+ * - onPageChange?: (page) => void
+ *
+ * - renderActions?: (row) => ReactNode    // kolom aksi (sticky right)
+ * - getRowKey?: (row, index) => string
+ *
+ * - stickyHeader?: boolean                 // default true
+ * - maxHeight?: string                     // e.g. '60vh' untuk scroll vertikal
+ * - className?: string
+ */
+export default function DataTable({
   columns = [],
-  title,
-  searchable = true,
-  searchTerm = '',
-  onSearchChange,
-  sortConfig = { key: null, direction: 'asc' },
+  data = [],
+  loading = false,
+  emptyText = "No data found",
+
+  sortKey = null,
+  sortDir = "asc",
   onSort,
+
+  meta = { current_page: 1, last_page: 1, per_page: 10, total: 0 },
   currentPage = 1,
-  totalPages = 1,
   onPageChange,
-  startIndex = 0,
-  endIndex = 0,
-  totalItems = 0,
-  filterComponent,
-  actions,
-  className = ""
-}) => {
-  
-  const getSortIcon = (column) => {
-    if (!column.sortable || !onSort) return null;
-    
-    if (sortConfig.key === column.key) {
-      return sortConfig.direction === 'asc' ? 
-        <ChevronUp className="w-4 h-4" /> : 
-        <ChevronDown className="w-4 h-4" />;
-    }
-    return <ChevronsUpDown className="w-4 h-4 text-gray-300" />;
-  };
 
-  const getHeaderAlignment = (column) => {
-    // Jika ada headerAlign yang didefinisikan secara eksplisit, gunakan itu
-    if (column.headerAlign) {
-      return column.headerAlign;
-    }
-    
-    // Jika ada align untuk cell, gunakan yang sama untuk header
-    if (column.align) {
-      return column.align;
-    }
-    
-    // Auto-detect berdasarkan tipe data atau nama kolom
-    const numericColumns = [
-      'subTotal', 'pay', 'change', 'price', 'amount', 'total', 
-      'qty', 'quantity', 'subtotal', 'discount', 'tax', 'balance',
-      'cost', 'fee', 'rate', 'percentage', 'count', 'number', 'value'
-    ];
-    
-    const columnLower = column.key.toLowerCase();
-    const isNumeric = numericColumns.some(numeric => 
-      columnLower.includes(numeric.toLowerCase())
-    );
-    
-    if (isNumeric) {
-      return 'right';
-    }
-    
-    return 'left';
-  };
+  renderActions,
+  getRowKey,
 
-  const getHeaderClass = (column) => {
-    const alignment = getHeaderAlignment(column);
-    let baseClass = "px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider";
-    
-    // Add alignment class
-    switch (alignment) {
-      case 'center':
-        baseClass += " text-center";
-        break;
-      case 'right':
-        baseClass += " text-right";
-        break;
-      default:
-        baseClass += " text-left";
-    }
-    
-    // Add sticky classes
-    if (column.sticky === 'left') {
-      baseClass += " sticky left-0 bg-gray-50 border-r border-gray-200 z-10";
-    }
-    if (column.sticky === 'right') {
-      baseClass += " sticky right-0 bg-gray-50 border-l border-gray-200 z-10";
-    }
-    
-    // Add sortable cursor
-    if (column.sortable && onSort) {
-      baseClass += " cursor-pointer hover:bg-gray-100 transition-colors";
-    }
-    
-    // Add min width
-    if (column.minWidth) {
-      baseClass += ` min-w-[${column.minWidth}]`;
-    }
-    
-    return baseClass;
-  };
+  stickyHeader = true,
+  maxHeight, // optional → aktifkan scroll Y
+  className = "",
+}) {
+  const startIndex = (meta?.current_page - 1) * (meta?.per_page || 10);
+  const endIndex = Math.min(meta?.current_page * (meta?.per_page || 10), meta?.total || data.length);
 
-  const getFlexClass = (alignment) => {
-    switch (alignment) {
-      case 'center':
-        return 'justify-center';
-      case 'right':
-        return 'justify-end';
-      default:
-        return 'justify-start';
-    }
-  };
+  const hasStickyLeft = columns.some((c) => c.sticky === "left");
+  const hasStickyRight = columns.some((c) => c.sticky === "right") || !!renderActions;
+
+  const thBase =
+    "px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider bg-gray-50 border-b border-gray-200";
+  const tdBase =
+    "px-4 py-3 text-sm text-gray-900 whitespace-nowrap bg-white border-b border-gray-100";
+  const alignClass = (a) => (a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left");
+  const stickyClass = (side) =>
+    side === "left" ? "sticky left-0 z-10" : side === "right" ? "sticky right-0 z-10" : "";
 
   return (
-    <div className={`bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden ${className}`}>
-      <DataTableHeader
-        title={title}
-        searchable={searchable}
-        searchTerm={searchTerm}
-        onSearchChange={onSearchChange}
-        filterComponent={filterComponent}
-        actions={actions}
-      />
-      
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+    <div className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`}>
+      {/* wrapper scroll */}
+      <div
+        className="overflow-x-auto"
+        style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}
+      >
+        <table className="w-full">
+          <thead className="border-b border-gray-200">
             <tr>
-              {columns.map((column, index) => {
-                const alignment = getHeaderAlignment(column);
+              {columns.map((col, idx) => {
+                const sortable = !!onSort && col.key;
+                const isActive = sortKey === col.key;
+                const nextDir = isActive && sortDir === "asc" ? "desc" : "asc";
+                const style = col.width ? { width: col.width, minWidth: col.width } : undefined;
+
+                // header cell
+                const baseClass = `${thBase} ${alignClass(col.align)} ${col.className || ""}`;
+                const stickyHeaderClass = stickyHeader ? "sticky top-0 z-20" : "";
+                const stickyColClass = col.sticky
+                  ? `${stickyClass(col.sticky)} ${stickyHeader ? "z-30" : ""} ${
+                      col.sticky === "left"
+                        ? hasStickyLeft ? "border-r border-gray-200" : ""
+                        : hasStickyRight ? "border-l border-gray-200" : ""
+                    }`
+                  : "";
+
                 return (
                   <th
-                    key={column.key || index}
-                    className={getHeaderClass(column)}
-                    onClick={() => column.sortable && onSort && onSort(column.key)}
+                    key={idx}
+                    className={`${baseClass} ${stickyHeaderClass} ${stickyColClass}`}
+                    style={style}
                   >
-                    <div className={`flex items-center gap-2 ${getFlexClass(alignment)}`}>
-                      {/* Icon di kiri untuk left/center alignment */}
-                      {alignment !== 'right' && getSortIcon(column)}
-                      <span className="select-none">{column.label}</span>
-                      {/* Icon di kanan untuk right alignment */}
-                      {alignment === 'right' && getSortIcon(column)}
-                    </div>
+                    {sortable ? (
+                      <button
+                        onClick={() => onSort(col.key)}
+                        className="inline-flex items-center gap-1 text-gray-700 hover:text-gray-900"
+                        title={`Sort ${nextDir}`}
+                      >
+                        <span className="truncate">{col.header}</span>
+                        {isActive ? (
+                          <span className="text-xs">{sortDir === "asc" ? "▲" : "▼"}</span>
+                        ) : (
+                          <span className="text-xs opacity-40">↕</span>
+                        )}
+                      </button>
+                    ) : (
+                      <span className="truncate">{col.header}</span>
+                    )}
                   </th>
                 );
               })}
+
+              {renderActions && (
+                <th
+                  className={`${thBase} text-center ${stickyHeader ? "sticky top-0 z-20" : ""} ${stickyClass("right")} ${
+                    hasStickyRight ? "border-l border-gray-200" : ""
+                  }`}
+                  style={{ minWidth: "120px" }}
+                >
+                  Action
+                </th>
+              )}
             </tr>
           </thead>
-          <DataTableBody data={data} columns={columns} />
+
+          <tbody className="divide-y divide-gray-100">
+            {loading && (
+              <tr>
+                <td colSpan={columns.length + (renderActions ? 1 : 0)} className="px-4 py-8 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <p className="text-gray-500">Loading...</p>
+                  </div>
+                </td>
+              </tr>
+            )}
+
+            {!loading && (!data || data.length === 0) && (
+              <tr>
+                <td colSpan={columns.length + (renderActions ? 1 : 0)} className="px-4 py-8 text-center text-gray-500">
+                  {emptyText}
+                </td>
+              </tr>
+            )}
+
+            {!loading &&
+              data?.map((row, i) => {
+                const rowKey = getRowKey ? getRowKey(row, i) : row.id ?? i;
+                return (
+                  <tr key={rowKey} className="hover:bg-gray-50 transition-colors">
+                    {columns.map((col, ci) => {
+                      const style = col.width ? { width: col.width, minWidth: col.width } : undefined;
+                      const value = col.accessor ? col.accessor(row) : row[col.key];
+                      const content = col.cell ? col.cell(row) : value;
+
+                      return (
+                        <td
+                          key={`${rowKey}-${ci}`}
+                          className={`${tdBase} ${alignClass(col.align)} ${col.className || ""} ${
+                            col.sticky
+                              ? `${stickyClass(col.sticky)} ${
+                                  col.sticky === "left"
+                                    ? hasStickyLeft ? "border-r border-gray-200" : ""
+                                    : hasStickyRight ? "border-l border-gray-200" : ""
+                                }`
+                              : ""
+                          }`}
+                          style={style}
+                        >
+                          {content}
+                        </td>
+                      );
+                    })}
+
+                    {renderActions && (
+                      <td
+                        className={`${tdBase} text-center ${stickyClass("right")} ${
+                          hasStickyRight ? "border-l border-gray-200" : ""
+                        }`}
+                        style={{ minWidth: "120px" }}
+                      >
+                        {renderActions(row)}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+          </tbody>
         </table>
       </div>
 
-      <Pagination
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={onPageChange}
-        startIndex={startIndex}
-        endIndex={endIndex}
-        totalItems={totalItems}
-      />
+      {/* Pagination footer (opsional) */}
+      {(onPageChange || meta) && (
+        <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+          <div className="text-sm text-gray-700">
+            Showing <span className="font-medium">{startIndex + 1 || 0}</span> to{" "}
+            <span className="font-medium">{endIndex || 0}</span> of{" "}
+            <span className="font-medium">{meta?.total ?? data.length}</span> results
+          </div>
+
+          {typeof onPageChange === "function" && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+                disabled={currentPage <= 1}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-3 py-1.5 text-sm text-gray-700">
+                Page {meta?.current_page || currentPage} of {meta?.last_page || 1}
+              </span>
+              <button
+                onClick={() => onPageChange(Math.min(meta?.last_page || currentPage + 1, currentPage + 1))}
+                disabled={(meta?.last_page || 1) <= currentPage}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
-};
-
-export default DataTable;
+}

@@ -1,33 +1,55 @@
+// src/pages/PurchasePage.jsx
 import React, { useMemo, useState, useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
+
 import WizardTabs from "../components/purchase/WizardTabs";
 import FilterBar from "../components/purchase/FilterBar";
+
+// Per-PO table (tanpa header/toolbar, aksi sticky right)
 import PoBySupplierTable from "../components/purchase/PoBySupplierTable";
+
+// By-Item (punyamu sebelumnya, tetap dipakai di step 1)
 import PoByItemTable from "../components/purchase/PoByItemTable";
+
 import PurchaseDetailDrawer from "../components/purchase/PurchaseDetailDrawer";
 import GRModal from "../components/purchase/GRModal";
 import SupplierBreakdownDrawer from "../components/purchase/SupplierBreakdownDrawer";
-import { approvePurchase, cancelPurchase } from "../api/purchases";
 import AddPurchaseModal from "../components/purchase/AddPurchaseModal";
+
+// API approve/cancel yang sesuai
+import { approvePurchase, cancelPurchase } from "../api/purchases";
 
 export default function PurchasePage() {
   const qc = useQueryClient();
-  const [step, setStep] = useState(0); // 0 = supplier, 1 = item
+
+  // 0 = per-PO, 1 = by-item
+  const [step, setStep] = useState(0);
+
+  // filter/search/pagination
   const [filters, setFilters] = useState({});
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
+  // detail drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPurchaseId, setDrawerPurchaseId] = useState(null);
 
+  // GR modal
   const [grOpen, setGrOpen] = useState(false);
   const [grPurchaseId, setGrPurchaseId] = useState(null);
 
+  // supplier breakdown (dipakai di step by-item)
   const [supplierDrawerOpen, setSupplierDrawerOpen] = useState(false);
   const [supplierData, setSupplierData] = useState(null);
 
-  // ===== Helpers: remain & rule GR =====
+  // tambah purchase
+  const [addOpen, setAddOpen] = useState(false);
+
+  // baris yang sedang diproses approve/cancel → untuk “freeze” tombol + spinner
+  const [actingId, setActingId] = useState(null);
+
+  // ===== Helpers: remain & rule GR (tetap dari kode kamu) =====
   const getRemainCount = useCallback((row) => {
     if (!row) return 0;
     if (row.total_remain != null) return Number(row.total_remain);
@@ -47,17 +69,20 @@ export default function PurchasePage() {
   const canGR = useCallback((row) => {
     const status = String(row?.status || "").toLowerCase();
     if (["cancelled", "canceled"].includes(status)) return false;
-    // IZINKAN GR di approved ATAU partially_received
     const allowed = ["approved", "partially_received"];
     if (!allowed.includes(status)) return false;
     return getRemainCount(row) > 0;
   }, [getRemainCount]);
 
+  // ===== API mutations (endpoint: /api/purchases/:id/approve & /cancel) =====
   const approveMut = useMutation({
     mutationFn: (id) => approvePurchase(id),
     onSuccess: () => {
       toast.success("PO approved");
       qc.invalidateQueries({ queryKey: ["purchases"] });
+    },
+    onError: (err) => {
+      toast.error(err?.message || "Gagal approve PO");
     },
   });
 
@@ -67,8 +92,12 @@ export default function PurchasePage() {
       toast.success("PO cancelled");
       qc.invalidateQueries({ queryKey: ["purchases"] });
     },
+    onError: (err) => {
+      toast.error(err?.message || "Gagal membatalkan PO");
+    },
   });
 
+  // ===== Actions (dipass ke tabel) =====
   const onDetail = (row) => {
     setDrawerPurchaseId(row.id);
     setDrawerOpen(true);
@@ -84,17 +113,24 @@ export default function PurchasePage() {
     setGrOpen(true);
   };
 
-  const onApprove = (row) => approveMut.mutate(row.id);
-  const onCancel = (row) => cancelMut.mutate(row.id);
+  const onApprove = (row) => {
+    setActingId(row.id);
+    approveMut.mutate(row.id, { onSettled: () => setActingId(null) });
+  };
 
-  const actions = useMemo(() => ({ onDetail, onGR, onApprove, onCancel }), []); // eslint-disable-line
+  const onCancel = (row) => {
+    setActingId(row.id);
+    cancelMut.mutate(row.id, { onSettled: () => setActingId(null) });
+  };
 
-  const [addOpen, setAddOpen] = useState(false);
+  const actions = useMemo(() => ({ onDetail, onGR, onApprove, onCancel }), []); 
 
+  // ===== Render =====
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
+      {/* Header: Tabs + FilterBar */}
       <div className="flex items-center justify-between mb-6">
-        <WizardTabs step={step} onStep={setStep} />
+        <WizardTabs step={step} onStep={(s) => { setStep(s); setPage(1); }} />
         <FilterBar
           value={search}
           onChange={(v) => {
@@ -108,19 +144,22 @@ export default function PurchasePage() {
         />
       </div>
 
+      {/* Content */}
       {step === 0 ? (
+        // ======= PER-PO VIEW =======
         <PoBySupplierTable
           search={search}
           filters={filters}
           page={page}
           setPage={setPage}
-          {...actions}
-          // tombol GR di list = HIJAU jika masih ada sisa (remain>0) pada status yang diizinkan
-          canGR={canGR}
-          getRemainCount={getRemainCount}
-          onSort={(key) => console.log("sort:", key)}
+          onApprovePO={actions.onApprove}
+          onCancelPO={actions.onCancel}
+          onDetailPO={actions.onDetail}     // buka PurchaseDetailDrawer
+          actingId={actingId}               // freeze baris saat proses
+          fetchDetail={true}                // hitung total/qty jika field total tidak dikirim
         />
       ) : (
+        // ======= BY ITEM VIEW (tetap) =======
         <PoByItemTable
           search={search}
           filters={filters}
@@ -135,7 +174,7 @@ export default function PurchasePage() {
         />
       )}
 
-      {/* Supplier breakdown */}
+      {/* Supplier breakdown (dipakai di step by-item) */}
       <SupplierBreakdownDrawer
         open={supplierDrawerOpen}
         onClose={() => setSupplierDrawerOpen(false)}
