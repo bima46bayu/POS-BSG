@@ -1,23 +1,45 @@
+// src/components/purchase/WizardTabs.jsx
 import React from "react";
 import { Rows, Boxes } from "lucide-react";
 
 export default function WizardTabs({ step = 0, onStep }) {
-  const Item = ({ i, Icon, label }) => (
-    <button
-      onClick={() => onStep(i)}
-      className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${
-        step === i ? "bg-blue-600 text-white border-blue-600 shadow" : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-      }`}
-    >
-      <Icon className="w-4 h-4" />
-      <span className="text-sm font-medium">{label}</span>
-    </button>
-  );
+  const items = [
+    { i: 0, label: "PO by Supplier", Icon: Rows },
+    { i: 1, label: "PO by Item", Icon: Boxes },
+  ];
 
   return (
-    <div className="flex items-center gap-2 p-2 bg-white rounded-2xl border border-gray-200">
-      <Item i={0} Icon={Rows} label="PO by Supplier" />
-      <Item i={1} Icon={Boxes} label="PO by Item" />
+    <div className="w-full md:w-auto">
+      <div
+        className="rounded-2xl p-1.5 border border-gray-200 bg-gradient-to-b from-gray-100 to-gray-50"
+      >
+        {/* grid 2 kolom agar lebar tombol sama */}
+        <div className="grid grid-cols-2 gap-1.5 min-w-[320px] md:min-w-[420px]">
+          {items.map(({ i, label, Icon }) => {
+            const active = step === i;
+            return (
+              <button
+                key={i}
+                onClick={() => onStep?.(i)}
+                className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 h-10
+                  text-sm font-medium transition-all border
+                  ${
+                    active
+                      ? "bg-white text-blue-600 border-blue-300 shadow-md"
+                      : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100 hover:text-blue-600"
+                  }`}
+              >
+                <Icon
+                  className={`w-4 h-4 ${
+                    active ? "text-blue-600" : "text-gray-500"
+                  }`}
+                />
+                <span className="truncate">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

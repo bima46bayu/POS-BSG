@@ -125,11 +125,11 @@ export default function GRPage() {
                 <ArrowLeft className="w-5 h-5 text-slate-600" />
               </button>
             )}
-            <h1 className="text-2xl font-bold text-slate-900">
-              {view === 'suppliers' && 'Goods Receipt - Supplier List'}
-              {view === 'orders' && `Purchase Orders - ${selectedSupplier?.name}`}
-            </h1>
           </div>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {view === 'suppliers' && 'Goods Receipt - Supplier List'}
+            {view === 'orders' && `Purchase Orders - ${selectedSupplier?.name}`}
+          </h1>
           <p className="text-sm text-slate-600">
             {view === 'suppliers' && 'Pilih supplier untuk melihat purchase order yang belum di-GR'}
             {view === 'orders' && 'Pilih purchase order untuk melakukan goods receipt'}
@@ -224,12 +224,12 @@ export default function GRPage() {
         {!isLoading && !isError && view === 'orders' && selectedSupplier && (
           <div className="space-y-5">
             {selectedSupplier.purchases.map(po => (
-              <div key={po.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <div className="p-6 border-b border-slate-200 bg-slate-50">
+              <div key={po.id} className="bg-white rounded-xl border border-blue-200 overflow-hidden">
+                <div className="p-6 border-b border-blue-200 bg-white">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="text-lg font-semibold text-slate-900">
-                        PO #{po.purchase_number || po.id}
+                        {po.purchase_number || po.id}
                       </h3>
                       <div className="flex gap-4 mt-2 text-sm text-slate-600">
                         <span>Tanggal: {new Date(po.order_date).toLocaleDateString('id-ID')}</span>
@@ -254,7 +254,7 @@ export default function GRPage() {
                 </div>
 
                 {/* Purchase Info Summary */}
-                <div className="p-6 bg-slate-50 border-b border-slate-200">
+                <div className="p-6 bg-white border-b border-slate-200">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <span className="text-slate-600">Total Amount:</span>

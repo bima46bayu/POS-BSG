@@ -148,6 +148,7 @@ export default function PoByItemTable({
   return (
     <div className="space-y-4">
 
+
       {/* SECTION 3: Table (horizontal scroll) */}
       <div className="bg-white border border-gray-200 rounded-lg">
         <div className="w-full overflow-x-auto overscroll-x-contain">
