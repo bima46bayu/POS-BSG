@@ -113,7 +113,7 @@ export default function GRPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 md:px-6 py-6">
+      <div className="max-w-auto mx-auto px-4 md:px-6 py-6">
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-2">
@@ -258,7 +258,7 @@ export default function GRPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <span className="text-slate-600">Total Amount:</span>
-                      <p className="font-semibold text-slate-900 mt-1">{IDR(po.total_amount)}</p>
+                      <p className="font-semibold text-slate-900 mt-1">{IDR(po.subtotal)}</p>
                     </div>
                     <div>
                       <span className="text-slate-600">Total Items:</span>

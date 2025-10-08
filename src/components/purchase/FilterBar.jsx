@@ -107,7 +107,7 @@ export default function FilterBar({ value, onChange, onAdd, onExport, filters = 
             </div>
 
             <div className="space-y-3">
-              <div>
+              {/* <div>
                 <label className="block text-xs text-gray-600 mb-1">Supplier ID</label>
                 <input
                   value={filters?.supplier_id || ""}
@@ -115,7 +115,7 @@ export default function FilterBar({ value, onChange, onAdd, onExport, filters = 
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                   placeholder="e.g. 1"
                 />
-              </div>
+              </div> */}
 
               <div>
                 <label className="block text-xs text-gray-600 mb-1">Status</label>
@@ -126,11 +126,10 @@ export default function FilterBar({ value, onChange, onAdd, onExport, filters = 
                 >
                   <option value="">All</option>
                   <option value="draft">Draft</option>
-                  <option value="pending">Pending</option>
                   <option value="approved">Approved</option>
                   <option value="partially_received">Partially Received</option>
-                  <option value="received">Received</option>
-                  <option value="cancelled">Cancelled</option>
+                  <option value="closed">Closed</option>
+                  <option value="canceled">Canceled</option>
                 </select>
               </div>
 

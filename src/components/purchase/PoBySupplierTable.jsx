@@ -24,7 +24,7 @@ function normalizeStatus(raw) {
   const s = String(raw || "").trim().toLowerCase();
 
   if (s === "approved") return "approved";
-  if (s.includes("cancel")) return "cancelled"; // cancelled/canceled
+  if (s.includes("cancel")) return "canceled"; // cancelled/canceled
   if (["closed", "received", "completed", "done", "finished"].includes(s)) return "closed";
   if (["partial", "partially_received", "in_progress", "progress"].includes(s)) return "partial_gr";
   if (s === "pending") return "pending";
@@ -37,7 +37,7 @@ const STATUS_STYLE = {
   pending: "bg-gray-100 text-gray-800 border-gray-200",
   partial_gr: "bg-amber-100 text-amber-800 border-amber-200",
   approved: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  cancelled: "bg-rose-100 text-rose-800 border-rose-200",
+  canceled: "bg-rose-100 text-rose-800 border-rose-200",
   draft: "bg-blue-100 text-blue-800 border-blue-200",
 };
 
