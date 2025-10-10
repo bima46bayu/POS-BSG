@@ -23,3 +23,9 @@ export async function listStoreLocations({ search, per_page = 50 } = {}, signal)
   // jika backend pakai paginate Laravel: { data: [...], ...meta }
   return Array.isArray(data) ? data : (data.data ?? data);
 }
+
+export async function getMe(signal) {
+  const { data } = await api.get("/api/me", { signal });
+  // Expect: { id, name, email, role, store_location_id, ... }
+  return data?.data || data;
+}

@@ -1,10 +1,11 @@
 // src/pages/HistoryPage.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, X, Search, Filter, Download } from "lucide-react";
+import { Calendar, X, Search, Filter, Download, XCircle, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../components/data-table/DataTable";
-import { getSales, getSale } from "../api/sales";
+import { getSales, getSale, voidSale } from "../api/sales";
 import SaleDetailModal from "../components/sales/SaleDetailModal";
+import ConfirmDialog from "../components/common/ConfirmDialog";
 
 const PER_PAGE = 10;
 
@@ -36,6 +37,12 @@ const METHOD_OPTIONS = [
   { value: "QRIS", label: "QRIS" },
 ];
 
+const STATUS_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "completed", label: "Completed" },
+  { value: "void", label: "Void" },
+];
+
 const normMethodKey = (m) => (m === "QRIS" ? "QRIS" : String(m || "").toLowerCase());
 const isWithinDateRange = (iso, start, end) => {
   if (!iso) return false;
@@ -46,10 +53,17 @@ const isWithinDateRange = (iso, start, end) => {
 };
 
 export default function HistoryPage() {
+  // ===== server data & meta =====
   const [rawRows, setRawRows] = useState([]);
-  const [serverMeta, setServerMeta] = useState({ current_page: 1, last_page: 1, per_page: PER_PAGE, total: 0 });
+  const [serverMeta, setServerMeta] = useState({
+    current_page: 1,
+    last_page: 1,
+    per_page: PER_PAGE,
+    total: 0,
+  });
   const [loading, setLoading] = useState(false);
 
+  // ===== client states =====
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortKey, setSortKey] = useState(null);
@@ -57,6 +71,7 @@ export default function HistoryPage() {
 
   const [showFilters, setShowFilters] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
 
   const [showDetail, setShowDetail] = useState(false);
@@ -64,23 +79,47 @@ export default function HistoryPage() {
   const [selectedSale, setSelectedSale] = useState(null);
   const [saleDetail, setSaleDetail] = useState(null);
 
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  // ConfirmDialog (Reject)
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectRow, setRejectRow] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectLoading, setRejectLoading] = useState(false);
+  const [rejectError, setRejectError] = useState("");
+
   const btnRef = useRef(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
 
-  const clientFilterActive = Boolean(paymentMethod || dateRange.start || dateRange.end);
+  const clientFilterActive = Boolean(paymentMethod || dateRange.start || dateRange.end || statusFilter);
 
+  // ===== FETCH LIST =====
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
 
     const params = clientFilterActive
-      ? { page: 1, per_page: 100000, code: searchTerm.trim() || undefined, sort: sortKey || undefined, dir: sortKey ? sortDir : undefined }
-      : { page: currentPage, per_page: PER_PAGE, code: searchTerm.trim() || undefined, sort: sortKey || undefined, dir: sortKey ? sortDir : undefined };
+      ? {
+          page: 1,
+          per_page: 100000,
+          code: searchTerm.trim() || undefined,
+          sort: sortKey || undefined,
+          dir: sortKey ? sortDir : undefined,
+        }
+      : {
+          page: currentPage,
+          per_page: PER_PAGE,
+          code: searchTerm.trim() || undefined,
+          sort: sortKey || undefined,
+          dir: sortKey ? sortDir : undefined,
+        };
 
     getSales(params, controller.signal)
       .then(({ items, meta }) => {
         setRawRows(items || []);
-        setServerMeta(meta || { current_page: 1, last_page: 1, per_page: PER_PAGE, total: (items || []).length });
+        setServerMeta(
+          meta || { current_page: 1, last_page: 1, per_page: PER_PAGE, total: (items || []).length }
+        );
       })
       .catch((err) => {
         const isCanceled = err?.name === "CanceledError" || err?.code === "ERR_CANCELED";
@@ -89,8 +128,19 @@ export default function HistoryPage() {
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, [searchTerm, sortKey, sortDir, currentPage, clientFilterActive, dateRange.start, dateRange.end, paymentMethod]);
+  }, [
+    searchTerm,
+    sortKey,
+    sortDir,
+    currentPage,
+    clientFilterActive,
+    dateRange.start,
+    dateRange.end,
+    paymentMethod,
+    refreshTick,
+  ]);
 
+  // ===== client-side filter/sort (saat filter aktif) =====
   const filteredSorted = useMemo(() => {
     let list = rawRows;
 
@@ -103,15 +153,27 @@ export default function HistoryPage() {
           return setMethods.has(normMethodKey(paymentMethod));
         });
       }
-      if (dateRange.start || dateRange.end) list = list.filter((r) => isWithinDateRange(r.created_at, dateRange.start, dateRange.end));
+
+      if (statusFilter) {
+        list = list.filter((r) => {
+          const v = String(r.status || "").toLowerCase();
+          return statusFilter === "void" ? v === "void" : v !== "void";
+        });
+      }
+
+      if (dateRange.start || dateRange.end)
+        list = list.filter((r) => isWithinDateRange(r.created_at, dateRange.start, dateRange.end));
+
       if (searchTerm.trim()) {
         const q = searchTerm.trim().toLowerCase();
         list = list.filter((r) => String(r.code || "").toLowerCase().includes(q));
       }
+
       if (sortKey) {
         const dir = sortDir === "desc" ? -1 : 1;
         list = [...list].sort((a, b) => {
-          const va = a[sortKey]; const vb = b[sortKey];
+          const va = a[sortKey];
+          const vb = b[sortKey];
           if (va == null && vb == null) return 0;
           if (va == null) return -1 * dir;
           if (vb == null) return 1 * dir;
@@ -121,25 +183,50 @@ export default function HistoryPage() {
       }
     }
     return list;
-  }, [rawRows, clientFilterActive, paymentMethod, dateRange.start, dateRange.end, searchTerm, sortKey, sortDir]);
+  }, [rawRows, clientFilterActive, paymentMethod, statusFilter, dateRange.start, dateRange.end, searchTerm, sortKey, sortDir]);
 
+  // ===== paginate & NORMALIZE meta (fix utama) =====
   const { pageRows, meta } = useMemo(() => {
-    if (!clientFilterActive) return { pageRows: rawRows, meta: serverMeta };
-    const total = filteredSorted.length;
-    const last_page = Math.max(1, Math.ceil(total / PER_PAGE));
-    const current = Math.min(currentPage, last_page);
-    const startIdx = (current - 1) * PER_PAGE;
-    const endIdx = startIdx + PER_PAGE;
-    return { pageRows: filteredSorted.slice(startIdx, endIdx), meta: { current_page: current, last_page, per_page: PER_PAGE, total } };
+    if (clientFilterActive) {
+      const total = filteredSorted.length;
+      const per = PER_PAGE;
+      const last = Math.max(1, Math.ceil(total / per));
+      const curr = Math.min(currentPage, last);
+      const startIdx = (curr - 1) * per;
+      const endIdx = startIdx + per;
+      return {
+        pageRows: filteredSorted.slice(startIdx, endIdx),
+        meta: { current_page: curr, last_page: last, per_page: per, total },
+      };
+    }
+
+    // TANPA FILTER → NORMALISASI serverMeta agar last_page selalu benar
+    const per = serverMeta?.per_page ?? PER_PAGE;
+    const total = serverMeta?.total ?? rawRows.length;
+    const last = serverMeta?.last_page ?? Math.max(1, Math.ceil(total / Math.max(1, per)));
+    const curr = serverMeta?.current_page ?? currentPage;
+
+    return {
+      pageRows: rawRows,
+      meta: { ...serverMeta, per_page: per, total, last_page: last, current_page: curr },
+    };
   }, [clientFilterActive, filteredSorted, rawRows, serverMeta, currentPage]);
 
-  const handleSort = useCallback((key) => {
-    if (!key) return;
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("asc"); }
-    setCurrentPage(1);
-  }, [sortKey]);
+  // ===== sorting =====
+  const handleSort = useCallback(
+    (key) => {
+      if (!key) return;
+      if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      else {
+        setSortKey(key);
+        setSortDir("asc");
+      }
+      setCurrentPage(1);
+    },
+    [sortKey]
+  );
 
+  // ===== detail =====
   const openDetail = useCallback(async (row) => {
     setSelectedSale(row);
     setDetailLoading(true);
@@ -156,6 +243,55 @@ export default function HistoryPage() {
     }
   }, []);
 
+  // ===== void/reject =====
+  const openReject = useCallback((row) => {
+    setRejectRow(row);
+    setRejectReason("");
+    setRejectError("");
+    setRejectOpen(true);
+  }, []);
+
+  const confirmReject = useCallback(async () => {
+    if (!rejectRow?.id) return;
+    setRejectLoading(true);
+    setRejectError("");
+    try {
+      await voidSale(rejectRow.id, { reason: rejectReason });
+      toast.success("Transaksi berhasil di-void");
+      setRejectOpen(false);
+      setRejectRow(null);
+      setRejectReason("");
+      if (showDetail && (selectedSale?.id === rejectRow.id || saleDetail?.id === rejectRow.id)) {
+        setShowDetail(false);
+        setSelectedSale(null);
+        setSaleDetail(null);
+      }
+      setRefreshTick((t) => t + 1);
+    } catch (e) {
+      const res = e?.response;
+      const msg =
+        res?.data?.message ||
+        (res?.data && typeof res.data === "string" ? res.data : "") ||
+        e?.message ||
+        "Gagal melakukan void transaksi";
+
+      let fieldErrors = "";
+      const errors = res?.data?.errors;
+      if (errors && typeof errors === "object") {
+        const lines = [];
+        Object.entries(errors).forEach(([k, arr]) => {
+          const text = Array.isArray(arr) ? arr.join(", ") : String(arr);
+          lines.push(`${k}: ${text}`);
+        });
+        if (lines.length) fieldErrors = lines.join("\n");
+      }
+      setRejectError([msg, fieldErrors].filter(Boolean).join("\n"));
+    } finally {
+      setRejectLoading(false);
+    }
+  }, [rejectRow, rejectReason, showDetail, selectedSale, saleDetail]);
+
+  // ===== UI helpers =====
   const PaymentBadge = ({ row }) => {
     const methods =
       Array.isArray(row.payments) && row.payments.length
@@ -171,7 +307,13 @@ export default function HistoryPage() {
       "-": "bg-gray-100 text-gray-800 border-gray-200",
     };
     const label = (k) =>
-      k === "QRIS" ? "QRIS" : k === "ewallet" ? "E-Wallet" : k === "transfer" ? "Bank Transfer" : k.charAt(0).toUpperCase() + k.slice(1);
+      k === "QRIS"
+        ? "QRIS"
+        : k === "ewallet"
+        ? "E-Wallet"
+        : k === "transfer"
+        ? "Bank Transfer"
+        : k.charAt(0).toUpperCase() + k.slice(1);
 
     return (
       <div className="flex flex-wrap gap-1">
@@ -189,7 +331,6 @@ export default function HistoryPage() {
     );
   };
 
-  // === Responsive column cells (pakai truncate + max-w responsif) ===
   const CodeCell = ({ row }) => (
     <span
       className="block whitespace-nowrap truncate max-w-[9rem] sm:max-w-[12rem] lg:max-w-[16rem]"
@@ -214,54 +355,84 @@ export default function HistoryPage() {
     </span>
   );
 
-  // ===== Columns (tanpa width fixed; biarkan fleksibel & responsif) =====
+  const StatusBadge = ({ status }) => {
+    const v = String(status || "").toLowerCase();
+    const isVoid = v === "void";
+    return (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border
+          ${isVoid ? "bg-red-50 text-red-700 border-red-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
+      >
+        {isVoid ? "Void" : "Completed"}
+      </span>
+    );
+  };
+
+  // ===== Columns =====
   const columns = [
     { key: "code", header: "Transaction", sticky: "left", cell: (row) => <CodeCell row={row} />, className: "font-medium" },
-
     { key: "created_at", header: "Tanggal", cell: (row) => <DateCell row={row} /> },
-
-    { key: "customer_name", header: "Customer", cell: (row) => (
-        <TextCell title={row.customer_name || "General"}>{row.customer_name || "General"}</TextCell>
-      ) },
-
-    { key: "subtotal", header: "Sub Total", align: "right", className: "hidden xs:table-cell", cell: (row) => (
-        <TextCell title={String(formatIDR(row.subtotal))}>{formatIDR(row.subtotal)}</TextCell>
-      ) },
-
-    { key: "paid", header: "Pay", align: "right", className: "hidden sm:table-cell",
-      accessor: (row) => (Array.isArray(row.payments) ? row.payments.reduce((s, p) => s + toNumber(p.amount), 0) : row.paid),
+    {
+      key: "customer_name",
+      header: "Customer",
+      cell: (row) => <TextCell title={row.customer_name || "General"}>{row.customer_name || "General"}</TextCell>,
+    },
+    { key: "status", header: "Status", className: "hidden sm:table-cell", cell: (row) => <StatusBadge status={row.status} /> },
+    {
+      key: "subtotal",
+      header: "Sub Total",
+      align: "right",
+      className: "hidden sm:table-cell",
+      cell: (row) => <TextCell title={String(formatIDR(row.subtotal))}>{formatIDR(row.subtotal)}</TextCell>,
+    },
+    {
+      key: "paid",
+      header: "Pay",
+      align: "right",
+      className: "hidden md:table-cell",
       cell: (row) => {
-        const val = Array.isArray(row.payments) ? row.payments.reduce((s, p) => s + toNumber(p.amount), 0) : row.paid;
+        const val = Array.isArray(row.payments)
+          ? row.payments.reduce((s, p) => s + toNumber(p.amount), 0)
+          : row.paid;
         return <TextCell title={String(formatIDR(val))}>{formatIDR(val)}</TextCell>;
-      } },
-
-    { key: "change", header: "Change", align: "right", className: "hidden md:table-cell", cell: (row) => (
-        <TextCell title={String(formatIDR(row.change))}>{formatIDR(row.change)}</TextCell>
-      ) },
-
-    { key: "payment_method", header: "Payment", className: "hidden sm:table-cell", cell: (row) => <PaymentBadge row={row} /> },
-
-    // Sticky-right Actions (freeze)
+      },
+    },
+    {
+      key: "change",
+      header: "Change",
+      align: "right",
+      className: "hidden lg:table-cell",
+      cell: (row) => <TextCell title={String(formatIDR(row.change))}>{formatIDR(row.change)}</TextCell>,
+    },
+    { key: "payment_method", header: "Payment", className: "hidden lg:table-cell", cell: (row) => <PaymentBadge row={row} /> },
     {
       key: "__actions",
-      header: () => (
-        <div className="sticky right-0 z-30 bg-white text-right pr-3" style={{ boxShadow: "-6px 0 6px -6px rgba(0,0,0,.12)" }}>
-          Actions
-        </div>
-      ),
+      header: "Actions",
       sticky: "right",
-      className: "sticky right-0 z-20 bg-white",
+      className: "sticky right-0 z-20 bg-white w-[84px]",
       cell: (row) => (
         <div
-          className="sticky right-0 z-20 bg-white flex justify-end pr-2"
+          className="sticky right-0 z-20 bg-white flex items-center justify-end gap-1 pr-2"
           style={{ boxShadow: "-6px 0 6px -6px rgba(0,0,0,.12)" }}
         >
           <button
             onClick={() => openDetail(row)}
-            className="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700"
+            className="p-1.5 rounded-md border bg-blue-600 text-white hover:bg-blue-800"
+            title="Detail transaksi"
+            aria-label="Detail transaksi"
           >
-            Detail
+            <Eye className="w-4 h-4" />
           </button>
+          {row.status !== "void" && (
+            <button
+              onClick={() => openReject(row)}
+              className="p-1.5 rounded-md border border-red-300 text-red-600 hover:bg-red-50"
+              title="Void / Reject transaksi"
+              aria-label="Void transaksi"
+            >
+              <XCircle className="w-4 h-4" />
+            </button>
+          )}
         </div>
       ),
     },
@@ -286,7 +457,7 @@ export default function HistoryPage() {
       toast.loading("Menyiapkan CSV...", { id: "exp" });
       const data = clientFilterActive ? filteredSorted : rawRows;
 
-      const headers = ["Transaction Number", "Tanggal", "Customer", "Sub Total", "Pay", "Change", "Payment Methods"];
+      const headers = ["Transaction Number", "Tanggal", "Customer", "Status", "Sub Total", "Pay", "Change", "Payment Methods"];
       const escape = (v) => {
         if (v == null) return "";
         const s = String(v);
@@ -297,19 +468,30 @@ export default function HistoryPage() {
         const methods =
           Array.isArray(r.payments) && r.payments.length
             ? [...new Set(r.payments.map((p) => normMethodKey(p.method)))]
-                .map((m) => (m === "QRIS" ? "QRIS" : m === "ewallet" ? "E-Wallet" : m === "transfer" ? "Bank Transfer" : m[0].toUpperCase() + m.slice(1)))
+                .map((m) =>
+                  m === "QRIS"
+                    ? "QRIS"
+                    : m === "ewallet"
+                    ? "E-Wallet"
+                    : m === "transfer"
+                    ? "Bank Transfer"
+                    : m[0].toUpperCase() + m.slice(1)
+                )
                 .join(" | ")
-            : (r.payment_method || r.method || "-");
+            : r.payment_method || r.method || "-";
 
         return [
           r.code || r.number || "-",
           formatDateTime(r.created_at),
           r.customer_name || "General",
+          r.status === "void" ? "Void" : "Completed",
           formatIDR(r.subtotal),
           formatIDR(pay),
           formatIDR(r.change),
           methods,
-        ].map(escape).join(",");
+        ]
+          .map(escape)
+          .join(",");
       });
 
       const csv = [headers.join(","), ...csvRows].join("\n");
@@ -355,9 +537,9 @@ export default function HistoryPage() {
             >
               <Filter className="w-4 h-4" />
               Filter
-              {(paymentMethod || dateRange.start || dateRange.end) && (
+              {(paymentMethod || dateRange.start || dateRange.end || statusFilter) && (
                 <span className="ml-1 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full">
-                  {(paymentMethod ? 1 : 0) + (dateRange.start ? 1 : 0) + (dateRange.end ? 1 : 0)}
+                  {(paymentMethod ? 1 : 0) + (dateRange.start ? 1 : 0) + (dateRange.end ? 1 : 0) + (statusFilter ? 1 : 0)}
                 </span>
               )}
             </button>
@@ -373,7 +555,7 @@ export default function HistoryPage() {
         </div>
       </div>
 
-      {/* Table (full width, responsif) */}
+      {/* Table */}
       <div className="bg-white border border-gray-200 rounded-lg mt-4">
         <div className="relative w-full overflow-x-auto">
           <div className="inline-block align-middle w-full">
@@ -385,7 +567,8 @@ export default function HistoryPage() {
               sortDir={sortDir}
               onSort={handleSort}
               meta={meta}
-              currentPage={meta.current_page}
+              // >>> penting: pakai state currentPage, bukan meta.current_page
+              currentPage={currentPage}
               onPageChange={(p) => setCurrentPage(p)}
               stickyHeader
               getRowKey={(row, i) => row.id ?? row.code ?? i}
@@ -445,10 +628,29 @@ export default function HistoryPage() {
                 />
               </div>
             </div>
+
+            {/* Status */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1); }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {STATUS_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
             <button
-              onClick={() => { setPaymentMethod(""); setDateRange({ start: "", end: "" }); setCurrentPage(1); }}
+              onClick={() => {
+                setPaymentMethod("");
+                setDateRange({ start: "", end: "" });
+                setStatusFilter("");
+                setCurrentPage(1);
+              }}
               className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
             >
               Clear All
@@ -476,6 +678,42 @@ export default function HistoryPage() {
           sale={saleDetail || selectedSale}
         />
       )}
+
+      {/* Reject / Void ConfirmDialog */}
+      <ConfirmDialog
+        open={rejectOpen}
+        title="Void / Reject Transaksi"
+        confirmText="Reject"
+        loadingText="Rejecting..."
+        cancelText="Batal"
+        variant="danger"
+        loading={rejectLoading}
+        onClose={() => { if (!rejectLoading) setRejectOpen(false); }}
+        onConfirm={confirmReject}
+        message={
+          <div className="space-y-3">
+            <p className="text-sm text-gray-700">
+              Anda akan me-<b>void</b> transaksi{" "}
+              <span className="font-semibold">{rejectRow?.code || rejectRow?.id}</span>. Tindakan ini tidak dapat
+              dibatalkan.
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Alasan (opsional)</label>
+              <textarea
+                rows={3}
+                placeholder="Tulis alasan pembatalan di sini…"
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                disabled={rejectLoading}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+              />
+              {rejectError && (
+                <div className="mt-2 text-xs text-red-600 whitespace-pre-line">{rejectError}</div>
+              )}
+            </div>
+          </div>
+        }
+      />
     </div>
   );
 }

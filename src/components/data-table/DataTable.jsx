@@ -201,38 +201,71 @@ export default function DataTable({
         </table>
       </div>
 
-      {/* Pagination footer (opsional) */}
-      {(onPageChange || meta) && (
-        <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
-          <div className="text-sm text-gray-700">
-            Showing <span className="font-medium">{startIndex + 1 || 0}</span> to{" "}
-            <span className="font-medium">{endIndex || 0}</span> of{" "}
-            <span className="font-medium">{meta?.total ?? data.length}</span> results
-          </div>
+{/* Pagination footer */}
+{(onPageChange || meta) && (
+  <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+    {/* kiri: info showing */}
+    <div className="text-sm text-gray-700">
+      Showing{" "}
+      <span className="font-medium">
+        {startIndex != null ? startIndex + 1 : 0}
+      </span>{" "}
+      to{" "}
+      <span className="font-medium">
+        {endIndex != null ? endIndex : 0}
+      </span>{" "}
+      of{" "}
+      <span className="font-medium">
+        {meta?.total ?? data.length}
+      </span>{" "}
+      results
+    </div>
 
-          {typeof onPageChange === "function" && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-                disabled={currentPage <= 1}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <span className="px-3 py-1.5 text-sm text-gray-700">
-                Page {meta?.current_page || currentPage} of {meta?.last_page || 1}
-              </span>
-              <button
-                onClick={() => onPageChange(Math.min(meta?.last_page || currentPage + 1, currentPage + 1))}
-                disabled={(meta?.last_page || 1) <= currentPage}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+    {/* kanan: pager */}
+    {typeof onPageChange === "function" && (
+      (() => {
+        const perPage =
+          meta?.per_page ??
+          ((endIndex != null && startIndex != null && endIndex > startIndex)
+            ? (endIndex - startIndex)
+            : 10); // fallback aman
+
+        const totalItems = meta?.total ?? data.length;
+        const computedTotalPages = Math.max(
+          1,
+          meta?.last_page ?? Math.ceil(totalItems / Math.max(1, perPage))
+        );
+
+        const page = meta?.current_page || currentPage || 1;
+
+        return (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onPageChange(Math.max(1, page - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <span className="px-3 py-1.5 text-sm text-gray-700">
+              Page {page} of {computedTotalPages}
+            </span>
+
+            <button
+              onClick={() => onPageChange(Math.min(computedTotalPages, page + 1))}
+              disabled={page >= computedTotalPages}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        );
+      })()
+    )}
+  </div>
+)}
+
     </div>
   );
 }

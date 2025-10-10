@@ -11,6 +11,7 @@ import { X } from "lucide-react";
  * - cancelText?: string (default: "Cancel")
  * - variant?: "danger" | "primary" (default: "danger")
  * - loading?: boolean
+ * - loadingText?: string (default: confirmText + "...")
  * - onConfirm: () => void | Promise<void>
  * - onClose: () => void
  */
@@ -22,6 +23,7 @@ export default function ConfirmDialog({
   cancelText = "Cancel",
   variant = "danger",
   loading = false,
+  loadingText,                              // ⬅️ new
   onConfirm,
   onClose,
 }) {
@@ -42,16 +44,9 @@ export default function ConfirmDialog({
       : "bg-blue-600 hover:bg-blue-700 focus:ring-blue-500";
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" role="dialog" aria-modal="true">
       {/* backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50"
-        onClick={() => !loading && onClose?.()}
-      />
+      <div className="absolute inset-0 bg-black/50" onClick={() => !loading && onClose?.()} />
 
       {/* panel */}
       <div className="relative z-[201] w-full max-w-md rounded-2xl bg-white shadow-xl border border-gray-200">
@@ -69,11 +64,7 @@ export default function ConfirmDialog({
         </div>
 
         <div className="px-5 py-4">
-          {typeof message === "string" ? (
-            <p className="text-sm text-gray-700">{message}</p>
-          ) : (
-            message
-          )}
+          {typeof message === "string" ? <p className="text-sm text-gray-700">{message}</p> : message}
         </div>
 
         <div className="px-5 py-4 border-t flex items-center justify-end gap-3">
@@ -91,7 +82,7 @@ export default function ConfirmDialog({
             onClick={onConfirm}
             disabled={loading}
           >
-            {loading ? "Deleting..." : confirmText}
+            {loading ? (loadingText || `${confirmText}...`) : confirmText}
           </button>
         </div>
       </div>

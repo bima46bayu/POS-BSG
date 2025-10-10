@@ -1,6 +1,6 @@
 // src/components/purchase/PoBySupplierTable.jsx
-import React, { useMemo } from "react";
-import { useQueries } from "@tanstack/react-query";
+import React, { useMemo, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listPurchases, getPurchase } from "../../api/purchases";
 import DataTable from "../data-table/DataTable";
 import { Check, X as XIcon, Eye, Calendar, Loader2 } from "lucide-react";
@@ -19,16 +19,14 @@ const formatDateTime = (s) =>
       })
     : "-";
 
-// ===== NEW: normalisasi status dan style =====
+// Normalisasi status → label konsisten
 function normalizeStatus(raw) {
   const s = String(raw || "").trim().toLowerCase();
-
   if (s === "approved") return "approved";
-  if (s.includes("cancel")) return "canceled"; // cancelled/canceled
+  if (s.includes("cancel")) return "canceled";
   if (["closed", "received", "completed", "done", "finished"].includes(s)) return "closed";
   if (["partial", "partially_received", "in_progress", "progress"].includes(s)) return "partial_gr";
   if (s === "pending") return "pending";
-  // default fallback
   return "draft";
 }
 
@@ -50,45 +48,68 @@ export default function PoBySupplierTable({
   onCancelPO,
   onDetailPO,
   actingId,
-  fetchDetail = true,
+  perPage = 10,
 }) {
-  const { data: list, isLoading: listLoading } =
-    useQueries({
-      queries: [
-        {
-          queryKey: ["purchases", { ...filters, search, page }],
-          queryFn: () => listPurchases({ ...filters, search, page }),
-          keepPreviousData: true,
-        },
-      ],
-    })[0] || {};
+  const queryClient = useQueryClient();
 
-  const baseRows = Array.isArray(list) ? list : list?.data || [];
-  const metaFromList = (!Array.isArray(list) && list?.meta) || null;
-
-  const detailQueries = useQueries({
-    queries: fetchDetail
-      ? baseRows.map((po) => ({
-          queryKey: ["purchase", po.id],
-          queryFn: () => getPurchase(po.id),
-        }))
-      : [],
+  // === 1) HANYA 1 FETCH UNTUK LIST ===
+  const { data, isLoading: listLoading } = useQuery({
+    queryKey: ["purchases", { ...filters, search: search ?? "", page, per_page: perPage }],
+    queryFn: () => listPurchases({ ...filters, search, page, per_page: perPage }),
+    keepPreviousData: true,
+    staleTime: 30_000,
   });
 
-  const isLoadingDetails = fetchDetail ? detailQueries.some((q) => q.isLoading) : false;
-  const rows = useMemo(
-    () => (fetchDetail ? detailQueries.map((q, i) => q.data || baseRows[i]).filter(Boolean) : baseRows),
-    [fetchDetail, detailQueries, baseRows]
+  // Adapter: dukung 3 bentuk (normalized, laravel root, array)
+  const items = useMemo(() => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;                 // array murni (jarang)
+    if (Array.isArray(data.items)) return data.items;     // normalized
+    if (Array.isArray(data.data)) return data.data;       // laravel paginator root
+    return [];
+  }, [data]);
+
+  const meta = useMemo(() => {
+    if (!data) return { current_page: page || 1, last_page: 1, per_page: perPage, total: 0 };
+    // normalized
+    if (data.meta) return data.meta;
+    // laravel root
+    if (data.current_page != null) {
+      return {
+        current_page: Number(data.current_page ?? page ?? 1),
+        per_page: Number(data.per_page ?? perPage),
+        last_page: Number(data.last_page ?? 1),
+        total: Number(data.total ?? items.length),
+      };
+    }
+    // fallback
+    return { current_page: page || 1, last_page: 1, per_page: perPage, total: items.length };
+  }, [data, page, perPage, items.length]);
+
+  // === 2) OPSIONAL: PREFETCH DETAIL SAAT HOVER TOMBOL DETAIL ===
+  const prefetchDetail = useCallback(
+    (id) => {
+      queryClient.prefetchQuery({
+        queryKey: ["purchase", id],
+        queryFn: () => getPurchase(id),
+        staleTime: 30_000,
+      });
+    },
+    [queryClient]
   );
 
+  // === 3) Kolom tabel pakai data yang SUDAH ada di list (cepat) ===
   const getTotals = (row) => {
-    let qtyOrder = num(row.qty_order);
-    let totalPrice = row.grand_total ?? row.total ?? row.total_price ?? row.subtotal ?? null;
-    if (Array.isArray(row.items)) {
-      qtyOrder = row.items.reduce((s, it) => s + num(it.qty_order), 0);
-      if (totalPrice == null) totalPrice = row.items.reduce((s, it) => s + num(it.price) * num(it.qty_order), 0);
-    }
-    return { qtyOrder, totalPrice: totalPrice ?? 0 };
+    // gunakan field dari list yang sudah disiapkan backend
+    // prefer grand_total → subtotal → total_price, dsb
+    const totalPrice = num(row.grand_total ?? row.total ?? row.total_price ?? row.subtotal ?? 0);
+    const qtyOrder =
+      // dari index patch: qty_total (selectSub SUM(qty_order))
+      num(row.qty_total) ||
+      // fallback ke items_count kalau memang hanya ingin jumlah baris item (bukan total qty)
+      num(row.items_count) ||
+      0;
+    return { qtyOrder, totalPrice };
   };
 
   const columns = useMemo(
@@ -103,15 +124,15 @@ export default function PoBySupplierTable({
         cell: (r) => r.purchase_number || `PO#${r.id}`,
       },
       {
-        key: "created_at",
-        header: "TANGGAL DIBUAT",
+        key: "order_date",
+        header: "TANGGAL",
         width: "160px",
         tdClassName: "px-2 py-1.5",
         thClassName: "px-2 py-2",
         cell: (r) => (
           <div className="flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5 text-gray-400" />
-            {formatDateTime(r.created_at)}
+            {formatDateTime(r.order_date ?? r.created_at)}
           </div>
         ),
       },
@@ -135,7 +156,7 @@ export default function PoBySupplierTable({
       {
         key: "qty_order",
         header: "TOTAL ORDER",
-        width: "90px",
+        width: "110px",
         align: "right",
         tdClassName: "px-2 py-1.5",
         thClassName: "px-2 py-2",
@@ -192,6 +213,8 @@ export default function PoBySupplierTable({
                 </>
               )}
               <button
+                onMouseEnter={() => prefetchDetail(r.id)}   // prefetch biar modal cepat
+                onFocus={() => prefetchDetail(r.id)}
                 onClick={() => onDetailPO?.(r)}
                 className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
                 title="Detail"
@@ -203,13 +226,8 @@ export default function PoBySupplierTable({
         },
       },
     ],
-    [actingId, onApprovePO, onCancelPO, onDetailPO]
+    [actingId, onApprovePO, onCancelPO, onDetailPO, prefetchDetail]
   );
-
-  const meta = useMemo(() => {
-    if (metaFromList) return metaFromList;
-    return { current_page: page || 1, last_page: page || 1, per_page: rows.length, total: rows.length };
-  }, [metaFromList, page, rows.length]);
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg">
@@ -217,8 +235,8 @@ export default function PoBySupplierTable({
         <div className="min-w-full inline-block align-middle">
           <DataTable
             columns={columns}
-            data={rows}
-            loading={listLoading || isLoadingDetails}
+            data={items}
+            loading={listLoading}
             meta={meta}
             currentPage={meta.current_page}
             onPageChange={setPage}

@@ -1,3 +1,4 @@
+// src/pages/HomePage.jsx
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -5,630 +6,58 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, Legend, CartesianGrid,
   PieChart, Pie, Cell, LineChart, Line,
 } from "recharts";
-import { 
-  Search, Calendar, Store, Tag, Download, 
-  TrendingUp, TrendingDown, DollarSign, 
-  ShoppingCart, Receipt, Percent, ChevronDown,
-  ArrowUpDown
+import {
+  DollarSign, Receipt, ShoppingCart, Percent,
+  Table as TableIcon, Tag, ChevronDown as ChevronDownIcon, ArrowUpDown
 } from "lucide-react";
+
+import KpiCard from "../components/dashboard/KpiCard";
+import ChartCard from "../components/dashboard/ChartCard";
+import SimpleTable from "../components/dashboard/SimpleTable";
+import FilterBar from "../components/dashboard/FilterBar";
+import DailyMatrixModal from "../components/dashboard/DailyMatrixModal";
+
 import { api } from "../api/client";
+import { listSalesForDashboard } from "../api/sales";
+import { getMe } from "../api/users";
 
-/* ========== Utils ========== */
-const IDR = (n) => Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
-const N = (v) => (v == null ? 0 : Number(String(v).replace(/[^0-9.-]/g, "")) || 0);
-const shortIDR = (v) => (v>=1e9? (v/1e9).toFixed(1)+"M" : v>=1e6? (v/1e6).toFixed(1)+"jt" : v>=1e3? (v/1e3).toFixed(1)+"rb" : String(v));
-const dayKey = (d) => { 
-  const dt=new Date(d); 
-  if(isNaN(dt)) return ""; 
-  const y=dt.getFullYear(), m=String(dt.getMonth()+1).padStart(2,"0"), dd=String(dt.getDate()).padStart(2,"0"); 
-  return `${y}-${m}-${dd}`; 
-};
+import {
+  IDR, N, shortIDR, formatDate, generateDateRange, dayKey, PIE_COLORS, isDiscountSale,
+  payBadgeClass, methodLabel, normMethodKey
+} from "../lib/fmt";
+import { aggregateForRange } from "../lib/aggregate";
+import { exportToPDF } from "../lib/exportPdf";
 
-const formatDate = (d) => {
-  const dt = new Date(d);
-  return dt.toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
-};
-
-const PIE_COLORS = ["#2563EB","#7C3AED","#EC4899","#10B981","#F59E0B","#EF4444","#06B6D4","#8B5CF6"];
-
-const isDiscountItem = (it)=> N(it?.discount_nominal)>0 || N(it?.discount_percent)>0;
-const isDiscountSale = (s)=> N(s?.discount)>0 || (Array.isArray(s?.items) && s.items.some(isDiscountItem));
-
-/* ========== Date Range Generator ========== */
-function generateDateRange(from, to) {
-  const dates = [];
-  const start = new Date(from + "T00:00:00");
-  const end = new Date(to + "T23:59:59");
-  
-  for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
-    dates.push(dayKey(dt));
-  }
-  return dates;
-}
-
-/* ========== API Functions ========== */
-async function fetchSales(params, signal){
-  const { data } = await api.get("/api/sales", { params, signal });
-  return Array.isArray(data?.data) ? data.data : data;
-}
-
-async function fetchStores(signal){
-  try{ 
-    const { data } = await api.get("/api/store-locations", { params: { per_page:100 }, signal }); 
-    return Array.isArray(data?.data)?data.data:data; 
-  }catch{ 
-    return []; 
-  }
-}
-
-async function fetchCategories(signal){
-  try{ 
-    const { data } = await api.get("/api/categories", { params: { per_page:100 }, signal }); 
-    return Array.isArray(data?.data)?data.data:data; 
-  }catch{ 
-    return []; 
-  }
-}
-
-async function fetchSubCategories(signal){
-  try{ 
-    const { data } = await api.get("/api/sub-categories", { params: { per_page:100 }, signal }); 
-    return Array.isArray(data?.data)?data.data:data; 
-  }catch{ 
-    return []; 
-  }
-}
-
-/* ========== PDF Export Function ========== */
-async function exportToPDF(data, filters, aggRange) {
-  // Check if libraries are loaded
-  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
-    alert('Library PDF belum ter-load. Pastikan html2canvas dan jsPDF sudah di-include.');
-    return;
-  }
-
-  // Create temporary container
-  const tempContainer = document.createElement('div');
-  tempContainer.id = 'pdf-export-container';
-  tempContainer.style.cssText = `
-    position: absolute;
-    left: -9999px;
-    top: 0;
-    width: 794px;
-    background: white;
-    padding: 40px;
-    font-family: 'Segoe UI', Arial, sans-serif;
-  `;
-  
-  tempContainer.innerHTML = `
-    <div style="color: #1e293b;">
-      <!-- Header -->
-      <div style="background: linear-gradient(135deg, #2563EB 0%, #1e40af 100%); color: white; padding: 40px; text-align: center; margin: -40px -40px 30px -40px; border-radius: 0;">
-        <div style="font-size: 14px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 10px; opacity: 0.9;">DASHBOARD POS</div>
-        <div style="font-size: 32px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.5px;">Laporan Penjualan</div>
-        <div style="font-size: 16px; margin-bottom: 20px; opacity: 0.95;">Analisis Performa & Statistik Transaksi</div>
-        <div style="font-size: 14px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.3); opacity: 0.9;">
-          Periode: ${formatDate(filters.from)} - ${formatDate(filters.to)}
-        </div>
-      </div>
-
-      <!-- KPI Cards -->
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 40px;">
-        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
-          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">TOTAL REVENUE</div>
-          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${IDR(aggRange.revenue)}</div>
-          <div style="color: #64748b; font-size: 11px;">Pendapatan keseluruhan</div>
-        </div>
-        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
-          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">TOTAL TRANSAKSI</div>
-          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${aggRange.tx.toLocaleString("id-ID")}</div>
-          <div style="color: #64748b; font-size: 11px;">Jumlah transaksi</div>
-        </div>
-        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
-          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">AVG ORDER VALUE</div>
-          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${IDR(aggRange.aov)}</div>
-          <div style="color: #64748b; font-size: 11px;">Rata-rata per transaksi</div>
-        </div>
-        <div style="background: #f8fafc; border: 2px solid #e2e8f0; border-left: 5px solid #2563EB; border-radius: 10px; padding: 24px;">
-          <div style="color: #64748b; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;">TOTAL DISKON</div>
-          <div style="color: #1e293b; font-size: 24px; font-weight: 700; margin-bottom: 8px;">${IDR(aggRange.discounts)}</div>
-          <div style="color: #64748b; font-size: 11px;">${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon</div>
-        </div>
-      </div>
-
-      <!-- Kategori Terlaris -->
-      <div style="margin-bottom: 40px;">
-        <div style="font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #2563EB;">
-          Kategori Terlaris
-        </div>
-        <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
-          <thead style="background: linear-gradient(to bottom, #f8fafc, #f1f5f9);">
-            <tr>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0; width: 50px;">#</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Kategori</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Qty</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Transaksi</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Revenue</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Share</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${aggRange.topCategories.slice(0, 10).map((cat, idx) => `
-              <tr>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #2563EB; font-weight: 700;">${idx + 1}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; font-weight: 600;">${cat.name}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${cat.qty.toLocaleString("id-ID")}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${cat.txCount.toLocaleString("id-ID")}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right; font-weight: 600;">${IDR(cat.revenue)}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${cat.share.toFixed(1)}%</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Produk Terlaris -->
-      <div style="margin-bottom: 40px;">
-        <div style="font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #2563EB;">
-          Produk Terlaris
-        </div>
-        <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
-          <thead style="background: linear-gradient(to bottom, #f8fafc, #f1f5f9);">
-            <tr>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0; width: 50px;">#</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Produk</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Qty</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Revenue</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Share</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${aggRange.topProducts.slice(0, 10).map((prod, idx) => `
-              <tr>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #2563EB; font-weight: 700;">${idx + 1}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; font-weight: 600;">${prod.name}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${prod.qty.toLocaleString("id-ID")}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right; font-weight: 600;">${IDR(prod.revenue)}</td>
-                <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${prod.share.toFixed(1)}%</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Metode Pembayaran -->
-      <div style="margin-bottom: 40px;">
-        <div style="font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 3px solid #2563EB;">
-          Metode Pembayaran
-        </div>
-        <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;">
-          <thead style="background: linear-gradient(to bottom, #f8fafc, #f1f5f9);">
-            <tr>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: left; border-bottom: 2px solid #e2e8f0;">Metode</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Jumlah</th>
-              <th style="color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 14px 12px; text-align: right; border-bottom: 2px solid #e2e8f0;">Persentase</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${aggRange.paymentMix.map((pay) => {
-              const percentage = aggRange.revenue > 0 ? (pay.amount / aggRange.revenue * 100) : 0;
-              return `
-                <tr>
-                  <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; font-weight: 600;">${pay.method}</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right; font-weight: 600;">${IDR(pay.amount)}</td>
-                  <td style="padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 12px; color: #1e293b; text-align: right;">${percentage.toFixed(1)}%</td>
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Footer -->
-      <div style="margin-top: 60px; padding-top: 25px; border-top: 2px solid #e2e8f0; text-align: center;">
-        <div style="color: #64748b; font-size: 11px; margin-bottom: 8px;">
-          Laporan dibuat pada: ${new Date().toLocaleString("id-ID", { 
-            day: "2-digit", 
-            month: "long", 
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit"
-          })}
-        </div>
-        <div style="color: #2563EB; font-size: 13px; font-weight: 700;">Dashboard POS - Analytics Report</div>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(tempContainer);
-
+/* ========== Master data ringan ========== */
+async function fetchStores(signal) {
   try {
-    const canvas = await html2canvas(tempContainer, {
-      scale: 2,
-      backgroundColor: "#ffffff",
-      logging: false,
-      useCORS: true,
-    });
-
-    const imgData = canvas.toDataURL("image/png");
-    const pageWidthMm = 210;
-    const pageHeightMm = 297;
-    const marginMm = 10;
-    const imgWidthMm = pageWidthMm - (marginMm * 2);
-    const imgHeightMm = (canvas.height * imgWidthMm) / canvas.width;
-
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({
-      orientation: "portrait",
-      unit: "mm",
-      format: "a4",
-    });
-
-    let heightLeft = imgHeightMm;
-    let position = marginMm;
-
-    pdf.addImage(imgData, "PNG", marginMm, position, imgWidthMm, imgHeightMm);
-    heightLeft -= (pageHeightMm - marginMm * 2);
-
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeightMm + marginMm;
-      pdf.addPage();
-      pdf.addImage(imgData, "PNG", marginMm, position, imgWidthMm, imgHeightMm);
-      heightLeft -= (pageHeightMm - marginMm * 2);
-    }
-
-    window.open(pdf.output("bloburl"), "_blank");
-    
-  } catch (error) {
-    console.error("Error generating PDF:", error);
-    alert("Gagal membuat PDF. Pastikan library html2canvas dan jsPDF sudah ter-load.");
-  } finally {
-    if (document.body.contains(tempContainer)) {
-      document.body.removeChild(tempContainer);
-    }
-  }
+    const { data } = await api.get("/api/store-locations", { params: { per_page: 100 }, signal });
+    return Array.isArray(data?.data) ? data.data : data;
+  } catch { return []; }
+}
+async function fetchCategories(signal) {
+  try {
+    const { data } = await api.get("/api/categories", { params: { per_page: 100 }, signal });
+    return Array.isArray(data?.data) ? data.data : data;
+  } catch { return []; }
+}
+async function fetchSubCategories(signal) {
+  try {
+    const { data } = await api.get("/api/sub-categories", { params: { per_page: 100 }, signal });
+    return Array.isArray(data?.data) ? data.data : data;
+  } catch { return []; }
 }
 
-/* ========== Components ========== */
-function KpiCard({ title, value, delta, icon: Icon, trend }) {
-  const isPositive = delta >= 0;
-  
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-shadow">
-      <div className="flex items-start justify-between mb-3">
-        <div className="p-2 bg-blue-50 rounded-lg">
-          <Icon className="w-5 h-5 text-blue-600" />
-        </div>
-        {delta !== null && (
-          <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-            isPositive ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
-          }`}>
-            {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-            {Math.abs(delta).toFixed(1)}%
-          </div>
-        )}
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm text-slate-600 font-medium">{title}</p>
-        <p className="text-2xl font-bold text-slate-900">{value}</p>
-        {trend && <p className="text-xs text-slate-500">{trend}</p>}
-      </div>
-    </div>
-  );
-}
-
-function FilterBar({ filters, setFilters, stores, onExport, isLoading }) {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
-        <div className="lg:col-span-4">
-          <label className="block text-sm font-medium text-slate-700 mb-2">
-            Pencarian
-          </label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text"
-              value={filters.search}
-              onChange={(e) => setFilters(f => ({ ...f, search: e.target.value }))}
-              placeholder="Cari invoice, produk, kasir..."
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="lg:col-span-3">
-          <label className="block text-sm font-medium text-slate-700 mb-2">
-            Dari Tanggal
-          </label>
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="date"
-              value={filters.from}
-              onChange={(e) => setFilters(f => ({ ...f, from: e.target.value }))}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="lg:col-span-3">
-          <label className="block text-sm font-medium text-slate-700 mb-2">
-            Sampai Tanggal
-          </label>
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="date"
-              value={filters.to}
-              onChange={(e) => setFilters(f => ({ ...f, to: e.target.value }))}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="lg:col-span-2">
-          <label className="block text-sm font-medium text-slate-700 mb-2">
-            Cabang
-          </label>
-          <div className="relative">
-            <Store className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none z-10" />
-            <select
-              value={filters.storeId}
-              onChange={(e) => setFilters(f => ({ ...f, storeId: e.target.value }))}
-              className="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
-            >
-              <option value="">Semua</option>
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-200">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filters.onlyDiscount}
-            onChange={(e) => setFilters(f => ({ ...f, onlyDiscount: e.target.checked }))}
-            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
-          />
-          <Tag className="w-4 h-4 text-slate-600" />
-          <span className="text-sm font-medium text-slate-700">Hanya Transaksi Diskon</span>
-        </label>
-
-        <button
-          onClick={onExport}
-          disabled={isLoading}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium disabled:opacity-50"
-        >
-          <Download className="w-4 h-4" />
-          Export PDF
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ChartCard({ title, children, className = "", action }) {
-  return (
-    <div className={`bg-white rounded-xl border border-slate-200 p-5 shadow-sm ${className}`}>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function DataTable({ columns, data, emptyMessage = "Tidak ada data" }) {
-  return (
-    <div className="overflow-x-auto -mx-5">
-      <div className="inline-block min-w-full align-middle px-5">
-        <table className="min-w-full divide-y divide-slate-200">
-          <thead>
-            <tr>
-              {columns.map((col, idx) => (
-                <th
-                  key={idx}
-                  className={`px-3 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider ${
-                    col.align === "right" ? "text-right" : ""
-                  } ${col.width || ""}`}
-                >
-                  {col.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {data.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className="px-3 py-8 text-center text-sm text-slate-500">
-                  {emptyMessage}
-                </td>
-              </tr>
-            ) : (
-              data.map((row, idx) => (
-                <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                  {columns.map((col, colIdx) => {
-                    let value = row[col.key];
-                    if (col.render) value = col.render(value, row, idx);
-                    return (
-                      <td
-                        key={colIdx}
-                        className={`px-3 py-3 text-sm text-slate-900 ${
-                          col.align === "right" ? "text-right" : ""
-                        }`}
-                      >
-                        {value}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-/* ========== Aggregation ========== */
-function aggregateForRange(sales, from, to, categoriesMap, subCategoriesMap) {
-  let revenue = 0, tx = 0, discounts = 0, items = 0;
-  const byDate = {};
-  const byDateTotal = {};
-  const byCategory = {};
-  const byCategoryForPie = {};
-  const payMix = {};
-  const byProduct = {};
-  const byProductDiscounted = {};
-  const byCategoryStats = {};
-  const bySubCategory = {};
-
-  const allDates = generateDateRange(from, to);
-  allDates.forEach(date => {
-    byDate[date] = { date, discount: 0, non_discount: 0 };
-    byDateTotal[date] = { date, total: 0 };
-  });
-
-  for (const s of sales) {
-    const total = N(s?.total);
-    const dKey = dayKey(s?.created_at || Date.now());
-    const itemsArr = Array.isArray(s?.items) ? s.items : [];
-
-    revenue += total;
-    tx += 1;
-    discounts += N(s?.discount);
-    items += itemsArr.reduce((a, it) => a + N(it?.qty ?? it?.quantity ?? 1), 0);
-
-    if (byDate[dKey]) {
-      if (isDiscountSale(s)) {
-        byDate[dKey].discount += total;
-      } else {
-        byDate[dKey].non_discount += total;
-      }
-    }
-
-    if (byDateTotal[dKey]) {
-      byDateTotal[dKey].total += total;
-    }
-
-    const pays = Array.isArray(s?.payments) ? s.payments : [];
-    if (pays.length === 0) {
-      payMix["Cash"] = (payMix["Cash"] || 0) + total;
-    } else {
-      for (const p of pays) {
-        payMix[p?.method || "Cash"] = (payMix[p?.method || "Cash"] || 0) + N(p?.amount);
-      }
-    }
-
-    for (const it of itemsArr) {
-      const product = it?.product || {};
-      const categoryId = product?.category_id || null;
-      const subCategoryId = product?.sub_category_id || null;
-      
-      const categoryName = categoryId && categoriesMap[categoryId] ? categoriesMap[categoryId].name : "Uncategorized";
-      const subCategoryName = subCategoryId && subCategoriesMap[subCategoryId] ? subCategoriesMap[subCategoryId].name : "Other";
-      
-      const productName = product?.name || it?.name || `Product #${it?.product_id || "?"}`;
-      const qty = N(it?.qty ?? it?.quantity ?? 1);
-      const lineTotal = N(it?.line_total ?? it?.subtotal ?? N(it?.price) * qty);
-
-      if (!byCategoryStats[categoryName]) {
-        byCategoryStats[categoryName] = { name: categoryName, qty: 0, revenue: 0, tx: new Set() };
-      }
-      byCategoryStats[categoryName].qty += qty;
-      byCategoryStats[categoryName].revenue += lineTotal;
-      byCategoryStats[categoryName].tx.add(s.id);
-
-      byCategoryForPie[categoryName] = (byCategoryForPie[categoryName] || 0) + lineTotal;
-
-      const subKey = `${categoryName}::${subCategoryName}`;
-      if (!bySubCategory[subKey]) {
-        bySubCategory[subKey] = { category: categoryName, subCategory: subCategoryName, qty: 0, revenue: 0, tx: new Set() };
-      }
-      bySubCategory[subKey].qty += qty;
-      bySubCategory[subKey].revenue += lineTotal;
-      bySubCategory[subKey].tx.add(s.id);
-
-      if (!byCategory[dKey]) byCategory[dKey] = { date: dKey };
-      byCategory[dKey][categoryName] = (byCategory[dKey][categoryName] || 0) + lineTotal;
-
-      byProduct[productName] ||= { key: productName, name: productName, qty: 0, revenue: 0 };
-      byProduct[productName].qty += qty;
-      byProduct[productName].revenue += lineTotal;
-
-      if (isDiscountItem(it) || N(s?.discount) > 0) {
-        byProductDiscounted[productName] ||= { key: productName, name: productName, qty: 0, revenue: 0, used: 0 };
-        byProductDiscounted[productName].qty += qty;
-        byProductDiscounted[productName].revenue += lineTotal;
-        byProductDiscounted[productName].used += 1;
-      }
-    }
-  }
-
-  const aov = tx ? revenue / tx : 0;
-  const discountRate = tx ? (sales.filter(isDiscountSale).length / tx) : 0;
-
-  const trendStacked = Object.values(byDate).sort((a, b) => (a.date < b.date ? -1 : 1));
-  const trendTotal = Object.values(byDateTotal).sort((a, b) => (a.date < b.date ? -1 : 1));
-  const categoryTrend = Object.values(byCategory).sort((a, b) => (a.date < b.date ? -1 : 1));
-  const paymentMix = Object.entries(payMix).map(([method, amount]) => ({ method, amount }));
-  const categoryPie = Object.entries(byCategoryForPie).map(([category, amount]) => ({ category, amount }));
-
-  const topProducts = Object.values(byProduct)
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10)
-    .map(p => ({ ...p, share: revenue ? (p.revenue / revenue * 100) : 0 }));
-
-  const topDiscountedProducts = Object.values(byProductDiscounted)
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10)
-    .map(p => ({ ...p, discount_used: tx ? (p.used / tx * 100) : 0 }));
-
-  const topCategories = Object.values(byCategoryStats)
-    .map(c => ({ ...c, txCount: c.tx.size }))
-    .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, 10)
-    .map(c => ({ ...c, share: revenue ? (c.revenue / revenue * 100) : 0 }));
-
-  const topSubCategories = Object.values(bySubCategory)
-    .map(c => ({ ...c, txCount: c.tx.size }))
-    .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, 15);
-
-  const recentSales = [...sales]
-    .sort((a, b) => (a.created_at > b.created_at ? -1 : 1))
-    .slice(0, 10);
-
+/* ========== Util aman untuk shape /api/users/me ========== */
+const pickMe = (raw) => {
+  const me = raw?.data ?? raw ?? {};
   return {
-    revenue,
-    tx,
-    discounts,
-    aov,
-    discountRate,
-    trendStacked,
-    trendTotal,
-    categoryTrend,
-    paymentMix,
-    categoryPie,
-    topProducts,
-    topDiscountedProducts,
-    topCategories,
-    topSubCategories,
-    recentSales,
+    id: me.id ?? null,
+    role: String(me.role ?? "").toLowerCase(),
+    store_location_id: me.store_location_id ?? me.storeLocationId ?? me.store_location?.id ?? null,
   };
-}
+};
 
-/* ========== Main Component ========== */
 export default function HomePage() {
   const todayISO = new Date().toISOString().slice(0, 10);
 
@@ -645,80 +74,79 @@ export default function HomePage() {
   const [subCategorySortOrder, setSubCategorySortOrder] = React.useState("desc");
   const [productSortOrder, setProductSortOrder] = React.useState("desc");
   const [discountProductSortOrder, setDiscountProductSortOrder] = React.useState("desc");
+  const [matrixOpen, setMatrixOpen] = React.useState(false);
 
-  const storesQ = useQuery({
-    queryKey: ["stores"],
-    queryFn: ({ signal }) => fetchStores(signal),
+  // === User (pakai /api/users/me) ===
+  const meQ = useQuery({
+    queryKey: ["me"],
+    queryFn: async ({ signal }) => pickMe(await getMe(signal)),
     staleTime: 5 * 60_000,
   });
+  const me = meQ.data;
+  const isCashier = (me?.role || "") === "kasir";
 
-  const categoriesQ = useQuery({
-    queryKey: ["categories"],
-    queryFn: ({ signal }) => fetchCategories(signal),
-    staleTime: 5 * 60_000,
-  });
+  // Kunci filter saat kasir (1 hari + cabang user)
+  React.useEffect(() => {
+    if (!me || !isCashier) return;
+    const today = new Date().toISOString().slice(0, 10);
+    setFilters((prev) => ({
+      ...prev,
+      from: today,
+      to: today,
+      storeId: me.store_location_id ? String(me.store_location_id) : "",
+      search: "",
+      onlyDiscount: false,
+    }));
+  }, [isCashier, me]);
 
-  const subCategoriesQ = useQuery({
-    queryKey: ["subCategories"],
-    queryFn: ({ signal }) => fetchSubCategories(signal),
-    staleTime: 5 * 60_000,
-  });
+  // Master data
+  const storesQ = useQuery({ queryKey: ["stores"], queryFn: ({ signal }) => fetchStores(signal), staleTime: 5 * 60_000 });
+  const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: ({ signal }) => fetchCategories(signal), staleTime: 5 * 60_000 });
+  const subCategoriesQ = useQuery({ queryKey: ["subCategories"], queryFn: ({ signal }) => fetchSubCategories(signal), staleTime: 5 * 60_000 });
 
+  // SALES untuk dashboard (menunggu data user kalau kasir)
   const salesQ = useQuery({
-    queryKey: ["sales", filters],
-    queryFn: ({ signal }) =>
-      fetchSales(
-        {
-          search: filters.search,
-          from: filters.from,
-          to: filters.to,
-          store_location_id: filters.storeId || undefined,
-          only_discount: filters.onlyDiscount || undefined,
-        },
-        signal
-      ),
+    queryKey: ["sales-dashboard", {
+      from: filters.from,
+      to: filters.to,
+      store_location_id: filters.storeId || undefined,
+      only_discount: filters.onlyDiscount || undefined,
+      code: filters.search || undefined,
+    }],
+    queryFn: async ({ queryKey, signal }) => {
+      const [, params] = queryKey;
+      return listSalesForDashboard(params, signal);
+    },
+    enabled: !meQ.isLoading && (!isCashier || !!filters.from), // tunggu me siap jika kasir
     keepPreviousData: true,
     staleTime: 60_000,
   });
 
   const salesRaw = salesQ.data || [];
-  const categoriesData = categoriesQ.data || [];
-  const subCategoriesData = subCategoriesQ.data || [];
-
-  const categoriesMap = React.useMemo(() => {
-    const map = {};
-    categoriesData.forEach(cat => {
-      map[cat.id] = cat;
-    });
-    return map;
-  }, [categoriesData]);
-
-  const subCategoriesMap = React.useMemo(() => {
-    const map = {};
-    subCategoriesData.forEach(sub => {
-      map[sub.id] = sub;
-    });
-    return map;
-  }, [subCategoriesData]);
-
-  const filterNonDate = React.useCallback(
-    (s) => {
-      if (filters.storeId) {
-        const sl = s?.cashier?.store_location || s?.cashier?.storeLocation;
-        const sid = sl?.id ?? s?.store_location_id ?? null;
-        if (String(sid || "") !== String(filters.storeId)) return false;
-      }
-      if (filters.onlyDiscount && !isDiscountSale(s)) return false;
-      if (filters.search) {
-        const hay = `${s?.code || ""} ${s?.customer_name || ""} ${s?.cashier?.name || ""} ${JSON.stringify(
-          s?.items || []
-        )}`.toLowerCase();
-        if (!hay.includes(filters.search.toLowerCase())) return false;
-      }
-      return true;
-    },
-    [filters]
+  const categoriesMap = React.useMemo(
+    () => Object.fromEntries((categoriesQ.data || []).map((c) => [c.id, c])),
+    [categoriesQ.data]
   );
+  const subCategoriesMap = React.useMemo(
+    () => Object.fromEntries((subCategoriesQ.data || []).map((s) => [s.id, s])),
+    [subCategoriesQ.data]
+  );
+
+  // Filter FE
+  const filterNonDate = React.useCallback((s) => {
+    if (String(s?.status || "").toLowerCase() === "void") return false;
+    if (filters.storeId) {
+      const sl = s?.cashier?.store_location || s?.cashier?.storeLocation;
+      const sid = sl?.id ?? s?.store_location_id ?? null;
+      if (String(sid || "") !== String(filters.storeId)) return false;
+    }
+    if (filters.onlyDiscount && !isDiscountSale(s)) return false;
+    if (filters.search) {
+      const hay = `${s?.code || ""} ${s?.customer_name || ""} ${s?.cashier?.name || ""} ${JSON.stringify(s?.items || [])}`.toLowerCase();
+      if (!hay.includes(filters.search.toLowerCase())) return false;
+    }
+    return true;
+  }, [filters]);
 
   const rangeSales = React.useMemo(() => {
     const fromTs = filters.from ? new Date(filters.from + "T00:00:00").getTime() : -Infinity;
@@ -730,6 +158,7 @@ export default function HomePage() {
     });
   }, [salesRaw, filters.from, filters.to, filterNonDate]);
 
+  // Periode sebelumnya (delta %)
   const prevFrom = React.useMemo(() => {
     const start = new Date(filters.from + "T00:00:00");
     const end = new Date(filters.to + "T23:59:59");
@@ -747,56 +176,79 @@ export default function HomePage() {
     });
   }, [salesRaw, prevFrom, filterNonDate]);
 
-  const aggRange = React.useMemo(() => 
-    aggregateForRange(rangeSales, filters.from, filters.to, categoriesMap, subCategoriesMap), 
+  // Agregasi
+  const aggRange = React.useMemo(
+    () => aggregateForRange(rangeSales, filters.from, filters.to, categoriesMap, subCategoriesMap),
     [rangeSales, filters.from, filters.to, categoriesMap, subCategoriesMap]
   );
-  
   const aggPrev = React.useMemo(() => {
     const prevFromKey = dayKey(prevFrom.start);
     const prevToKey = dayKey(prevFrom.end);
     return aggregateForRange(prevSales, prevFromKey, prevToKey, categoriesMap, subCategoriesMap);
   }, [prevSales, prevFrom, categoriesMap, subCategoriesMap]);
 
-  const delta = (now, prev) => (prev > 0 ? ((now - prev) / prev) * 100 : null);
+  const pctDelta = React.useCallback((now, prev) => {
+    const EPS = 1e-6;
+    if (prev == null || !isFinite(prev) || Math.abs(prev) < EPS) return null;
+    return ((now - prev) / prev) * 100;
+  }, []);
 
+  // Tabel turunan
   const categories = React.useMemo(() => {
     const cats = new Set();
-    aggRange.topSubCategories.forEach(s => cats.add(s.category));
+    aggRange.topSubCategories.forEach((s) => cats.add(s.category));
     return Array.from(cats).sort();
   }, [aggRange.topSubCategories]);
 
   const filteredSubCategories = React.useMemo(() => {
     let data = aggRange.topSubCategories;
-    if (categoryFilter) {
-      data = data.filter(s => s.category === categoryFilter);
-    }
-    return data.sort((a, b) => {
-      return subCategorySortOrder === "desc" ? b.revenue - a.revenue : a.revenue - b.revenue;
-    });
+    if (categoryFilter) data = data.filter((s) => s.category === categoryFilter);
+    return data.sort((a, b) => (subCategorySortOrder === "desc" ? b.revenue - a.revenue : a.revenue - b.revenue));
   }, [aggRange.topSubCategories, categoryFilter, subCategorySortOrder]);
 
-  const sortedCategories = React.useMemo(() => {
-    return [...aggRange.topCategories].sort((a, b) => {
-      return categorySortOrder === "desc" ? b.revenue - a.revenue : a.revenue - b.revenue;
-    });
-  }, [aggRange.topCategories, categorySortOrder]);
+  const sortedCategories = React.useMemo(
+    () => [...aggRange.topCategories].sort((a, b) => (categorySortOrder === "desc" ? b.revenue - a.revenue : a.revenue - b.revenue)),
+    [aggRange.topCategories, categorySortOrder]
+  );
 
-  const sortedProducts = React.useMemo(() => {
-    return [...aggRange.topProducts].sort((a, b) => {
-      return productSortOrder === "desc" ? b.qty - a.qty : a.qty - b.qty;
-    });
-  }, [aggRange.topProducts, productSortOrder]);
+  const sortedProducts = React.useMemo(
+    () => [...aggRange.topProducts].sort((a, b) => (productSortOrder === "desc" ? b.qty - a.qty : a.qty - b.qty)),
+    [aggRange.topProducts, productSortOrder]
+  );
 
-  const sortedDiscountProducts = React.useMemo(() => {
-    return [...aggRange.topDiscountedProducts].sort((a, b) => {
-      return discountProductSortOrder === "desc" ? b.qty - a.qty : a.qty - b.qty;
-    });
-  }, [aggRange.topDiscountedProducts, discountProductSortOrder]);
+  const sortedDiscountProducts = React.useMemo(
+    () => [...aggRange.topDiscountedProducts].sort((a, b) => (discountProductSortOrder === "desc" ? b.qty - a.qty : a.qty - b.qty)),
+    [aggRange.topDiscountedProducts, discountProductSortOrder]
+  );
 
-  const handleExport = () => {
-    exportToPDF(rangeSales, filters, aggRange);
-  };
+  const handleExport = () => exportToPDF(rangeSales, filters, aggRange);
+
+  // Matriks harian
+  const dateList = React.useMemo(() => generateDateRange(filters.from, filters.to), [filters.from, filters.to]);
+  const byDay = React.useMemo(() => {
+    const map = new Map();
+    dateList.forEach((d) => map.set(d, []));
+    for (const s of rangeSales) {
+      const d = dayKey(s?.created_at || s?.createdAt || Date.now());
+      if (!map.has(d)) map.set(d, []);
+      map.get(d).push(s);
+    }
+    for (const d of map.keys()) {
+      map.set(d, (map.get(d) || []).filter((x) => String(x?.status || "").toLowerCase() !== "void"));
+    }
+    return map;
+  }, [rangeSales, dateList]);
+
+  const dailyRevenue = React.useMemo(() => {
+    const map = new Map();
+    dateList.forEach((d) => map.set(d, 0));
+    for (const s of rangeSales) {
+      if (String(s?.status || "").toLowerCase() === "void") continue;
+      const d = dayKey(s?.created_at || s?.createdAt || Date.now());
+      map.set(d, (map.get(d) || 0) + N(s.total));
+    }
+    return map;
+  }, [rangeSales, dateList]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -808,12 +260,24 @@ export default function HomePage() {
               Periode: {formatDate(filters.from)} - {formatDate(filters.to)}
             </p>
           </div>
-          {salesQ.isFetching && (
-            <div className="text-sm text-slate-600 flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-              Memuat data...
-            </div>
-          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setMatrixOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 text-slate-800 rounded-lg hover:bg-slate-50"
+              title="Lihat matriks transaksi harian"
+            >
+              <TableIcon className="w-4 h-4" />
+              <span className="text-sm font-medium">Matriks Harian</span>
+            </button>
+
+            {salesQ.isFetching && (
+              <div className="text-sm text-slate-600 flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                Memuat data...
+              </div>
+            )}
+          </div>
         </div>
 
         <FilterBar
@@ -822,39 +286,18 @@ export default function HomePage() {
           stores={storesQ.data || []}
           onExport={handleExport}
           isLoading={salesQ.isFetching}
+          locked={isCashier}
         />
 
+        {/* KPI */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-          <KpiCard
-            title="Total Revenue"
-            value={IDR(aggRange.revenue)}
-            delta={delta(aggRange.revenue, aggPrev.revenue)}
-            icon={DollarSign}
-            trend="vs periode sebelumnya"
-          />
-          <KpiCard
-            title="Total Transaksi"
-            value={aggRange.tx.toLocaleString("id-ID")}
-            delta={delta(aggRange.tx, aggPrev.tx)}
-            icon={Receipt}
-            trend="vs periode sebelumnya"
-          />
-          <KpiCard
-            title="Average Order Value"
-            value={IDR(aggRange.aov)}
-            delta={delta(aggRange.aov, aggPrev.aov)}
-            icon={ShoppingCart}
-            trend="rata-rata per transaksi"
-          />
-          <KpiCard
-            title="Total Diskon"
-            value={IDR(aggRange.discounts)}
-            delta={delta(aggRange.discounts, aggPrev.discounts)}
-            icon={Percent}
-            trend={`${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon`}
-          />
+          <KpiCard title="Total Revenue" value={IDR(aggRange.revenue)} delta={pctDelta(aggRange.revenue, aggPrev.revenue)} icon={DollarSign} trend="vs periode sebelumnya" />
+          <KpiCard title="Total Transaksi" value={aggRange.tx.toLocaleString("id-ID")} delta={pctDelta(aggRange.tx, aggPrev.tx)} icon={Receipt} trend="vs periode sebelumnya" />
+          <KpiCard title="Average Order Value" value={IDR(aggRange.aov)} delta={pctDelta(aggRange.aov, aggPrev.aov)} icon={ShoppingCart} trend="rata-rata per transaksi" />
+          <KpiCard title="Total Diskon" value={IDR(aggRange.discounts)} delta={pctDelta(aggRange.discounts, aggPrev.discounts)} icon={Percent} trend={`${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon`} />
         </div>
 
+        {/* Charts */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
           <ChartCard title="Pendapatan" className="xl:col-span-2">
             <div className="h-80">
@@ -867,30 +310,11 @@ export default function HomePage() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis 
-                    dataKey="date" 
-                    tickFormatter={formatDate}
-                    tick={{ fontSize: 12 }}
-                    stroke="#64748b"
-                  />
-                  <YAxis 
-                    tickFormatter={shortIDR} 
-                    tick={{ fontSize: 12 }}
-                    stroke="#64748b"
-                  />
-                  <Tooltip 
-                    formatter={(v) => IDR(v)}
-                    contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }}
-                  />
+                  <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 12 }} stroke="#64748b" />
+                  <YAxis tickFormatter={shortIDR} tick={{ fontSize: 12 }} stroke="#64748b" />
+                  <Tooltip formatter={(v) => IDR(v)} contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }} />
                   <Legend wrapperStyle={{ fontSize: "13px" }} />
-                  <Area
-                    type="monotone"
-                    dataKey="total"
-                    name="Total Pendapatan"
-                    stroke="#2563EB"
-                    fill="url(#colorTotal)"
-                    strokeWidth={2}
-                  />
+                  <Area type="monotone" dataKey="total" name="Total Pendapatan" stroke="#2563EB" fill="url(#colorTotal)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -914,10 +338,7 @@ export default function HomePage() {
                       <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip 
-                    formatter={(v) => IDR(v)}
-                    contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }}
-                  />
+                  <Tooltip formatter={(v) => IDR(v)} contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }} />
                   <Legend wrapperStyle={{ fontSize: "13px" }} />
                 </PieChart>
               </ResponsiveContainer>
@@ -931,40 +352,12 @@ export default function HomePage() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={aggRange.trendStacked} margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis 
-                    dataKey="date" 
-                    tickFormatter={formatDate}
-                    tick={{ fontSize: 12 }}
-                    stroke="#64748b"
-                  />
-                  <YAxis 
-                    tickFormatter={shortIDR}
-                    tick={{ fontSize: 12 }}
-                    stroke="#64748b"
-                  />
-                  <Tooltip 
-                    formatter={(v) => IDR(v)}
-                    contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }}
-                  />
+                  <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 12 }} stroke="#64748b" />
+                  <YAxis tickFormatter={shortIDR} tick={{ fontSize: 12 }} stroke="#64748b" />
+                  <Tooltip formatter={(v) => IDR(v)} contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }} />
                   <Legend wrapperStyle={{ fontSize: "13px" }} />
-                  <Line
-                    type="monotone"
-                    dataKey="discount"
-                    name="Diskon"
-                    stroke="#F97316"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    activeDot={{ r: 5 }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="non_discount"
-                    name="Non-Diskon"
-                    stroke="#2563EB"
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                    activeDot={{ r: 5 }}
-                  />
+                  <Line type="monotone" dataKey="discount" name="Diskon" stroke="#F97316" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="non_discount" name="Non-Diskon" stroke="#2563EB" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -988,10 +381,7 @@ export default function HomePage() {
                       <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip 
-                    formatter={(v) => IDR(v)}
-                    contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }}
-                  />
+                  <Tooltip formatter={(v) => IDR(v)} contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }} />
                   <Legend wrapperStyle={{ fontSize: "13px" }} />
                 </PieChart>
               </ResponsiveContainer>
@@ -1000,11 +390,11 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <ChartCard 
+          <ChartCard
             title="Kategori Terlaris"
             action={
               <button
-                onClick={() => setCategorySortOrder(o => o === "desc" ? "asc" : "desc")}
+                onClick={() => setCategorySortOrder((o) => (o === "desc" ? "asc" : "desc"))}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                 title={categorySortOrder === "desc" ? "Urutkan: Tertinggi ke Terendah" : "Urutkan: Terendah ke Tertinggi"}
               >
@@ -1012,7 +402,7 @@ export default function HomePage() {
               </button>
             }
           >
-            <DataTable
+            <SimpleTable
               columns={[
                 { key: "rank", label: "#", width: "w-12", render: (_, __, idx) => idx + 1 },
                 { key: "name", label: "Kategori" },
@@ -1025,37 +415,40 @@ export default function HomePage() {
             />
           </ChartCard>
 
-          <ChartCard 
+          <ChartCard
             title="Sub-Kategori Terlaris"
             action={
+              <div className="relative min-w-[220px]">
+                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                  className="w-full pl-10 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
+                  title="Filter Kategori"
+                >
+                  <option value="">Semua Kategori</option>
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+                <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+            }
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="text-xs text-slate-500">
+                {categoryFilter ? <>Filter: <span className="font-semibold text-slate-700">{categoryFilter}</span></> : "Semua Kategori"}
+              </div>
               <button
-                onClick={() => setSubCategorySortOrder(o => o === "desc" ? "asc" : "desc")}
+                onClick={() => setSubCategorySortOrder((o) => (o === "desc" ? "asc" : "desc"))}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
                 title={subCategorySortOrder === "desc" ? "Urutkan: Tertinggi ke Terendah" : "Urutkan: Terendah ke Tertinggi"}
               >
                 <ArrowUpDown className="w-4 h-4 text-slate-600" />
               </button>
-            }
-          >
-            <div className="mb-4">
-              <div className="relative">
-                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none z-10" />
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="w-full pl-10 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
-                >
-                  <option value="">Semua Kategori</option>
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              </div>
             </div>
-            <DataTable
+
+            <SimpleTable
               columns={[
                 { key: "rank", label: "#", width: "w-12", render: (_, __, idx) => idx + 1 },
                 { key: "category", label: "Kategori" },
@@ -1069,19 +462,15 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <ChartCard 
+          <ChartCard
             title="Produk Terlaris (By Quantity)"
             action={
-              <button
-                onClick={() => setProductSortOrder(o => o === "desc" ? "asc" : "desc")}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                title={productSortOrder === "desc" ? "Urutkan: Tertinggi ke Terendah" : "Urutkan: Terendah ke Tertinggi"}
-              >
+              <button onClick={() => setProductSortOrder((o) => (o === "desc" ? "asc" : "desc"))} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                 <ArrowUpDown className="w-4 h-4 text-slate-600" />
               </button>
             }
           >
-            <DataTable
+            <SimpleTable
               columns={[
                 { key: "rank", label: "#", width: "w-12", render: (_, __, idx) => idx + 1 },
                 { key: "name", label: "Produk" },
@@ -1093,19 +482,15 @@ export default function HomePage() {
             />
           </ChartCard>
 
-          <ChartCard 
+          <ChartCard
             title="Produk Dengan Diskon Terlaris"
             action={
-              <button
-                onClick={() => setDiscountProductSortOrder(o => o === "desc" ? "asc" : "desc")}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                title={discountProductSortOrder === "desc" ? "Urutkan: Tertinggi ke Terendah" : "Urutkan: Terendah ke Tertinggi"}
-              >
+              <button onClick={() => setDiscountProductSortOrder((o) => (o === "desc" ? "asc" : "desc"))} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                 <ArrowUpDown className="w-4 h-4 text-slate-600" />
               </button>
             }
           >
-            <DataTable
+            <SimpleTable
               columns={[
                 { key: "rank", label: "#", width: "w-12", render: (_, __, idx) => idx + 1 },
                 { key: "name", label: "Produk" },
@@ -1119,40 +504,36 @@ export default function HomePage() {
         </div>
 
         <ChartCard title="Transaksi Terbaru">
-          <DataTable
+          <SimpleTable
             columns={[
-              { key: "code", label: "Invoice", render: (_, row) => (
-                <span className="font-semibold text-blue-600">{row.code || row.id}</span>
-              )},
-              { key: "created_at", label: "Waktu", render: (v) => 
-                new Date(v).toLocaleString("id-ID", { 
-                  day: "2-digit", 
-                  month: "short", 
-                  hour: "2-digit", 
-                  minute: "2-digit" 
-                })
-              },
+              { key: "code", label: "Invoice", render: (_, row) => <span className="font-semibold text-blue-600">{row.code || row.id}</span> },
+              { key: "created_at", label: "Waktu", render: (v) => new Date(v).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) },
               { key: "cashier", label: "Kasir", render: (_, row) => row?.cashier?.name || "-" },
-              { key: "store", label: "Toko", render: (_, row) => {
-                const sl = row?.cashier?.store_location || row?.cashier?.storeLocation;
-                return sl?.name || "-";
-              }},
-              { key: "items", label: "Item", align: "right", render: (_, row) => {
-                const items = Array.isArray(row?.items) ? row.items : [];
-                return items.reduce((a, it) => a + N(it?.qty ?? it?.quantity ?? 1), 0);
-              }},
-              { key: "total", label: "Total", align: "right", render: (v) => (
-                <span className="font-semibold">{IDR(N(v))}</span>
-              )},
+              { key: "store", label: "Toko", render: (_, row) => (row?.cashier?.store_location || row?.cashier?.storeLocation)?.name || "-" },
+              { key: "items", label: "Item", align: "right", render: (_, row) =>
+                  (Array.isArray(row?.items) ? row.items : []).reduce((a, it) => a + N(it?.qty ?? it?.quantity ?? 1), 0)
+                },
+              { key: "total", label: "Total", align: "right", render: (v) => <span className="font-semibold">{IDR(N(v))}</span> },
               { key: "payments", label: "Metode", render: (_, row) => {
-                const pays = Array.isArray(row?.payments) ? row.payments : [];
-                const methods = pays.map(p => p?.method).filter(Boolean);
-                return methods.length > 0 ? (
-                  <span className="text-xs px-2 py-1 bg-slate-100 rounded-full">
-                    {methods.join(", ")}
-                  </span>
-                ) : "-";
-              }},
+                  const pays = Array.isArray(row?.payments) ? row.payments : [];
+                  if (!pays.length) {
+                    return (
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${payBadgeClass("cash")}`}>
+                        Cash
+                      </span>
+                    );
+                  }
+                  const uniq = [...new Set(pays.map((p) => normMethodKey(p?.method)))].filter(Boolean);
+                  return (
+                    <div className="flex flex-wrap gap-1">
+                      {uniq.map((k, i) => (
+                        <span key={`${k}-${i}`} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${payBadgeClass(k)}`}>
+                          {methodLabel(k)}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                }},
             ]}
             data={aggRange.recentSales}
             emptyMessage="Belum ada transaksi dalam periode ini"
@@ -1160,13 +541,17 @@ export default function HomePage() {
         </ChartCard>
 
         <div className="flex items-center justify-between text-sm text-slate-500 pb-4">
-          <div>
-            Menampilkan {aggRange.recentSales.length} dari {rangeSales.length} transaksi
-          </div>
-          <div>
-            Last updated: {new Date().toLocaleTimeString("id-ID")}
-          </div>
+          <div>Menampilkan {aggRange.recentSales.length} dari {rangeSales.length} transaksi</div>
+          <div>Last updated: {new Date().toLocaleTimeString("id-ID")}</div>
         </div>
+
+        <DailyMatrixModal
+          open={matrixOpen}
+          onClose={() => setMatrixOpen(false)}
+          dates={dateList}
+          byDay={byDay}
+          dailyRevenue={dailyRevenue}
+        />
       </div>
     </div>
   );
