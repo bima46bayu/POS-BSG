@@ -16,9 +16,7 @@ export function onUnauthorized(fn) {
   return () => { unauthorizedHandlers = unauthorizedHandlers.filter(h => h !== fn); };
 }
 function emitUnauthorized() {
-  unauthorizedHandlers.forEach(h => {
-    try { h(); } catch {}
-  });
+  unauthorizedHandlers.forEach(h => { try { h(); } catch {} });
 }
 
 // REQUEST: selalu pakai token terbaru
@@ -36,14 +34,22 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// RESPONSE: 401 -> emit event (jangan reload full)
+// RESPONSE: tahan spam 401 (once-only guard) + lempar CanceledError
+let isEmitting401 = false;
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err?.response?.status === 401) {
+    const status = err?.response?.status;
+    if (status === 401) {
       localStorage.removeItem(STORAGE_KEY);
-      // Hilangkan dispatch storage & redirect hard. Pakai event:
-      emitUnauthorized();
+      if (!isEmitting401) {
+        isEmitting401 = true;
+        emitUnauthorized();
+        // reset guard setelah microtask (batching 401 jadi satu event)
+        Promise.resolve().then(() => { isEmitting401 = false; });
+      }
+      // penting: jangan teruskan error biasa (hindari toast/stacktrace)
+      return Promise.reject(new axios.CanceledError("unauthorized"));
     }
     return Promise.reject(err);
   }
@@ -57,4 +63,21 @@ export function toAbsoluteUrl(u, base = API_BASE_URL) {
   const b = (base || "").replace(/\/+$/, "");
   const p = String(u).replace(/^\/+/, "");
   return b ? `${b}/${p}` : `/${p}`;
+}
+
+/**
+ * Pasang di App: 401 → cancel semua query, clear cache, redirect ke /unauthorized
+ */
+export function installUnauthorizedRedirect({ queryClient, navigate, loginPath = "/unauthorized" }) {
+  return onUnauthorized(() => {
+    try {
+      queryClient?.cancelQueries?.();
+      queryClient?.clear?.();
+    } catch {}
+    if (typeof navigate === "function") {
+      navigate(loginPath, { replace: true });
+    } else {
+      window.location.href = loginPath;
+    }
+  });
 }

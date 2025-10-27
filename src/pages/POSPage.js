@@ -12,7 +12,7 @@ import { getProducts, getProductBySKU } from "../api/products";
 import { getCategories, getSubCategories } from "../api/categories";
 import { toAbsoluteUrl } from "../api/client";
 
-const PER_PAGE = 20;
+const PER_PAGE = 10000;
 const TAX_RATE = 0;
 
 // Normalizer: samakan bentuk data product untuk FE

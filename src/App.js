@@ -8,14 +8,17 @@ import Sidebar from "./components/Sidebar";
 
 import POSPage from "./pages/POSPage";
 import ProductPage from "./pages/ProductPage";
-import InventoryPage from "./pages/InventoryPage";
+import InventoryProductsPage from "./pages/InventoryPage";
+import InventoryProductSummaryPage from "./pages/InventorySummaryPage";
 import PurchasePage from "./pages/PurchasePage";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
-import GRPage from './pages/GRPage';
+import GRPage from "./pages/GRPage";
+import UnauthorizedPage from "./pages/UnauthorizedPage";
+import NotFoundPage from "./pages/NotFoundPage";
 
-import { isLoggedIn, logoutRequest, getTokenExpiration  } from "./api/auth";
-import { STORAGE_KEY } from "./api/client";
+import { isLoggedIn, logoutRequest } from "./api/auth";
+import { STORAGE_KEY, installUnauthorizedRedirect, onUnauthorized } from "./api/client";
 
 import {
   Routes,
@@ -25,24 +28,49 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-// ====== SUMBER KEBENARAN ROLE → PAGES ======
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, err) => {
+        if (err?.name === "CanceledError") return false;
+        const status = err?.response?.status;
+        if (status === 401) return false;
+        return failureCount < 2;
+      },
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
 const DEFAULT_ALLOWED = {
   admin: ["home", "pos", "products", "inventory", "purchase", "gr", "history"],
   kasir: ["home", "pos", "history"],
 };
 
-// map page key → path
 const PAGE_PATH = {
   home: "/home",
   pos: "/pos",
   products: "/products",
-  inventory: "/inventory",
+  inventory: "/inventory/products",
   purchase: "/purchase",
   history: "/history",
   gr: "/gr",
 };
 
-// Ambil role dari localStorage (sesuaikan struktur kamu)
+const KNOWN_PATHS = new Set([
+  "/",
+  "/unauthorized",
+  "/home",
+  "/pos",
+  "/products",
+  "/inventory/products",
+  "/purchase",
+  "/history",
+  "/gr",
+]);
+
 function getRoleFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -54,31 +82,27 @@ function getRoleFromStorage() {
   }
 }
 
-// Komponen guard per-route (cek role)
 function ProtectedRoute({ children, pageKey, allowedPages }) {
   if (!allowedPages.includes(pageKey)) {
-    // redirect ke halaman pertama yang allowed
-    const first = PAGE_PATH[allowedPages[0]] || "/pos";
+    const first = PAGE_PATH[allowedPages[0]] || "/home";
     return <Navigate to={first} replace />;
   }
   return children;
 }
 
-export default function App() {
+function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Auth & role
   const [loggedIn, setLoggedIn] = useState(() => isLoggedIn());
   const [role, setRole] = useState(() => getRoleFromStorage());
 
-  // Daftar halaman yang boleh untuk role ini — SUMBER dari DEFAULT_ALLOWED
   const allowedPages = useMemo(
     () => DEFAULT_ALLOWED[role] || DEFAULT_ALLOWED.kasir,
     [role]
   );
 
-  // Sinkron antar-tab saat token/role berubah
+  // Sinkron antar-tab
   useEffect(() => {
     const onStorage = () => {
       setLoggedIn(isLoggedIn());
@@ -88,50 +112,51 @@ export default function App() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-    // ✅ TAMBAHAN: Periodic check token expiration (setiap 30 detik)
+  // Pasang listener 401 hanya kalau SUDAH login
   useEffect(() => {
     if (!loggedIn) return;
+    const off1 = installUnauthorizedRedirect({
+      queryClient,
+      navigate,
+      loginPath: "/unauthorized",
+    });
+    const off2 = onUnauthorized(() => {
+      localStorage.removeItem(STORAGE_KEY);
+      setLoggedIn(false);
+      setRole("kasir");
+    });
+    return () => { off1(); off2(); };
+  }, [loggedIn, navigate]);
 
-    const interval = setInterval(() => {
-      if (!isLoggedIn()) {
-        console.log("Token expired - logging out");
-        setLoggedIn(false);
-        setRole("kasir");
-      }
-    }, 30000); // Check setiap 30 detik
+  // Normalisasi path setelah login:
+  // - kalau path sekarang tidak dikenal & bukan sub-route inventory → arahkan ke halaman pertama yang diizinkan
+  useEffect(() => {
+    if (!loggedIn) return;
+    const p = location.pathname;
+    const isInventoryDetail = p.startsWith("/inventory/products/");
+    if (!KNOWN_PATHS.has(p) && !isInventoryDetail) {
+      const firstKey = (DEFAULT_ALLOWED[role] || DEFAULT_ALLOWED.kasir)[0] || "pos";
+      const target = PAGE_PATH[firstKey] || "/pos";
+      navigate(target, { replace: true });
+    }
+  }, [loggedIn, location.pathname, role, navigate]);
 
-    return () => clearInterval(interval);
-  }, [loggedIn]);
-
-  // ✅ OPTIONAL: Log token info saat dev (untuk debugging)
-  // useEffect(() => {
-  //   if (loggedIn && process.env.NODE_ENV === 'development') {
-  //     const tokenInfo = getTokenExpiration();
-  //     if (tokenInfo) {
-  //       console.log('Token expires at:', tokenInfo.expiresAt);
-  //       console.log('Time remaining:', tokenInfo.timeRemainingMinutes, 'minutes');
-  //     }
-  //   }
-  // }, [loggedIn]);
-
-  // Logout handler
-  const handleLogout = async () => {
-    await logoutRequest();
-    setLoggedIn(false);
-    setRole("kasir");
-    navigate(PAGE_PATH.pos, { replace: true });
-  };
-
-  // Setelah login sukses
+  // Halaman login
   if (!loggedIn) {
     return (
       <LoginPages
-        onLogin={() => {
+        onLogin={async () => {
+          // bersihkan query lama supaya tidak refetch pakai token usang
+          await queryClient.cancelQueries();
+          queryClient.clear();
+
           setLoggedIn(true);
           const r = getRoleFromStorage();
           setRole(r);
-          const first = (DEFAULT_ALLOWED[r] || DEFAULT_ALLOWED.kasir)[0];
-          navigate(PAGE_PATH[first] || "/pos", { replace: true });
+
+          const first = (DEFAULT_ALLOWED[r] || DEFAULT_ALLOWED.kasir)[0] || "pos";
+          const target = PAGE_PATH[first] || "/pos";
+          navigate(target, { replace: true });
         }}
       />
     );
@@ -143,23 +168,36 @@ export default function App() {
     navigate(PAGE_PATH[pageKey] || "/pos");
   };
 
+  // Key aktif sidebar — jangan paksa "pos" saat unauthorized/404
+  const getActivePageKey = () => {
+    const p = location.pathname;
+    if (p.startsWith("/inventory")) return "inventory";
+    for (const [key, path] of Object.entries(PAGE_PATH)) {
+      if (p === path) return key;
+    }
+    if (p === "/unauthorized") return null;
+    return null; // 404/unknown
+  };
+
   return (
     <div className="flex min-h-screen">
       <Sidebar
-        // tandai aktif berdasarkan pathname
-        currentPage={
-          Object.keys(PAGE_PATH).find((k) => PAGE_PATH[k] === location.pathname) ||
-          "pos"
-        }
+        currentPage={getActivePageKey() || undefined}
         onNavigate={handleNavigate}
         userRole={role}
         allowedPages={allowedPages}
-        onLogout={handleLogout}
+        onLogout={async () => {
+          await logoutRequest();
+          queryClient.clear();
+          setLoggedIn(false);
+          setRole("kasir");
+          navigate("/", { replace: true });
+        }}
       />
 
       <div className="flex-1 md:ml-24">
         <Routes>
-          {/* Redirect root → /pos (atau home, terserah) */}
+          {/* Root → POS (atau /home, silakan ubah) */}
           <Route path="/" element={<Navigate to={PAGE_PATH.pos} replace />} />
 
           <Route
@@ -170,6 +208,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path={PAGE_PATH.pos}
             element={
@@ -178,6 +217,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path={PAGE_PATH.products}
             element={
@@ -186,14 +226,25 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* INVENTORY */}
           <Route
-            path={PAGE_PATH.inventory}
+            path="/inventory/products"
             element={
               <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
-                <InventoryPage />
+                <InventoryProductsPage />
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/inventory/products/:id"
+            element={
+              <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
+                <InventoryProductSummaryPage />
+              </ProtectedRoute>
+            }
+          />
+
           <Route
             path={PAGE_PATH.purchase}
             element={
@@ -202,6 +253,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path={PAGE_PATH.gr}
             element={
@@ -210,6 +262,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path={PAGE_PATH.history}
             element={
@@ -219,12 +272,21 @@ export default function App() {
             }
           />
 
-          {/* 404 → balik ke /pos */}
-          <Route path="*" element={<Navigate to={PAGE_PATH.pos} replace />} />
+          {/* 401 & 404 TIDAK DIPROTEKSI */}
+          <Route path="/unauthorized" element={<UnauthorizedPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </div>
 
       <Toaster position="top-right" />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppShell />
+    </QueryClientProvider>
   );
 }

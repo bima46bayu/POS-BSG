@@ -1,7 +1,57 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { loginRequest } from "../api/auth"; // pastikan path ini benar
 
+// ===== BackgroundFader (local component, no export) =====
+function BackgroundFader({
+  images = [],
+  interval = 7000,
+  fadeDuration = 1000,
+  className = "",
+}) {
+  const [active, setActive] = useState(0);
+
+  // Preload all images once
+  useEffect(() => {
+    images.forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
+  }, [images]);
+
+  // Auto-rotate
+  useEffect(() => {
+    if (!images.length) return;
+    const id = setInterval(() => {
+      setActive((i) => (i + 1) % images.length);
+    }, interval);
+    return () => clearInterval(id);
+  }, [images.length, interval]);
+
+  const list = useMemo(() => images.filter(Boolean), [images]);
+
+  return (
+    <div className={`absolute inset-0 w-full h-full overflow-hidden ${className}`} aria-hidden="true">
+      {list.map((src, idx) => (
+        <img
+          key={src}
+          src={src}
+          alt=""
+          className={`absolute inset-0 w-full h-full object-cover transition-opacity ease-in-out ${
+            idx === active ? "opacity-100" : "opacity-0"
+          }`}
+          style={{ transitionDuration: `${fadeDuration}ms` }}
+          draggable="false"
+          loading={idx === 0 ? "eager" : "lazy"}
+        />
+      ))}
+      {/* Overlay untuk kontras teks */}
+      <div className="absolute inset-0 pointer-events-none bg-gradient-to-br from-black/40 via-black/20 to-transparent" />
+    </div>
+  );
+}
+
+// ===== Login Page =====
 const LoginPages = ({ onLogin }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,14 +84,15 @@ const LoginPages = ({ onLogin }) => {
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
-      {/* Background Gradient */}
-      <div
-        className="absolute inset-0 w-full h-full"
-        style={{
-          background:
-            "linear-gradient(135deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #f5576c 75%, #4facfe 100%)",
-        }}
-        aria-hidden="true"
+      {/* Background: fade antara 3 gambar */}
+      <BackgroundFader
+        images={[
+          "/images/background.jpg",
+          "/images/background2.jpg",
+          "/images/background3.jpg",
+        ]}
+        interval={4000}
+        fadeDuration={2000}
       />
 
       {/* Content Container */}
@@ -49,9 +100,12 @@ const LoginPages = ({ onLogin }) => {
         {/* Header Section */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center bg-white rounded-lg px-4 py-2 mb-6">
-            <div className="bg-blue-600 text-white px-2 py-1 rounded text-sm font-bold mr-2">
-              BSG
-            </div>
+            <img
+              src="/images/LogoBSG.png"
+              alt="BSG Logo"
+              className="h-7 w-auto mr-2 select-none"
+              draggable="false"
+            />
             <span className="text-gray-800 font-semibold text-lg">SHITPOS</span>
           </div>
           <p className="text-white text-sm font-medium">
@@ -131,7 +185,7 @@ const LoginPages = ({ onLogin }) => {
       </div>
 
       {/* CSS for browser compatibility */}
-      <style jsx>{`
+      <style>{`
         input[type="password"]::-ms-reveal,
         input[type="password"]::-ms-clear {
           display: none !important;

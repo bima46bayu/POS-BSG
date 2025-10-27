@@ -8,7 +8,7 @@ import {
 } from "recharts";
 import {
   DollarSign, Receipt, ShoppingCart, Percent,
-  Table as TableIcon, Tag, ChevronDown as ChevronDownIcon, ArrowUpDown
+  Table as TableIcon, Tag, ChevronDown as ChevronDownIcon, ArrowUpDown,
 } from "lucide-react";
 
 import KpiCard from "../components/dashboard/KpiCard";
@@ -104,7 +104,7 @@ export default function HomePage() {
   const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: ({ signal }) => fetchCategories(signal), staleTime: 5 * 60_000 });
   const subCategoriesQ = useQuery({ queryKey: ["subCategories"], queryFn: ({ signal }) => fetchSubCategories(signal), staleTime: 5 * 60_000 });
 
-  // SALES untuk dashboard (menunggu data user kalau kasir)
+  // SALES untuk dashboard
   const salesQ = useQuery({
     queryKey: ["sales-dashboard", {
       from: filters.from,
@@ -117,7 +117,7 @@ export default function HomePage() {
       const [, params] = queryKey;
       return listSalesForDashboard(params, signal);
     },
-    enabled: !meQ.isLoading && (!isCashier || !!filters.from), // tunggu me siap jika kasir
+    enabled: !meQ.isLoading && (!isCashier || !!filters.from),
     keepPreviousData: true,
     staleTime: 60_000,
   });
@@ -250,17 +250,30 @@ export default function HomePage() {
     return map;
   }, [rangeSales, dateList]);
 
+  /* ===== UI ===== */
+
+  // Section sekarang bisa terima className untuk grid span 8/4
+  const Section = ({ title, right, className = "", children }) => (
+    <div className={`rounded-2xl border border-slate-200 bg-white overflow-hidden ${className}`}>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+        <div className="font-semibold text-slate-900">{title}</div>
+        {right}
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto px-4 md:px-6 py-6 space-y-6">
-        <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
+      {/* Sticky top bar */}
+      <div className="sticky top-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-white/60 bg-white/90 border-b border-slate-200">
+        <div className="max-w-auto mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Dashboard POS</h1>
-            <p className="text-sm text-slate-600 mt-1">
+            <h1 className="text-lg font-semibold text-slate-900">Dashboard POS</h1>
+            <p className="text-xs text-slate-600">
               Periode: {formatDate(filters.from)} - {formatDate(filters.to)}
             </p>
           </div>
-
           <div className="flex items-center gap-2">
             <button
               onClick={() => setMatrixOpen(true)}
@@ -270,7 +283,6 @@ export default function HomePage() {
               <TableIcon className="w-4 h-4" />
               <span className="text-sm font-medium">Matriks Harian</span>
             </button>
-
             {salesQ.isFetching && (
               <div className="text-sm text-slate-600 flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -279,17 +291,35 @@ export default function HomePage() {
             )}
           </div>
         </div>
+      </div>
 
-        <FilterBar
-          filters={filters}
-          setFilters={setFilters}
-          stores={storesQ.data || []}
-          onExport={handleExport}
-          isLoading={salesQ.isFetching}
-          locked={isCashier}
-        />
+      <div className="max-w-auto mx-auto px-4 md:px-6 py-6 space-y-6">
+        {/* Hero */}
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-r from-indigo-50 to-white">
+          <div className="absolute -right-10 -top-10 w-36 h-36 bg-indigo-100 rounded-full opacity-60" />
+          <div className="absolute -right-20 top-14 w-28 h-28 bg-emerald-100 rounded-full opacity-60" />
+          <div className="relative p-6 md:p-8">
+            <div className="text-xs uppercase tracking-wider text-slate-500">Ringkasan</div>
+            <div className="mt-1 text-2xl md:text-3xl font-bold text-slate-900">Overview Penjualan</div>
+            <p className="mt-1 text-sm text-slate-600">
+              Lihat performa revenue, transaksi, dan komposisi penjualan pada periode terpilih.
+            </p>
 
-        {/* KPI */}
+            {/* FilterBar */}
+            <div className="mt-5">
+              <FilterBar
+                filters={filters}
+                setFilters={setFilters}
+                stores={storesQ.data || []}
+                onExport={handleExport}
+                isLoading={salesQ.isFetching}
+                locked={isCashier}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
           <KpiCard title="Total Revenue" value={IDR(aggRange.revenue)} delta={pctDelta(aggRange.revenue, aggPrev.revenue)} icon={DollarSign} trend="vs periode sebelumnya" />
           <KpiCard title="Total Transaksi" value={aggRange.tx.toLocaleString("id-ID")} delta={pctDelta(aggRange.tx, aggPrev.tx)} icon={Receipt} trend="vs periode sebelumnya" />
@@ -297,9 +327,13 @@ export default function HomePage() {
           <KpiCard title="Total Diskon" value={IDR(aggRange.discounts)} delta={pctDelta(aggRange.discounts, aggPrev.discounts)} icon={Percent} trend={`${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon`} />
         </div>
 
-        {/* Charts */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-          <ChartCard title="Pendapatan" className="xl:col-span-2">
+        {/* Charts 1 → 12-col grid, span 8/4 */}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+          <Section
+            title="Pendapatan"
+            right={<span className="text-xs text-slate-500">Trend harian</span>}
+            className="xl:col-span-8"
+          >
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={aggRange.trendTotal} margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
@@ -318,9 +352,13 @@ export default function HomePage() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-          </ChartCard>
+          </Section>
 
-          <ChartCard title="Komposisi Metode Pembayaran">
+          <Section
+            title="Komposisi Metode Pembayaran"
+            right={<span className="text-xs text-slate-500">Share per metode</span>}
+            className="xl:col-span-4"
+          >
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -343,11 +381,16 @@ export default function HomePage() {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-          </ChartCard>
+          </Section>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-          <ChartCard title="Trend Penjualan Diskon vs Non Diskon" className="xl:col-span-2">
+        {/* Charts 2 → 12-col grid, span 8/4 */}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+          <Section
+            title="Trend Penjualan Diskon vs Non Diskon"
+            right={<span className="text-xs text-slate-500">Perbandingan harian</span>}
+            className="xl:col-span-8"
+          >
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={aggRange.trendStacked} margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
@@ -361,9 +404,13 @@ export default function HomePage() {
                 </LineChart>
               </ResponsiveContainer>
             </div>
-          </ChartCard>
+          </Section>
 
-          <ChartCard title="Penjualan per Kategori">
+          <Section
+            title="Penjualan per Kategori"
+            right={<span className="text-xs text-slate-500">Share kategori</span>}
+            className="xl:col-span-4"
+          >
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -386,13 +433,14 @@ export default function HomePage() {
                 </PieChart>
               </ResponsiveContainer>
             </div>
-          </ChartCard>
+          </Section>
         </div>
 
+        {/* Tables */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <ChartCard
+          <Section
             title="Kategori Terlaris"
-            action={
+            right={
               <button
                 onClick={() => setCategorySortOrder((o) => (o === "desc" ? "asc" : "desc"))}
                 className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -412,42 +460,44 @@ export default function HomePage() {
                 { key: "share", label: "Share", align: "right", render: (v) => `${v.toFixed(1)}%` },
               ]}
               data={sortedCategories}
+              emptyMessage="Belum ada data kategori pada periode ini"
             />
-          </ChartCard>
+          </Section>
 
-          <ChartCard
+          <Section
             title="Sub-Kategori Terlaris"
-            action={
-              <div className="relative min-w-[220px]">
-                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="w-full pl-10 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
-                  title="Filter Kategori"
+            right={
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-[220px]">
+                  <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <select
+                    value={categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                    className="w-full pl-10 pr-10 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
+                    title="Filter Kategori"
+                  >
+                    <option value="">Semua Kategori</option>
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                  <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                </div>
+                <button
+                  onClick={() => setSubCategorySortOrder((o) => (o === "desc" ? "asc" : "desc"))}
+                  className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                  title={subCategorySortOrder === "desc" ? "Urutkan: Tertinggi ke Terendah" : "Urutkan: Terendah ke Tertinggi"}
                 >
-                  <option value="">Semua Kategori</option>
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-                <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <ArrowUpDown className="w-4 h-4 text-slate-600" />
+                </button>
               </div>
             }
           >
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-4 px-4">
               <div className="text-xs text-slate-500">
                 {categoryFilter ? <>Filter: <span className="font-semibold text-slate-700">{categoryFilter}</span></> : "Semua Kategori"}
               </div>
-              <button
-                onClick={() => setSubCategorySortOrder((o) => (o === "desc" ? "asc" : "desc"))}
-                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                title={subCategorySortOrder === "desc" ? "Urutkan: Tertinggi ke Terendah" : "Urutkan: Terendah ke Tertinggi"}
-              >
-                <ArrowUpDown className="w-4 h-4 text-slate-600" />
-              </button>
             </div>
-
             <SimpleTable
               columns={[
                 { key: "rank", label: "#", width: "w-12", render: (_, __, idx) => idx + 1 },
@@ -457,14 +507,15 @@ export default function HomePage() {
                 { key: "revenue", label: "Revenue", align: "right", render: (v) => IDR(v) },
               ]}
               data={filteredSubCategories.slice(0, 10)}
+              emptyMessage="Belum ada data sub-kategori pada periode ini"
             />
-          </ChartCard>
+          </Section>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <ChartCard
+          <Section
             title="Produk Terlaris (By Quantity)"
-            action={
+            right={
               <button onClick={() => setProductSortOrder((o) => (o === "desc" ? "asc" : "desc"))} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                 <ArrowUpDown className="w-4 h-4 text-slate-600" />
               </button>
@@ -479,12 +530,13 @@ export default function HomePage() {
                 { key: "share", label: "Share", align: "right", render: (v) => `${v.toFixed(1)}%` },
               ]}
               data={sortedProducts}
+              emptyMessage="Belum ada data produk pada periode ini"
             />
-          </ChartCard>
+          </Section>
 
-          <ChartCard
+          <Section
             title="Produk Dengan Diskon Terlaris"
-            action={
+            right={
               <button onClick={() => setDiscountProductSortOrder((o) => (o === "desc" ? "asc" : "desc"))} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
                 <ArrowUpDown className="w-4 h-4 text-slate-600" />
               </button>
@@ -499,11 +551,12 @@ export default function HomePage() {
                 { key: "discount_used", label: "% Trx Diskon", align: "right", render: (v) => `${v.toFixed(1)}%` },
               ]}
               data={sortedDiscountProducts}
+              emptyMessage="Belum ada data diskon produk pada periode ini"
             />
-          </ChartCard>
+          </Section>
         </div>
 
-        <ChartCard title="Transaksi Terbaru">
+        <Section title="Transaksi Terbaru" right={<span className="text-xs text-slate-500">Update realtime</span>}>
           <SimpleTable
             columns={[
               { key: "code", label: "Invoice", render: (_, row) => <span className="font-semibold text-blue-600">{row.code || row.id}</span> },
@@ -538,21 +591,20 @@ export default function HomePage() {
             data={aggRange.recentSales}
             emptyMessage="Belum ada transaksi dalam periode ini"
           />
-        </ChartCard>
-
-        <div className="flex items-center justify-between text-sm text-slate-500 pb-4">
-          <div>Menampilkan {aggRange.recentSales.length} dari {rangeSales.length} transaksi</div>
-          <div>Last updated: {new Date().toLocaleTimeString("id-ID")}</div>
-        </div>
-
-        <DailyMatrixModal
-          open={matrixOpen}
-          onClose={() => setMatrixOpen(false)}
-          dates={dateList}
-          byDay={byDay}
-          dailyRevenue={dailyRevenue}
-        />
+          <div className="flex items-center justify-between text-sm text-slate-500 px-4 py-3 border-t border-slate-200">
+            <div>Menampilkan {aggRange.recentSales.length} dari {rangeSales.length} transaksi</div>
+            <div>Last updated: {new Date().toLocaleTimeString("id-ID")}</div>
+          </div>
+        </Section>
       </div>
+
+      <DailyMatrixModal
+        open={matrixOpen}
+        onClose={() => setMatrixOpen(false)}
+        dates={dateList}
+        byDay={byDay}
+        dailyRevenue={dailyRevenue}
+      />
     </div>
   );
 }
