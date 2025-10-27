@@ -4,7 +4,8 @@ import {
 } from 'lucide-react';
 import { Link } from "react-router-dom";
 
-// ⬇️ tidak perlu import logo dari assets
+/** Paksa path jadi absolut dari root (hindari /inventory/images/...) */
+const toAbs = (p) => (p?.startsWith('/') ? p : `/${String(p || '').replace(/^\/+/, '')}`);
 
 const Sidebar = ({
   currentPage,
@@ -12,9 +13,13 @@ const Sidebar = ({
   userRole,
   onLogout,
   allowedPages = [],
-  logoSrc = "/images/LogoBSG.png",   // ✅ default: file di public/
+  /** default file di public/; aman untuk CRA/Vite */
+  logoSrc = "/images/LogoBSG.png",
 }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Normalisasi logoSrc → absolut dari root
+  const logoSrcAbs = useMemo(() => toAbs(logoSrc), [logoSrc]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -38,8 +43,13 @@ const Sidebar = ({
   const allowedSet = useMemo(() => new Set(allowedList), [allowedList]);
   const visibleItems = useMemo(() => menuItems.filter(i => allowedSet.has(i.id)), [menuItems, allowedSet]);
 
-  const handleNavigate = (pageId) => { if (allowedSet.has(pageId)) { onNavigate(pageId); setIsMobileMenuOpen(false);} };
-  const handleLogout = () => { onLogout(); setIsMobileMenuOpen(false); };
+  const handleNavigate = (pageId) => {
+    if (allowedSet.has(pageId)) {
+      onNavigate?.(pageId);
+      setIsMobileMenuOpen(false);
+    }
+  };
+  const handleLogout = () => { onLogout?.(); setIsMobileMenuOpen(false); };
 
   return (
     <>
@@ -57,8 +67,9 @@ const Sidebar = ({
         <div className="mb-8">
           <Link to="/" aria-label="Go to home">
             <img
-              src={logoSrc}              // ✅ pakai file public
+              src={logoSrcAbs}
               alt="Logo"
+              loading="lazy"
               className="w-12 h-12 rounded-lg object-contain"
               onError={(e) => {
                 e.currentTarget.outerHTML =
@@ -112,10 +123,10 @@ const Sidebar = ({
         >
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
             <div className="flex items-center space-x-3">
-              {/* ✅ pakai logo yang sama di mobile */}
               <img
-                src={logoSrc}
+                src={logoSrcAbs}
                 alt="Logo"
+                loading="lazy"
                 className="w-10 h-10 rounded-lg object-contain"
                 onError={(e) => {
                   e.currentTarget.outerHTML =
