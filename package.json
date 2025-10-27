@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Desktop app built with Electron and React",
   "main": "public/electron.js",
-  "homepage": "./",
+  "homepage": ".",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
