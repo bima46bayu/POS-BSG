@@ -27,29 +27,43 @@ api.interceptors.request.use((config) => {
       const { token } = JSON.parse(raw);
       if (token) config.headers.Authorization = `Bearer ${token}`;
       else delete config.headers.Authorization;
-    } catch { delete config.headers.Authorization; }
+    } catch {
+      delete config.headers.Authorization;
+    }
   } else {
     delete config.headers.Authorization;
   }
   return config;
 });
 
-// RESPONSE: tahan spam 401 (once-only guard) + lempar CanceledError
+// RESPONSE: tahan spam 401 (once-only guard) + JANGAN lempar error
 let isEmitting401 = false;
 api.interceptors.response.use(
   (r) => r,
   (err) => {
     const status = err?.response?.status;
     if (status === 401) {
-      localStorage.removeItem(STORAGE_KEY);
+      // bersihkan sesi
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+
+      // emit sekali untuk batch 401 yg beruntun
       if (!isEmitting401) {
         isEmitting401 = true;
         emitUnauthorized();
-        // reset guard setelah microtask (batching 401 jadi satu event)
         Promise.resolve().then(() => { isEmitting401 = false; });
       }
-      // penting: jangan teruskan error biasa (hindari toast/stacktrace)
-      return Promise.reject(new axios.CanceledError("unauthorized"));
+
+      // ⬇️ penting: JANGAN throw/reject
+      // kembalikan "fulfilled response" supaya tidak memicu overlay merah
+      // caller (React Query / fetcher) akan menerima { data: null, __unauthorized: true }
+      return Promise.resolve({
+        data: null,
+        status: 401,
+        headers: err?.response?.headers ?? {},
+        config: err?.config,
+        request: err?.request,
+        __unauthorized: true,
+      });
     }
     return Promise.reject(err);
   }
