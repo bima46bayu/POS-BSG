@@ -293,16 +293,16 @@ export default function InventorySummaryPage() {
         cell: (r) => <span>{fmtIDR(r._unit_cost)}</span>,
       },
       {
-        header: "Cost Balance",
-        width: "160px",
-        align: "right",
-        cell: (r) => <span className="font-semibold">{fmtIDR(r._cost_balance_after)}</span>,
-      },
-      {
         header: "Total Cost (±)",
         width: "160px",
         align: "right",
         cell: (r) => <span className="font-medium">{fmtIDR(Number(r._display_cost || 0))}</span>,
+      },
+      {
+        header: "Cost Balance",
+        width: "160px",
+        align: "right",
+        cell: (r) => <span className="font-semibold">{fmtIDR(r._cost_balance_after)}</span>,
       },
     ],
     []

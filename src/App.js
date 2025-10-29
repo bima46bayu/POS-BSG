@@ -17,6 +17,13 @@ import GRPage from "./pages/GRPage";
 import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
 
+// ⬅️ NEW (tanpa huruf s)
+import MasterUserPage from "./pages/master/MasterUserPage";
+import MasterCategoryPage from "./pages/master/MasterCategoryPage";
+import MasterSubCategoryPage from "./pages/master/MasterSubCategoryPage";
+import MasterSupplierPage from "./pages/master/MasterSupplierPage";
+import MasterStorePage from "./pages/master/MasterStorePage";
+
 import { isLoggedIn, logoutRequest } from "./api/auth";
 import { STORAGE_KEY, installUnauthorizedRedirect, onUnauthorized } from "./api/client";
 
@@ -45,7 +52,7 @@ const queryClient = new QueryClient({
 });
 
 const DEFAULT_ALLOWED = {
-  admin: ["home", "pos", "products", "inventory", "purchase", "gr", "history"],
+  admin: ["home", "pos", "products", "inventory", "purchase", "gr", "history", "master"], // ⬅️ NEW
   kasir: ["home", "pos", "history"],
 };
 
@@ -57,6 +64,8 @@ const PAGE_PATH = {
   purchase: "/purchase",
   history: "/history",
   gr: "/gr",
+  // ⬅️ NEW: master parent (pakai default ke users)
+  master: "/master/users",
 };
 
 const KNOWN_PATHS = new Set([
@@ -69,6 +78,8 @@ const KNOWN_PATHS = new Set([
   "/purchase",
   "/history",
   "/gr",
+  // ⬅️ NEW: master known base; childnya ditangani via startsWith
+  "/master",
 ]);
 
 function getRoleFromStorage() {
@@ -128,13 +139,13 @@ function AppShell() {
     return () => { off1(); off2(); };
   }, [loggedIn, navigate]);
 
-  // Normalisasi path setelah login:
-  // - kalau path sekarang tidak dikenal & bukan sub-route inventory → arahkan ke halaman pertama yang diizinkan
+  // Normalisasi path setelah login
   useEffect(() => {
     if (!loggedIn) return;
     const p = location.pathname;
     const isInventoryDetail = p.startsWith("/inventory/products/");
-    if (!KNOWN_PATHS.has(p) && !isInventoryDetail) {
+    const isMasterChild = p.startsWith("/master/"); // ⬅️ NEW
+    if (!KNOWN_PATHS.has(p) && !isInventoryDetail && !isMasterChild) {
       const firstKey = (DEFAULT_ALLOWED[role] || DEFAULT_ALLOWED.kasir)[0] || "pos";
       const target = PAGE_PATH[firstKey] || "/pos";
       navigate(target, { replace: true });
@@ -146,7 +157,6 @@ function AppShell() {
     return (
       <LoginPages
         onLogin={async () => {
-          // bersihkan query lama supaya tidak refetch pakai token usang
           await queryClient.cancelQueries();
           queryClient.clear();
 
@@ -168,10 +178,11 @@ function AppShell() {
     navigate(PAGE_PATH[pageKey] || "/pos");
   };
 
-  // Key aktif sidebar — jangan paksa "pos" saat unauthorized/404
+  // Key aktif sidebar
   const getActivePageKey = () => {
     const p = location.pathname;
     if (p.startsWith("/inventory")) return "inventory";
+    if (p.startsWith("/master")) return "master"; // ⬅️ NEW
     for (const [key, path] of Object.entries(PAGE_PATH)) {
       if (p === path) return key;
     }
@@ -197,7 +208,7 @@ function AppShell() {
 
       <div className="flex-1 md:ml-24">
         <Routes>
-          {/* Root → POS (atau /home, silakan ubah) */}
+          {/* Root → POS */}
           <Route path="/" element={<Navigate to={PAGE_PATH.pos} replace />} />
 
           <Route
@@ -272,7 +283,52 @@ function AppShell() {
             }
           />
 
-          {/* 401 & 404 TIDAK DIPROTEKSI */}
+          {/* ===== MASTER (admin only) ===== */}
+          <Route
+            path="/master/user"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterUserPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/master/category"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterCategoryPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/master/sub-category"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterSubCategoryPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/master/supplier"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterSupplierPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/master/store-location"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterStorePage />
+              </ProtectedRoute>
+            }
+          />
+          {/* 401 & 404 */}
           <Route path="/unauthorized" element={<UnauthorizedPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
