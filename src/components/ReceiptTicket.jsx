@@ -76,7 +76,7 @@ export default function ReceiptTicket({ saleId, store: storeProp, printableId = 
       <div id={printableId} className="bg-white text-black mx-auto px-2" style={{ width: 280, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, lineHeight: 1.35 }}>
         {/* Header toko */}
         <div className="text-center py-1">
-          <div className="font-bold uppercase tracking-wide">{loc?.name || "TOKO"}</div>
+          <div className="font-bold uppercase tracking-wide">{loc?.name || "BSG Group"}</div>
           {loc?.address && <div className="text-[11px] text-gray-700">{loc.address}</div>}
           {loc?.phone && <div className="text-[11px] text-gray-700">Telp: {loc.phone}</div>}
         </div>

@@ -415,14 +415,6 @@ export default function HistoryPage() {
           className="sticky right-0 z-20 bg-white flex items-center justify-end gap-1 pr-2"
           style={{ boxShadow: "-6px 0 6px -6px rgba(0,0,0,.12)" }}
         >
-          <button
-            onClick={() => openDetail(row)}
-            className="p-1.5 rounded-md border bg-blue-600 text-white hover:bg-blue-800"
-            title="Detail transaksi"
-            aria-label="Detail transaksi"
-          >
-            <Eye className="w-4 h-4" />
-          </button>
           {row.status !== "void" && (
             <button
               onClick={() => openReject(row)}
@@ -433,6 +425,14 @@ export default function HistoryPage() {
               <XCircle className="w-4 h-4" />
             </button>
           )}
+          <button
+            onClick={() => openDetail(row)}
+            className="p-1.5 rounded-md border bg-blue-600 text-white hover:bg-blue-800"
+            title="Detail transaksi"
+            aria-label="Detail transaksi"
+          >
+            <Eye className="w-4 h-4" />
+          </button>
         </div>
       ),
     },

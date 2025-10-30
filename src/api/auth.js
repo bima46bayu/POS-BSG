@@ -29,7 +29,7 @@ export async function loginRequest(email, password) {
 
   // 👉 langsung hard redirect (atau reload)
   // window.location.reload(); // kalau mau reload halaman sekarang
-  window.location.replace("/dashboard"); // arahkan ke dashboard
+  window.location.replace("/pos"); // arahkan ke dashboard
   return data; // (opsional, tidak akan dipakai karena sudah redirect)
 }
 

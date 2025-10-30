@@ -20,7 +20,7 @@ export default function NotFoundPage() {
           className="mt-6 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
         >
           <Home className="w-4 h-4" />
-          Kembali ke Dashboard
+          Kembali ke Home
         </button>
       </div>
     </div>

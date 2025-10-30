@@ -15,6 +15,44 @@ function cleanParams(obj) {
 
 const normUserRes = (data) => data?.user ?? data?.data ?? data;
 
+/**
+ * Normalisasi payload store agar SELALU menjadi array [{ id, name }]
+ * Menerima berbagai bentuk respons: array langsung, {data: [...]}, {items: [...]}, atau nested.
+ */
+function normalizeStoresPayload(payload) {
+  let arr = [];
+  if (Array.isArray(payload)) {
+    arr = payload;
+  } else if (payload && typeof payload === "object") {
+    if (Array.isArray(payload.data)) arr = payload.data;
+    else if (Array.isArray(payload.items)) arr = payload.items;
+    else if (payload.data && Array.isArray(payload.data.data)) arr = payload.data.data; // jaga-jaga nested
+  }
+
+  return (arr || [])
+    .map((s, i) => {
+      const id =
+        s?.id ??
+        s?.store_location_id ??
+        s?.value ??
+        s?.storeId ??
+        s?.store?.id ??
+        (i + 1);
+
+      const name =
+        s?.name ??
+        s?.store_name ??
+        s?.label ??
+        s?.title ??
+        s?.store_location_name ??
+        s?.store?.name ??
+        (id != null ? `Store #${id}` : null);
+
+      return id == null ? null : { id, name: name ?? `Store #${id}` };
+    })
+    .filter(Boolean);
+}
+
 /* =========================
  * Profile (me)
  * ========================= */
@@ -40,8 +78,8 @@ export async function updateMyStore({ store_location_id }, signal) {
 export async function listStoreLocations({ search, per_page = 50 } = {}, signal) {
   const params = cleanParams({ search, per_page });
   const { data } = await api.get("/api/store-locations", { params, signal });
-  // Bisa array langsung atau paginate { data: [...] }
-  return Array.isArray(data) ? data : (data?.data ?? data);
+  // Kembalikan SELALU [{ id, name }]
+  return normalizeStoresPayload(data);
 }
 
 /* =========================
@@ -51,27 +89,27 @@ export async function listUsers(params = {}, signal) {
   const {
     page = 1,
     per_page = 10,
-    search = "",
+    search = "",           // <-- BIARKAN STRING KOSONG
     role = "",
     store_location_id = "",
   } = params;
 
-  // cast & bersihkan
-  const cleaned = cleanParams({
+  const numStore =
+    store_location_id === "" ? undefined : Number(store_location_id);
+  const roleLower = role ? String(role).toLowerCase() : undefined;
+
+  // JANGAN pakai cleanParams agar `search: ""` TETAP TERKIRIM
+  const query = {
     page,
     per_page,
-    search,
-    role,
-    store_location_id:
-      store_location_id === "" ? undefined : Number(store_location_id),
-  });
+    search,                             // <-- selalu ikut, walau ""
+    ...(roleLower ? { role: roleLower } : {}),
+    ...(numStore != null ? { store_location_id: numStore } : {}),
+    // Jika BE juga menerima alias:
+    // ...(numStore != null ? { store_id: numStore } : {}),
+  };
 
-  const { data } = await api.get("/api/users", { params: cleaned, signal });
-  return data; // expected: { items:[], meta:{...} } atau { data:[], meta:{...} }
-}
-
-export async function getUser(id, signal) {
-  const { data } = await api.get(`/api/users/${id}`, { signal });
+  const { data } = await api.get("/api/users", { params: query, signal });
   return data;
 }
 
@@ -113,6 +151,6 @@ export async function resetUserPassword(id, newPassword, signal) {
  * Dropdown / Options
  * ========================= */
 export async function fetchRoleOptions(signal) {
-  const { data } = await api.get("/api/users/roles/options", { signal }); // e.g. ["admin","kasir"]
+  const { data } = await api.get("/api/users/roles/options", { signal }); // e.g. ["admin","kasir"] atau [{value,label}]
   return data;
 }
