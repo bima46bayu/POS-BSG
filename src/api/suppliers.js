@@ -58,3 +58,12 @@ export async function deleteSupplier(id, signal) {
   const { data } = await api.delete(`/api/suppliers/${id}`, { signal });
   return data;
 }
+
+/** GET /api/suppliers/:id -> { id, name, address, phone, email, pic_name, ... } */
+export async function getSupplier(id, signal) {
+  if (!id) return null;
+  const { data } = await api.get(`/api/suppliers/${id}`, { signal });
+  // fleksibel: API bisa kirim {data:{...}} atau langsung object
+  const obj = data?.data ?? data ?? null;
+  return obj;
+}

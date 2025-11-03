@@ -27,3 +27,11 @@ export async function deleteStoreLocation(id, signal) {
   const { data } = await api.delete(`/api/store-locations/${id}`, { signal });
   return data;
 }
+
+/** GET /api/store-locations/:id  -> { id, code, name, address, phone, ... } */
+export async function getStoreLocation(id, signal) {
+  if (!id) return null;
+  const { data } = await api.get(`/api/store-locations/${id}`, { signal });
+  // respons kamu langsung objek, tapi tetap aman kalau suatu hari dibungkus {data:...}
+  return data?.data ?? data ?? null;
+}

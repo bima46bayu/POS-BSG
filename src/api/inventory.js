@@ -33,4 +33,12 @@ export async function getProductLogs(productId, { page = 1, per_page = 10 } = {}
   return data || { items: [], meta: { current_page: page, per_page, total: 0, last_page: 1 } };
 }
 
+export async function exportProductStockCard(productId, params = {}) {
+  // params: { from?: 'YYYY-MM-DD', to?: 'YYYY-MM-DD' }
+  const { data } = await api.get(`/api/inventory/${productId}/stock-card/export`, {
+    params,
+    responseType: "blob", // penting: PDF blob
+  });
+  return data; // Blob
+}
 

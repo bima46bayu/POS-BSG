@@ -35,6 +35,7 @@ const fmtDateTime = (s) => {
 };
 
 const PER_PAGE = 10;
+const STORES_DIRTY_KEY = "POS_STORES_DIRTY";
 
 export default function MasterUserPage() {
   const qc = useQueryClient();
@@ -87,17 +88,44 @@ export default function MasterUserPage() {
     return m;
   }, [rolesOpt]);
 
-  // ====== stores dari API (sudah dinormalisasi ke [{id,name}]) ======
+  // ====== STORES (normalize + refetch agresif) ======
   const {
-    data: storeOptionsRaw = [],
+    data: storeRes,
     isFetching: isFetchingStores,
+    refetch: refetchStores,
   } = useQuery({
     queryKey: ["stores", { per_page: 500 }],
     queryFn: ({ signal }) => listStoreLocations({ per_page: 500 }, signal),
-    initialData: [],
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
+    staleTime: 0,                      // selalu dianggap stale
+    gcTime: 5 * 60_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
+
+  // normalize hasil API ke array [{id,name}]
+  const storeOptionsRaw = useMemo(() => {
+    const s = storeRes;
+    if (Array.isArray(s)) return s;
+    if (Array.isArray(s?.items)) return s.items;
+    if (Array.isArray(s?.data))  return s.data;
+    return [];
+  }, [storeRes]);
+
+  // saat buka modal Add → paksa refetch store
+  useEffect(() => { if (openAdd) refetchStores(); }, [openAdd, refetchStores]);
+
+  // dengarkan “dirty flag” (dipasang dari MasterStoreLocationPage saat create/update/delete)
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === STORES_DIRTY_KEY && e.newValue === "1") {
+        refetchStores();
+        try { localStorage.removeItem(STORES_DIRTY_KEY); } catch {}
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [refetchStores]);
 
   // ====== debounce search ======
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -619,12 +647,11 @@ export default function MasterUserPage() {
             await mResetPwd.mutateAsync({ id: resetTarget.id });
             setResetTarget(null);
           } catch {
-            // toast sudah dihandle di mutation onError
+            /* error toast sudah dihandle */
           }
         }}
         onClose={() => { if (!mResetPwd.isLoading) setResetTarget(null); }}
       />
-
     </div>
   );
 }

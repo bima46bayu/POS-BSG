@@ -26,6 +26,13 @@ const fmtDateTime = (s) => {
     });
   } catch { return s; }
 };
+// potong berdasarkan jumlah kata
+const truncateWords = (text, maxWords = 12) => {
+  if (!text) return "-";
+  const parts = String(text).trim().split(/\s+/);
+  if (parts.length <= maxWords) return text;
+  return parts.slice(0, maxWords).join(" ") + "…";
+};
 const badgeType = (t) => {
   const v = String(t || "").toLowerCase();
   if (v === "retail") return "bg-emerald-50 text-emerald-700";
@@ -293,7 +300,7 @@ export default function MasterSupplierPage() {
       key: "address",
       header: "Address",
       width: "280px",
-      cell: (r) => <span className="text-gray-700 text-xs line-clamp-2">{r.address || "-"}</span>,
+      cell: (r) => <span className="text-gray-700 text-xs line-clamp-2">{truncateWords(r.address, 6) || "-"}</span>,
     },
     {
       key: "created_at",

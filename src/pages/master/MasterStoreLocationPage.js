@@ -14,6 +14,7 @@ import {
 } from "../../api/storeLocations";
 
 const PER_PAGE = 10;
+localStorage.setItem("POS_STORES_DIRTY", "1");
 
 /* ===== Utils ===== */
 const fmtDateTime = (s) => {

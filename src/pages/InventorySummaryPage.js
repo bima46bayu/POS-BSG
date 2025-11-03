@@ -1,13 +1,19 @@
 // src/pages/InventorySummaryPage.jsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, ClipboardList, Tag } from "lucide-react";
+import { ArrowLeft, ClipboardList, Tag, Download, ArrowUpDown } from "lucide-react";
+import toast from "react-hot-toast";
+
 import { getProductSummary, getProductLogs } from "../api/inventory";
 import DataTable from "../components/data-table/DataTable";
+import ExportPdfModal from "../components/common/ExportPdfModal";
+import { exportStockCardPdf } from "../lib/exportStockCardPdf";
 
+/* ===================== Konstanta ===================== */
 const PER_PAGE = 10;
 const MAX_PAGES = 200;
 
+/* ===================== Formatter ===================== */
 const fmtIDR = (n) =>
   Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 const fmtNum = (n) => Number(n || 0).toLocaleString("id-ID");
@@ -16,12 +22,22 @@ const fmtDate = (s) => {
   const d = new Date(s);
   return isNaN(d) ? "-" : d.toLocaleDateString("id-ID");
 };
+const toYMD = (s) => {
+  if (!s) return "";
+  const d = new Date(s);
+  if (isNaN(d)) return "";
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
 
-// ARAH NORMALISASI: SALE/DESTROY = keluar (-1); SALE_VOID/GR/ADD = masuk (+1)
+/* =========== Arah normalisasi Qty/Cost per Ref Type =========== */
 const fallbackDirection = (refType) => {
   const t = String(refType || "").toUpperCase();
   if (t === "SALE" || t === "DESTROY") return -1;               // keluar
-  if (t === "SALE_VOID" || t === "GR" || t === "ADD") return +1; // masuk (void return & inbound)
+  if (t === "SALE_VOID" || t === "GR" || t === "ADD") return +1; // masuk
+  if (t === "OPENING") return 0;                                 // opening tidak pengaruh saldo
   return 1;
 };
 
@@ -31,9 +47,11 @@ const refTypeClass = (t) => {
   if (k === "GR" || k === "ADD") return "bg-emerald-100 text-emerald-700";
   if (k === "DESTROY") return "bg-gray-200 text-gray-700";
   if (k === "SALE_VOID") return "bg-indigo-100 text-indigo-700";
+  if (k === "OPENING") return "bg-amber-100 text-amber-700";
   return "bg-slate-100 text-slate-700";
 };
 
+/* ===================== UI Kecil ===================== */
 const InfoRow = ({ label, value }) => (
   <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-[inset_0_0_0_9999px_rgba(248,250,252,0.65)]">
     <span className="text-[12px] leading-5 text-slate-600">{label}</span>
@@ -90,7 +108,7 @@ const ProductSummaryCard = ({
   </div>
 );
 
-// ===== Helpers =====
+/* ===================== Helpers Data ===================== */
 function sortLogsAsc(rows) {
   return [...rows].sort((a, b) => {
     const da = new Date(a._date || 0).getTime();
@@ -102,7 +120,6 @@ function sortLogsAsc(rows) {
   });
 }
 
-/** Running balance berdasarkan opening dari API */
 function addRunningBalances(rows, startQty, startCost) {
   let unitBal = Number(startQty || 0);
   let costBal = Number(startCost || 0);
@@ -111,15 +128,13 @@ function addRunningBalances(rows, startQty, startCost) {
   return asc.map((r, i) => {
     const isOpening = Boolean(r._is_opening) || String(r._ref_type || "").toUpperCase() === "ADD";
 
-    // delta yang memengaruhi balance
-    const dQty = isOpening ? 0 : Number(r._signed_qty || 0);
+    const dQty  = isOpening ? 0 : Number(r._signed_qty || 0);
     const dCost = isOpening ? 0 : Number(r._signed_cost || 0);
 
     unitBal += dQty;
     costBal += dCost;
 
-    // tampilan (±) : opening tampilkan qty & cost aslinya
-    const shownQty = isOpening ? Number(r._qty || 0) : dQty;
+    const shownQty  = isOpening ? Number(r._qty || 0) : dQty;
     const shownCost = isOpening ? Number(r._subtotal_cost || 0) : dCost;
 
     return {
@@ -133,6 +148,92 @@ function addRunningBalances(rows, startQty, startCost) {
   });
 }
 
+/* ===== Deteksi/Parser note ===== */
+function isOpeningNote(note) {
+  if (!note) return false;
+  return /stok\s*awal|stock\s*awal/i.test(String(note));
+}
+function isDestroyNote(note) {
+  if (!note) return false;
+  return /\bdestroy\b/i.test(String(note));
+}
+// "sale #POS-20251016-0007" -> "POS-20251016-0007", "GR GR-202510-0012" -> "GR-202510-0012"
+function extractDocNoFromNote(note, refType) {
+  const s = String(note || "").trim();
+  const t = String(refType || "").toUpperCase();
+  if (isOpeningNote(s) || t === "OPENING") return "OPENING";
+  if (isDestroyNote(s) || t === "DESTROY") return "DESTROY";
+
+  const mHash = s.match(/#([A-Za-z0-9._-]+)/);
+  if (mHash?.[1]) return mHash[1];
+
+  const common = s.match(/\b(POS|GR|PO|SO|DO|INV|ADJ)-[0-9]{4,}(?:-[0-9]+)*\b/i);
+  if (common?.[0]) return common[0].toUpperCase();
+
+  const generic = s.match(/\b[A-Z]{2,}-\d{2,}(?:-\d+)*\b/);
+  if (generic?.[0]) return generic[0];
+
+  return "-";
+}
+
+/* ===== Helpers export range ===== */
+function toDateOnly(d) {
+  if (!d) return null;
+  const x = new Date(d);
+  if (isNaN(x)) return null;
+  return new Date(x.getFullYear(), x.getMonth(), x.getDate());
+}
+function within(dateStr, fromStr, toStr) {
+  const d = toDateOnly(dateStr);
+  if (!d) return false;
+  const f = fromStr ? toDateOnly(fromStr) : null;
+  const t = toStr ? toDateOnly(toStr) : null;
+  if (f && d < f) return false;
+  if (t && d > t) return false;
+  return true;
+}
+function rebalanceForRange(allRows, globalOpeningQty, globalOpeningCost, fromStr, toStr) {
+  const f = fromStr ? new Date(fromStr + "T00:00:00") : null;
+
+  let openingQty = Number(globalOpeningQty || 0);
+  let openingCost = Number(globalOpeningCost || 0);
+
+  if (f) {
+    for (const r of allRows) {
+      const d = r._date ? new Date(r._date) : null;
+      if (d && d < f) {
+        openingQty += Number(r._signed_qty || 0);
+        openingCost += Number(r._signed_cost || 0);
+      }
+    }
+  }
+
+  const inRange = allRows
+    .filter((r) => within(r._date, fromStr, toStr))
+    .sort((a, b) => new Date(a._date || 0) - new Date(b._date || 0) || (Number(a.id||a._idx||0) - Number(b.id||b._idx||0)));
+
+  let balQty = openingQty;
+  let balCost = openingCost;
+
+  const rowsBalanced = inRange.map((r, i) => {
+    const shownQty  = Number(r._signed_qty || 0);
+    const shownCost = Number(r._signed_cost || 0);
+    balQty  += shownQty;
+    balCost += shownCost;
+    return {
+      ...r,
+      _idx: i,
+      _display_qty: shownQty,
+      _display_cost: shownCost,
+      _unit_balance_after: balQty,
+      _cost_balance_after: balCost,
+    };
+  });
+
+  return { openingQty, openingCost, rowsBalanced };
+}
+
+/* ===================== Halaman ===================== */
 export default function InventorySummaryPage() {
   const { id } = useParams();
   const { state } = useLocation();
@@ -141,14 +242,21 @@ export default function InventorySummaryPage() {
 
   const [period, setPeriod] = useState({ from: null, to: null });
   const [allLogs, setAllLogs] = useState([]);
+
   const [summary, setSummary] = useState({
     stockBeginning: 0, stockIn: 0, stockOut: 0, stockEnding: 0,
     costBeginning: 0, costIn: 0, costOut: 0, costEnding: 0,
   });
+
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
-  // Ambil period + summary API + semua logs
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+
+  // 'desc' (default terbaru di atas) / 'asc'
+  const [sortOrder, setSortOrder] = useState("desc");
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -156,17 +264,16 @@ export default function InventorySummaryPage() {
         getProductSummary(id),
         getProductLogs(id, { page: 1, per_page: PER_PAGE }),
       ]);
+
       setPeriod(sum?.period ?? { from: null, to: null });
 
-      // mapping dari API
       const openingQty   = Number(sum?.opening_qty ?? 0);
       const openingCost  = Number(sum?.opening_cost ?? 0);
-      const qtyIn        = Number(sum?.qty_in ?? 0);   // GR only
-      const qtyOut       = Number(sum?.qty_out ?? 0);  // SALE valid + DESTROY
-      const costIn       = Number(sum?.cost_in ?? 0);  // GR only
-      const costOut      = Number(sum?.cost_out ?? 0); // SALE valid + DESTROY
+      const qtyIn        = Number(sum?.qty_in ?? 0);
+      const qtyOut       = Number(sum?.qty_out ?? 0);
+      const costIn       = Number(sum?.cost_in ?? 0);
+      const costOut      = Number(sum?.cost_out ?? 0);
 
-      // hitung vs fallback dari API
       const stockEnding  = openingQty + qtyIn - qtyOut;
       const costEnding   = sum?.stock_cost_total != null
         ? Number(sum.stock_cost_total)
@@ -183,16 +290,21 @@ export default function InventorySummaryPage() {
         costEnding,
       });
 
-      // --- Normalisasi logs (untuk tabel & running balance) ---
       const normalize = (items) =>
         (Array.isArray(items) ? items : []).map((it) => {
           const ref_type = it.ref_type ?? it.reference_type ?? "-";
-          const dir = it.direction != null ? Number(it.direction) : fallbackDirection(ref_type);
 
-          const qty = Number(it.qty ?? it.quantity ?? 0);
-          const unit_cost = Number(it.unit_cost ?? it.unit_landed_cost ?? it.cost ?? 0);
-          const unit_price = Number(it.unit_price ?? it.price ?? 0);
+          // opening/destroy dari note atau ref_type
+          const opening = isOpeningNote(it.note) || String(ref_type).toUpperCase() === "OPENING";
+          const baseDir = it.direction != null ? Number(it.direction) : fallbackDirection(ref_type);
+          const dir = opening ? 0 : baseDir;
+
+          const qty           = Number(it.qty ?? it.quantity ?? 0);
+          const unit_cost     = Number(it.unit_cost ?? it.unit_landed_cost ?? it.cost ?? 0);
+          const unit_price    = Number(it.unit_price ?? it.price ?? 0);
           const subtotal_cost = Number(it.subtotal_cost ?? it.total_cost ?? qty * unit_cost);
+
+          const doc_no = extractDocNoFromNote(it.note, ref_type);
 
           return {
             ...it,
@@ -202,9 +314,12 @@ export default function InventorySummaryPage() {
             _unit_cost: unit_cost,
             _unit_price: unit_price,
             _subtotal_cost: subtotal_cost,
-            _signed_qty: qty * dir,                 // SALE_VOID => +qty
-            _signed_cost: subtotal_cost * dir,      // SALE_VOID => +cost
-            _is_opening: false, // opening berasal dari summary API
+
+            _signed_qty: qty * dir,            // opening => 0
+            _signed_cost: subtotal_cost * dir, // opening => 0
+            _is_opening: opening,
+
+            _doc_no: doc_no,
           };
         });
 
@@ -220,6 +335,9 @@ export default function InventorySummaryPage() {
       }
       setAllLogs(merged);
       setCurrentPage(1);
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.response?.data?.message || "Gagal memuat data.");
     } finally {
       setLoading(false);
     }
@@ -230,45 +348,53 @@ export default function InventorySummaryPage() {
   const headerName = productFromState?.name || `Product #${id}`;
   const headerSKU  = productFromState?.sku || "-";
 
-  // Running balance start dari opening summary API
-  const logsWithBalances = useMemo(() => {
+  // Balance kronologis (ASC)
+  const logsWithBalancesAsc = useMemo(() => {
     return addRunningBalances(allLogs, summary.stockBeginning, summary.costBeginning);
   }, [allLogs, summary.stockBeginning, summary.costBeginning]);
 
-  // Slice tabel
+  // Tampilan sesuai sort
+  const logsForDisplay = useMemo(() => {
+    return sortOrder === "desc" ? [...logsWithBalancesAsc].reverse() : logsWithBalancesAsc;
+  }, [logsWithBalancesAsc, sortOrder]);
+
   const tableRows = useMemo(() => {
     const start = (currentPage - 1) * PER_PAGE;
     const end = start + PER_PAGE;
-    return logsWithBalances.slice(start, end);
-  }, [logsWithBalances, currentPage]);
+    return logsForDisplay.slice(start, end);
+  }, [logsForDisplay, currentPage]);
 
   const meta = useMemo(() => {
-    const total = logsWithBalances.length;
+    const total = logsForDisplay.length;
     return {
       current_page: currentPage,
       per_page: PER_PAGE,
       total,
       last_page: Math.max(1, Math.ceil(total / PER_PAGE)),
     };
-  }, [logsWithBalances.length, currentPage]);
+  }, [logsForDisplay.length, currentPage]);
 
-  // Kolom: Qty±, Unit Balance, Unit Cost, Cost Balance, Total Cost±
+  // Kolom halaman (tanpa FIFO Loc)
   const columns = useMemo(
     () => [
-      { header: "Tanggal", width: "140px", cell: (r) => <span>{fmtDate(r._date)}</span> },
+      { header: "Tanggal", width: "120px", cell: (r) => <span>{fmtDate(r._date)}</span> },
       {
         header: "Ref Type",
-        width: "150px",
+        width: "120px",
         cell: (r) => {
           const ref = String(r._ref_type || "-").toUpperCase();
           return (
             <span className={`px-2 py-1 rounded-full text-xs font-medium ${refTypeClass(ref)}`}>
               {ref}
-              {ref === "SALE_VOID" && <span className="ml-1 text-[10px] opacity-70">(Void Return)</span>}
             </span>
           );
         },
       },
+      { header: "Doc No", width: "180px", cell: (r) => (
+          <span className="font-medium truncate inline-block max-w-[160px]" title={r._doc_no || "-"}>
+            {r._doc_no || "-"}
+          </span>
+      ) },
       {
         header: "Qty (±)",
         width: "110px",
@@ -308,6 +434,55 @@ export default function InventorySummaryPage() {
     []
   );
 
+  /* ===================== Export Handler (client-side) ===================== */
+  async function handleExportConfirm({ from, to }) {
+    setExportLoading(true);
+    try {
+      const { openingQty, openingCost, rowsBalanced } = rebalanceForRange(
+        logsWithBalancesAsc,
+        summary.stockBeginning,
+        summary.costBeginning,
+        from || null,
+        to || null
+      );
+
+      const pdfSummary = {
+        stockBeginning: openingQty,
+        stockIn: rowsBalanced.filter(r => Number(r._display_qty||0) > 0)
+                             .reduce((a,b)=> a + Number(b._display_qty||0), 0),
+        stockOut: rowsBalanced.filter(r => Number(r._display_qty||0) < 0)
+                              .reduce((a,b)=> a + Math.abs(Number(b._display_qty||0)), 0),
+        stockEnding: rowsBalanced.length ? rowsBalanced[rowsBalanced.length-1]._unit_balance_after : openingQty,
+        costBeginning: openingCost,
+        costIn: rowsBalanced.filter(r => Number(r._display_cost||0) > 0)
+                            .reduce((a,b)=> a + Number(b._display_cost||0), 0),
+        costOut: rowsBalanced.filter(r => Number(r._display_cost||0) < 0)
+                             .reduce((a,b)=> a + Math.abs(Number(b._display_cost||0)), 0),
+        costEnding: rowsBalanced.length ? rowsBalanced[rowsBalanced.length-1]._cost_balance_after : openingCost,
+      };
+
+      exportStockCardPdf({
+        company: "PT. BUANA SELARAS GLOBALINDO",
+        productName: headerName,
+        sku: headerSKU,
+        period: { from: from || period?.from || null, to: to || period?.to || null },
+        summary: pdfSummary,
+        openingQty,
+        openingCost,
+        rows: rowsBalanced,
+      });
+
+      toast.success("PDF berhasil dibuat.");
+      setExportOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.message || "Gagal generate PDF.");
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  /* ===================== Render ===================== */
   return (
     <div className="relative min-h-screen bg-slate-50">
       {/* Back */}
@@ -349,8 +524,30 @@ export default function InventorySummaryPage() {
               </div>
               <div className="font-semibold text-slate-900">Stock Logs</div>
             </div>
-            <div className="text-xs text-slate-500">
-              Menampilkan {PER_PAGE} per halaman • Total {fmtNum(meta?.total ?? 0)}
+
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-slate-500 hidden md:block pl-1">
+                Menampilkan {PER_PAGE} • Total {fmtNum(meta?.total ?? 0)}
+              </div>
+              {/* Toggle sort ikon */}
+              <button
+                title={sortOrder === "desc" ? "Urut: Terbaru → Terlama" : "Urut: Terlama → Terbaru"}
+                onClick={() => {
+                  setSortOrder((v) => (v === "desc" ? "asc" : "desc"));
+                  setCurrentPage(1);
+                }}
+                className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 hover:bg-slate-50"
+              >
+                <ArrowUpDown className="w-4 h-4 text-slate-700" />
+              </button>
+              {/* Export PDF */}
+              <button
+                onClick={() => setExportOpen(true)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-blue-600 text-white hover:bg-blue-700"
+                title="Export PDF"
+              >
+                <Download className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
@@ -365,6 +562,16 @@ export default function InventorySummaryPage() {
           />
         </div>
       </div>
+
+      {/* Export Modal (range tanggal) */}
+      <ExportPdfModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        onConfirm={handleExportConfirm}
+        defaultFrom={period?.from ? toYMD(period.from) : ""}
+        defaultTo={period?.to ? toYMD(period.to) : ""}
+        loading={exportLoading}
+      />
     </div>
   );
 }
