@@ -1,6 +1,6 @@
-// src/components/products/AddProduct.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
+import { getMe } from "../../api/users";
 
 /**
  * Props:
@@ -31,7 +31,33 @@ export default function AddProduct({
   const [isDragOver, setIsDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Filter subcategory berdasarkan category (tetap aktif; kalau belum pilih category, tampilkan semua)
+  // === store user dari /api/me (auto) ===
+  const [storeLocationId, setStoreLocationId] = useState(null);
+  const [meLoading, setMeLoading] = useState(true);
+  const [meError, setMeError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setMeLoading(true);
+      setMeError("");
+      try {
+        const me = await getMe();
+        const sid = me?.store_location?.id ?? me?.store_location_id ?? null;
+        if (!cancelled) setStoreLocationId(sid);
+      } catch (e) {
+        if (!cancelled) {
+          setStoreLocationId(null);
+          setMeError("Gagal mengambil lokasi store user.");
+        }
+      } finally {
+        if (!cancelled) setMeLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Filter subcategory berdasarkan category
   const filteredSubs = useMemo(() => {
     const list = subCategories || [];
     const cid = String(form.category_id || "");
@@ -120,6 +146,13 @@ export default function AddProduct({
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return;
+
+    if (storeLocationId == null) {
+      // cegah kirim tanpa store; BE akan menolak kalau perlu store
+      alert("Lokasi store user tidak ditemukan. Silakan relogin atau hubungi admin.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const payload = {
@@ -127,6 +160,8 @@ export default function AddProduct({
         price: form.price ? Number(form.price) : 0,
         stock: form.stock ? Number(form.stock) : 0,
         images: files.map((f) => f.file),
+        // auto inject store dari /api/me:
+        store_location_id: storeLocationId,
       };
       await onSubmit?.(payload);
     } finally {
@@ -151,6 +186,12 @@ export default function AddProduct({
           <h2 className="text-xl leading-6 font-semibold text-gray-900">
             Tambah Produk
           </h2>
+          {meLoading && <p className="text-xs text-gray-500 mt-1">Memuat store user…</p>}
+          {!meLoading && storeLocationId == null && (
+            <p className="text-xs text-red-600 mt-1">
+              {meError || "Store user tidak ditemukan. Produk tidak bisa disimpan."}
+            </p>
+          )}
         </div>
 
         {/* content */}
@@ -309,7 +350,8 @@ export default function AddProduct({
           <button
             type="submit"
             className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-            disabled={submitting}
+            disabled={submitting || meLoading || storeLocationId == null}
+            title={storeLocationId == null ? "Store user tidak ditemukan" : undefined}
           >
             {submitting ? "Saving..." : "Save Product"}
           </button>

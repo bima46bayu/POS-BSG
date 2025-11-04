@@ -1,3 +1,4 @@
+// src/pages/POSPage.jsx
 import React, { useCallback, useMemo, useEffect } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import SearchBar from "../components/pos/SearchBar";
@@ -10,12 +11,23 @@ import toast from "react-hot-toast";
 
 import { getProducts, getProductBySKU } from "../api/products";
 import { getCategories, getSubCategories } from "../api/categories";
+import { getMe } from "../api/users";
+import { listStoreLocations } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
 
-const PER_PAGE = 10000;
+const PER_PAGE = 60;
 const TAX_RATE = 0;
 
-// Normalizer: samakan bentuk data product untuk FE
+/* ===== Debounce util ===== */
+function useDebouncedValue(value, delay = 300) {
+  const [v, setV] = React.useState(value);
+  React.useEffect(() => {
+    const id = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return v;
+}
+
 const normalize = (p) => ({
   id: p.id ?? p.product_id ?? p.sku,
   name: p.name ?? p.product_name ?? p.nama ?? "Tanpa Nama",
@@ -28,19 +40,69 @@ const normalize = (p) => ({
 });
 
 export default function POSPage() {
-  // ===== Local UI states =====
+  /* ===== UI states ===== */
   const [q, setQ] = React.useState("");
+  const debouncedQ = useDebouncedValue(q, 300);
+
   const [filters, setFilters] = React.useState({
     category_id: undefined,
     sub_category_id: undefined,
-    stock_status: "any", // any|available|out
+    stock_status: "any",
   });
   const [pickedCategory, setPickedCategory] = React.useState(undefined);
 
   const [cartItems, setCartItems] = React.useState([]);
   const [sheetOpen, setSheetOpen] = React.useState(false);
 
-  // ===== Categories (cached) =====
+  /* ===== /api/me (role & store) ===== */
+  const meQ = useQuery({
+    queryKey: ["me"],
+    queryFn: ({ signal }) => getMe(signal),
+    retry: 1,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const role = (meQ.data?.role || "").toLowerCase();
+  const isAdmin = role === "admin";
+  const myStoreIdFromMe = meQ.isSuccess
+    ? (meQ.data?.store_location?.id ?? meQ.data?.store_location_id ?? null)
+    : null;
+
+  /* ===== stores (untuk admin) ===== */
+  const storesQ = useQuery({
+    queryKey: ["stores", { per_page: 200 }],
+    queryFn: ({ signal }) => listStoreLocations({ per_page: 200 }, signal),
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    enabled: isAdmin || meQ.isError, // load kalau admin; jika me error, kita pakai buat fallback
+  });
+  const stores = storesQ.data?.items ?? [];
+
+  /* ===== selected store =====
+     Kasir  : terkunci ke store milik user (tanpa selector).
+     Admin  : selector dengan opsi "Semua".
+  */
+  const [selectedStoreId, setSelectedStoreId] = React.useState(undefined);
+
+  // default dari /api/me
+  useEffect(() => {
+    if (meQ.isSuccess && selectedStoreId === undefined) {
+      if (isAdmin) {
+        setSelectedStoreId(myStoreIdFromMe != null ? String(myStoreIdFromMe) : "ALL");
+      } else {
+        setSelectedStoreId(myStoreIdFromMe != null ? String(myStoreIdFromMe) : "");
+      }
+    }
+  }, [meQ.isSuccess, isAdmin, myStoreIdFromMe, selectedStoreId]);
+
+  // fallback jika /api/me error → admin-like dengan ALL supaya jalan
+  useEffect(() => {
+    if (meQ.isError && selectedStoreId === undefined) {
+      setSelectedStoreId("ALL");
+    }
+  }, [meQ.isError, selectedStoreId]);
+
+  /* ===== Categories ===== */
   const { data: categories = [] } = useQuery({
     queryKey: ["categories"],
     queryFn: getCategories,
@@ -54,26 +116,28 @@ export default function POSPage() {
     staleTime: 30 * 60 * 1000,
   });
 
-  // ===== Products (infinite) =====
+  /* ===== Products (infinite) ===== */
   const productsQuery = useInfiniteQuery({
-    queryKey: ["products", { q, ...filters }],
-    queryFn: async ({ pageParam = 1 }) => {
+    queryKey: ["products", { q: debouncedQ, ...filters, scope: selectedStoreId ?? "NONE" }],
+    queryFn: async ({ pageParam = 1, signal }) => {
+      const isAll = selectedStoreId === "ALL";
       const params = {
-        search: q || undefined,
+        search: debouncedQ || undefined,
         page: pageParam,
         per_page: PER_PAGE,
         category_id: filters.category_id,
         sub_category_id: filters.sub_category_id,
         in_stock: filters.stock_status === "available" ? 1 : undefined,
         out_of_stock: filters.stock_status === "out" ? 1 : undefined,
+        store_id: !isAll && selectedStoreId ? Number(selectedStoreId) : undefined,
+        only_store: !isAll && selectedStoreId ? 1 : undefined,
       };
-      const res = await getProducts(params);
-      return res;
+      return getProducts(params, signal);
     },
+    enabled: selectedStoreId !== undefined && (isAdmin || !!selectedStoreId),
     getNextPageParam: (lastPage) => {
       const m = lastPage?.meta;
-      if (m && m.current_page < m.last_page) return m.current_page + 1;
-      return undefined;
+      return m && m.current_page < m.last_page ? m.current_page + 1 : undefined;
     },
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
@@ -90,11 +154,21 @@ export default function POSPage() {
   }, [productsQuery.data]);
 
   const hasMore = !!productsQuery.hasNextPage;
-  const loading = productsQuery.isFetching && !productsQuery.isFetchingNextPage;
+  const loading =
+    (productsQuery.isFetching && !productsQuery.isFetchingNextPage) ||
+    meQ.isLoading ||
+    (isAdmin && storesQ.isLoading && selectedStoreId === undefined);
   const loadingMore = productsQuery.isFetchingNextPage;
-  const err = productsQuery.isError ? "Gagal memuat produk" : "";
+  const err =
+    productsQuery.isError
+      ? "Gagal memuat produk"
+      : storesQ.isError && isAdmin
+      ? "Gagal memuat daftar cabang"
+      : meQ.isError
+      ? "Gagal memuat data user"
+      : "";
 
-  // ===== Cart handlers =====
+  /* ===== Cart handlers ===== */
   const handleAddToCart = useCallback((product) => {
     setCartItems((prev) => {
       const exist = prev.find((i) => i.id === product.id);
@@ -104,12 +178,7 @@ export default function POSPage() {
           )
         : [
             ...prev,
-            {
-              ...product,
-              quantity: 1,
-              discount_type: "%",     // 'rp' | '%'
-              discount_value: 0,      // number
-            },
+            { ...product, quantity: 1, discount_type: "%", discount_value: 0 },
           ];
     });
   }, []);
@@ -140,7 +209,7 @@ export default function POSPage() {
     setCartItems((prev) => prev.filter((i) => i.id !== id));
   }, []);
 
-  // ===== Search / Filter / Category pick / Scan =====
+  /* ===== Search / Filter / Category pick / Scan ===== */
   const handleSearch = useCallback((text) => setQ(text), []);
   const handleFilterChange = useCallback((f) => setFilters(f), []);
   const handlePickCategory = useCallback((catId) => setPickedCategory(catId || undefined), []);
@@ -149,18 +218,18 @@ export default function POSPage() {
     async (code) => {
       try {
         const cleanCode = code.trim().toUpperCase();
-        const p = await getProductBySKU(cleanCode);
-        
-        if (!p) {
-          return toast.error(`Kode ${cleanCode} tidak ditemukan`);
-        }
-        
-        // Optional: Validasi SKU match (extra safety)
+        const isAll = selectedStoreId === "ALL";
+
+        const p = await getProductBySKU(
+          cleanCode,
+          isAll ? {} : { store_id: Number(selectedStoreId), only_store: 1 }
+        );
+
+        if (!p) return toast.error(`Kode ${cleanCode} tidak ditemukan`);
         if (p.sku?.toUpperCase() !== cleanCode) {
           console.warn(`SKU mismatch: expected ${cleanCode}, got ${p.sku}`);
           return toast.error(`Produk tidak ditemukan`);
         }
-        
         handleAddToCart(normalize(p));
         toast.success(`${p.name} ditambahkan ke cart`);
       } catch (e) {
@@ -168,10 +237,10 @@ export default function POSPage() {
         toast.error("Scanner error. Coba lagi.");
       }
     },
-    [handleAddToCart]
+    [handleAddToCart, selectedStoreId]
   );
 
-  // ===== Totals dengan diskon per-item =====
+  /* ===== Totals ===== */
   const subtotalItems = useMemo(() => {
     return cartItems.reduce((s, i) => {
       const price = Number(i.price || 0);
@@ -183,11 +252,10 @@ export default function POSPage() {
       return s + netUnit * qty;
     }, 0);
   }, [cartItems]);
-
   const tax = useMemo(() => Math.round(subtotalItems * TAX_RATE), [subtotalItems]);
   const total = subtotalItems + tax;
 
-  // ===== Infinite scroll trigger =====
+  /* ===== Infinite scroll trigger ===== */
   useEffect(() => {
     function onScroll() {
       if (!hasMore || productsQuery.isFetchingNextPage) return;
@@ -202,22 +270,39 @@ export default function POSPage() {
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-50">
       {/* Main Content */}
-      {/* FIX: jadikan main sebagai baseline z-stack */}
-      <main className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-20 md:pb-0 relative z-0">
+      <main className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-24 md:pb-0 relative z-0">
         <div className="max-w-6xl mx-auto">
-          <SearchBar
-            onSearch={handleSearch}
-            onScan={handleScan}
-            onFilterChange={handleFilterChange}
-            categories={categories}
-            subCategories={subCategories}
-            onPickCategory={handlePickCategory}
-          />
+          {/* Toolbar: dibuat satu bar dengan SearchBar + tombol filter/scan, selector cabang nempel kanan */}
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-4">
+            {/* kiri: komponen search+filter+scanner kamu */}
+            <div className="flex-1">
+              <SearchBar
+                onSearch={handleSearch}
+                onScan={handleScan}
+                onFilterChange={handleFilterChange}
+                categories={categories}
+                subCategories={subCategories}
+                onPickCategory={setPickedCategory}
 
-          {loading && <div className="text-gray-500 mb-3">Loading products…</div>}
-          {err && <div className="text-red-600 mb-3">{err}</div>}
+                /* ====== baru: selector cabang ====== */
+                showStoreSelector={isAdmin}
+                storeOptions={[
+                  { value: "ALL", label: "Semua" },
+                  ...stores.map((s) => ({ value: String(s.id), label: s.name })),
+                ]}
+                selectedStoreId={selectedStoreId || "ALL"}
+                onChangeStore={(val) => setSelectedStoreId(val || "ALL")}
+                storeDisabled={storesQ.isLoading}
+              />
+            </div>
+          </div>
+
+          {loading && <div className="text-gray-500 mt-3">Loading products…</div>}
+          {err && <div className="text-red-600 mt-3">{err}</div>}
           {!loading && !err && flatProducts.length === 0 && (
-            <div className="text-gray-500 mb-3">Tidak ada produk.</div>
+            <div className="text-gray-500 mt-3">
+              {isAdmin && selectedStoreId === "ALL" ? "Tidak ada produk (semua cabang)." : "Tidak ada produk di cabang ini."}
+            </div>
           )}
 
           <ProductGrid products={flatProducts} onAddToCart={handleAddToCart} />
@@ -230,7 +315,6 @@ export default function POSPage() {
       </main>
 
       {/* Desktop order panel */}
-      {/* FIX: naikkan z-index supaya panel & isinya (popup) di atas grid produk */}
       <aside
         className="hidden md:block order-2 w-full md:w-[340px] lg:w-[400px] xl:w-[480px]
                    bg-white border-t md:border-t-0 md:border-l border-gray-200
@@ -239,9 +323,25 @@ export default function POSPage() {
       >
         <OrderDetails
           items={cartItems}
-          onUpdateQuantity={handleUpdateQuantity}
-          onUpdateDiscount={handleUpdateDiscount}
-          onRemoveItem={handleRemoveItem}
+          onUpdateQuantity={(id, c) => {
+            setCartItems((prev) =>
+              prev
+                .map((item) =>
+                  item.id !== id
+                    ? item
+                    : item.quantity + c > 0
+                    ? { ...item, quantity: item.quantity + c }
+                    : null
+                )
+                .filter(Boolean)
+            );
+          }}
+          onUpdateDiscount={(id, d) => {
+            setCartItems((prev) =>
+              prev.map((it) => (it.id === id ? { ...it, ...d } : it))
+            );
+          }}
+          onRemoveItem={(id) => setCartItems((prev) => prev.filter((i) => i.id !== id))}
         />
 
         <SaleSubmitter
@@ -255,10 +355,14 @@ export default function POSPage() {
           }}
           onCancel={() => setCartItems([])}
           showSummary={true}
+          extraPayload={{
+            store_location_id:
+              selectedStoreId && selectedStoreId !== "ALL" ? Number(selectedStoreId) : undefined,
+          }}
         />
       </aside>
 
-      {/* Mobile mini bar (drop-up trigger) */}
+      {/* Mobile mini bar */}
       <div className="md:hidden fixed left-0 right-0 bottom-0 z-40 bg-white border-t border-gray-200">
         <button
           onClick={() => setSheetOpen(true)}
@@ -281,9 +385,25 @@ export default function POSPage() {
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         items={cartItems}
-        onUpdateQuantity={handleUpdateQuantity}
-        onUpdateDiscount={handleUpdateDiscount}
-        onRemoveItem={handleRemoveItem}
+        onUpdateQuantity={(id, c) => {
+          setCartItems((prev) =>
+            prev
+              .map((item) =>
+                item.id !== id
+                  ? item
+                  : item.quantity + c > 0
+                  ? { ...item, quantity: item.quantity + c }
+                  : null
+              )
+              .filter(Boolean)
+          );
+        }}
+        onUpdateDiscount={(id, d) => {
+          setCartItems((prev) =>
+            prev.map((it) => (it.id === id ? { ...it, ...d } : it))
+          );
+        }}
+        onRemoveItem={(id) => setCartItems((prev) => prev.filter((i) => i.id !== id))}
         subtotal={subtotalItems}
         tax={tax}
         total={total}

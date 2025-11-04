@@ -1,12 +1,12 @@
-// src/components/products/UpdateProduct.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
+import { getMe } from "../../api/users";
 
 /**
  * Props:
  *  - open: boolean
  *  - onClose: () => void
- *  - onSubmit: (payload) => Promise<void> | void   // kamu yang kirim ke API
+ *  - onSubmit: (payload) => Promise<void> | void
  *  - categories: [{id, name}]
  *  - subCategories: [{id, name, category_id}]
  *  - product: {id, name, price, category_id, sub_category_id, stock, sku, description, image_url?}
@@ -33,6 +33,32 @@ export default function UpdateProduct({
   const [isDragOver, setIsDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // === store user dari /api/me (auto) ===
+  const [storeLocationId, setStoreLocationId] = useState(null);
+  const [meLoading, setMeLoading] = useState(true);
+  const [meError, setMeError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setMeLoading(true);
+      setMeError("");
+      try {
+        const me = await getMe();
+        const sid = me?.store_location?.id ?? me?.store_location_id ?? null;
+        if (!cancelled) setStoreLocationId(sid);
+      } catch (e) {
+        if (!cancelled) {
+          setStoreLocationId(null);
+          setMeError("Gagal mengambil lokasi store user.");
+        }
+      } finally {
+        if (!cancelled) setMeLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Prefill dari product saat modal dibuka
   useEffect(() => {
     if (open && product) {
@@ -45,7 +71,7 @@ export default function UpdateProduct({
         sku: product.sku ?? "",
         description: product.description ?? "",
       });
-      setFiles([]); // biarkan kosong agar tidak overwrite kalau user tidak ganti gambar
+      setFiles([]); // biar tidak overwrite jika user tidak ganti gambar
       setSubmitting(false);
     }
     if (!open) {
@@ -64,7 +90,7 @@ export default function UpdateProduct({
     }
   }, [open, product]);
 
-  // Filter subcategory berdasarkan category (tetap aktif; kalau belum pilih category, tampilkan semua)
+  // Filter subcategory berdasarkan category
   const filteredSubs = useMemo(() => {
     const list = subCategories || [];
     const cid = String(form.category_id || "");
@@ -88,7 +114,7 @@ export default function UpdateProduct({
     }));
   };
 
-  // ========= Upload helpers (sama persis) =========
+  // ========= Upload helpers =========
   const readableSize = (n) => {
     const kb = n / 1024;
     if (kb < 1024) return `${Math.round(kb)}kb`;
@@ -136,14 +162,22 @@ export default function UpdateProduct({
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting || !product?.id) return;
+
+    if (storeLocationId == null) {
+      alert("Lokasi store user tidak ditemukan. Silakan relogin atau hubungi admin.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const payload = {
-        id: product.id, // penting untuk update
+        id: product.id,
         ...form,
         price: form.price ? Number(form.price) : 0,
         stock: form.stock ? Number(form.stock) : 0,
-        images: files.map((f) => f.file), // kosongkan jika tidak ganti gambar
+        images: files.map((f) => f.file),
+        // auto inject store dari /api/me:
+        store_location_id: storeLocationId,
       };
       await onSubmit?.(payload);
     } finally {
@@ -168,6 +202,12 @@ export default function UpdateProduct({
           <h2 className="text-xl leading-6 font-semibold text-gray-900">
             Ubah Produk
           </h2>
+          {meLoading && <p className="text-xs text-gray-500 mt-1">Memuat store user…</p>}
+          {!meLoading && storeLocationId == null && (
+            <p className="text-xs text-red-600 mt-1">
+              {meError || "Store user tidak ditemukan. Produk tidak bisa disimpan."}
+            </p>
+          )}
         </div>
 
         {/* content */}
@@ -240,13 +280,13 @@ export default function UpdateProduct({
             />
           </Field>
 
-          {/* uploader (sama persis) */}
+          {/* uploader */}
           <div className="mb-3">
             <label className="block text-xs font-medium text-gray-600 mb-2">
               Product Photo
             </label>
 
-            {/* Jika ingin menampilkan foto lama sekilas */}
+            {/* preview foto lama */}
             {product?.image_url && files.length === 0 && (
               <div className="mb-3">
                 <img
@@ -340,7 +380,8 @@ export default function UpdateProduct({
           <button
             type="submit"
             className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-            disabled={submitting}
+            disabled={submitting || meLoading || storeLocationId == null}
+            title={storeLocationId == null ? "Store user tidak ditemukan" : undefined}
           >
             {submitting ? "Updating..." : "Update Product"}
           </button>
@@ -350,7 +391,7 @@ export default function UpdateProduct({
   );
 }
 
-/* ------- Reusable inputs (tetap sama persis) ------- */
+/* ------- Reusable inputs ------- */
 function Field({ label, children }) {
   return (
     <div className="mb-4">

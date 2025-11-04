@@ -1,8 +1,11 @@
 // src/pages/ProductPage.jsx
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Calendar, Download, Filter, X, Edit, Trash2, Plus, Image as ImageIcon, Search } from "lucide-react";
-import { toAbsoluteUrl } from "../api/client";
+import React, { useEffect, useMemo, useRef, useState, useCallback, useTransition } from "react";
+import {
+  Calendar, Download, Filter, X, Edit, Trash2, Plus, Image as ImageIcon, Search, Store as StoreIcon
+} from "lucide-react";
 import toast from "react-hot-toast";
+
+import { toAbsoluteUrl } from "../api/client";
 import {
   getProducts,
   uploadProductImage,
@@ -10,39 +13,64 @@ import {
   createProductWithImages,
   updateProductWithImages,
 } from "../api/products";
+import { getCategories, getSubCategories } from "../api/categories";
+import { getMe } from "../api/users";
+import { listStoreLocations } from "../api/storeLocations";
+
 import AddProduct from "../components/products/AddProduct";
 import UpdateProduct from "../components/products/UpdateProduct";
-import { getCategories, getSubCategories } from "../api/categories";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import DataTable from "../components/data-table/DataTable";
 
 const PER_PAGE = 10;
 
-/* ========================== CACHE CONFIG ========================== */
-const CACHE_KEY = "POS_CATEGORIES_CACHE_V1";   // { ts, categories, subCategories }
-const CACHE_DIRTY_KEY = "POS_CATS_DIRTY";      // "1" jika harus refresh
-const CACHE_TTL_MS = 5 * 60 * 1000;            // 5 menit
+/* ========= kecil2: cache kategori ========= */
+const CACHE_KEY = "POS_CATEGORIES_CACHE_V1";
+const CACHE_DIRTY_KEY = "POS_CATS_DIRTY";
+const CAT_CACHE_TTL_MS = 5 * 60 * 1000;
 const readCache = () => { try { const raw = localStorage.getItem(CACHE_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; } };
 const writeCache = (payload) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ...payload, ts: Date.now() })); } catch {} };
-const isCacheStale = (ts) => !ts || (Date.now() - ts > CACHE_TTL_MS);
+const isCacheStale = (ts) => !ts || (Date.now() - ts > CAT_CACHE_TTL_MS);
 const isDirty = () => localStorage.getItem(CACHE_DIRTY_KEY) === "1";
 const clearDirty = () => localStorage.removeItem(CACHE_DIRTY_KEY);
-/* ================================================================= */
 
+/* ========= LRU cache untuk list products ========= */
+const LIST_CACHE_TTL_MS = 60 * 1000;         // 60 detik: cukup agresif tapi aman
+const LIST_CACHE_MAX = 50;                   // maksimal 50 kombinasi query
+const listCache = new Map();                 // key -> { ts, payload }
+const listCacheGet = (key) => {
+  const hit = listCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > LIST_CACHE_TTL_MS) { listCache.delete(key); return null; }
+  // refresh posisi LRU
+  listCache.delete(key); listCache.set(key, hit);
+  return hit.payload;
+};
+const listCacheSet = (key, payload) => {
+  if (listCache.has(key)) listCache.delete(key);
+  listCache.set(key, { ts: Date.now(), payload });
+  while (listCache.size > LIST_CACHE_MAX) {
+    const first = listCache.keys().next().value;
+    listCache.delete(first);
+  }
+};
+
+/* ========= util kecil ========= */
 const badgeClass = (n) => {
   const v = Number(n || 0);
   if (v === 0) return "bg-red-100 text-red-800";
   if (v <= 5) return "bg-yellow-100 text-yellow-800";
   return "bg-blue-100 text-blue-800";
 };
-
-function useDebounce(value, delay = 300) {
-  const [v, setV] = useState(value);
-  useEffect(() => { const id = setTimeout(() => setV(value), delay); return () => clearTimeout(id); }, [value, delay]);
-  return v;
-}
-
-function normalizeSubCategories(cats = []) {
+const formatIDR = (v) =>
+  Number(v ?? 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+const formatDateTime = (s) => {
+  if (!s) return "-";
+  try {
+    return new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch { return s; }
+};
+const normalizeSubCategories = (cats = []) => {
   const out = [];
   cats.forEach((c) => {
     const children = c.sub_categories || c.subCategories || c.children || c.subs || [];
@@ -51,61 +79,111 @@ function normalizeSubCategories(cats = []) {
     });
   });
   return out;
-}
-
-const formatIDR = (v) => Number(v ?? 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
-const formatDateTime = (s) => {
-  if (!s) return "-";
-  try {
-    return new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  } catch { return s; }
 };
 
+// Serialize params ke key yang stabil (urutkan kunci)
+const stableKey = (obj) => {
+  const sorted = Object.keys(obj).sort().reduce((a, k) => (a[k] = obj[k], a), {});
+  return JSON.stringify(sorted);
+};
+
+/* ========= debounce hook ========= */
+function useDebouncedValue(value, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 export default function ProductPage() {
-  // ====== query state ======
+  const [isPending, startTransition] = useTransition();
+
+  /* ====== User store dari /api/me ====== */
+  const [myStoreId, setMyStoreId] = useState(undefined);   // undefined = belum tahu, null = tidak ada
+  const [storeName, setStoreName] = useState("-");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await getMe();
+        const sid = me?.store_location?.id ?? me?.store_location_id ?? null;
+        if (!cancelled) {
+          setMyStoreId(sid);
+          setStoreName(me?.store_location?.name ?? "-");
+        }
+      } catch {
+        if (!cancelled) { setMyStoreId(null); setStoreName("-"); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  /* ====== daftar store untuk dropdown ====== */
+  const [stores, setStores] = useState([]);
+  const [storesLoading, setStoresLoading] = useState(false);
+  useEffect(() => {
+    let cancel = false;
+    setStoresLoading(true);
+    listStoreLocations({ per_page: 100 })
+      .then(({ items }) => {
+        if (cancel) return;
+        setStores(Array.isArray(items) ? items : []);
+      })
+      .catch(() => { if (!cancel) toast.error("Gagal memuat daftar cabang"); })
+      .finally(() => { if (!cancel) setStoresLoading(false); });
+    return () => { cancel = true; };
+  }, []);
+
+  // store terpilih di dropdown; "ALL" berarti semua cabang
+  const [selectedStore, setSelectedStore] = useState("ALL");
+
+  // set default selectedStore = myStoreId setelah kedua data tersedia
+  useEffect(() => {
+    if (myStoreId !== undefined) {
+      setSelectedStore((prev) => (prev === "ALL" || prev == null ? (myStoreId ?? "ALL") : prev));
+    }
+  }, [myStoreId]);
+
+  /* ====== filters ====== */
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
-  const [skuExact, setSkuExact] = useState("");
+  const debouncedSearch = useDebouncedValue(searchTerm, 300);  // ⬅️ debounce
   const [categoryId, setCategoryId] = useState("");
   const [subCategoryId, setSubCategoryId] = useState("");
   const [stockStatus, setStockStatus] = useState("");
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
 
-  // filter popover
   const [showFilters, setShowFilters] = useState(false);
-  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
+  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
 
-  // draft filter (di popover)
-  const [draftSearchTerm, setDraftSearchTerm] = useState("");
-  const [draftSkuExact, setDraftSkuExact] = useState("");
+  // draft dalam popover
   const [draftCategoryId, setDraftCategoryId] = useState("");
   const [draftSubCategoryId, setDraftSubCategoryId] = useState("");
   const [draftStockStatus, setDraftStockStatus] = useState("");
   const [draftPriceRange, setDraftPriceRange] = useState({ min: "", max: "" });
 
-  // data state
+  /* ====== data ====== */
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({ current_page: 1, per_page: PER_PAGE, total: 0, last_page: 1 });
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
 
-  // modals
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [fileToUpload, setFileToUpload] = useState(null);
+  /* ====== modal & aksi ====== */
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
-
-  // confirm delete
+  const [selectedProduct, setSelectedProduct] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  /* ================== LOAD CATEGORIES WITH CACHE ================== */
+  /* ====== kategori (cache) ====== */
   useEffect(() => {
     let cancel = false;
+
     const toArray = (res) => {
       const payload = res?.data ?? res;
       if (Array.isArray(payload)) return payload;
@@ -154,22 +232,112 @@ export default function ProductPage() {
     };
 
     const cached = useCacheFirst();
-    const needFetch = !cached || isCacheStale(cached.ts) || isDirty();
-    if (needFetch) fetchFresh();
+    if (!cached || isCacheStale(cached.ts) || isDirty()) fetchFresh();
 
-    const onStorage = (e) => {
-      if (e.key === CACHE_DIRTY_KEY && e.newValue === "1") fetchFresh();
-    };
+    const onStorage = (e) => { if (e.key === CACHE_DIRTY_KEY && e.newValue === "1") fetchFresh(); };
     window.addEventListener("storage", onStorage);
     return () => { cancel = true; window.removeEventListener("storage", onStorage); };
   }, []);
-  /* ================================================================= */
 
-  // ====== filters & fetch products ======
+  /* ====== query builder ====== */
+  const queryParams = useMemo(() => {
+    const p = { page: currentPage, per_page: PER_PAGE };
+    if (debouncedSearch.trim()) p.search = debouncedSearch.trim(); // ⬅️ pakai yang debounced
+    if (categoryId) p.category_id = categoryId;
+    if (subCategoryId) p.sub_category_id = subCategoryId;
+    if (priceRange.min) p.min_price = priceRange.min;
+    if (priceRange.max) p.max_price = priceRange.max;
+
+    if (selectedStore !== "ALL" && selectedStore != null && selectedStore !== "") {
+      p.store_id = selectedStore;
+      p.only_store = 1;
+    }
+    return p;
+  }, [currentPage, debouncedSearch, categoryId, subCategoryId, priceRange.min, priceRange.max, selectedStore]);
+
+  const queryKey = useMemo(() => stableKey(queryParams), [queryParams]);
+
+  /* ====== fetch dengan cancellation + LRU cache + prefetch next ====== */
+  const abortRef = useRef(null);
+
+  const fetchList = useCallback(async (params, { useCache = true, signal } = {}) => {
+    const k = stableKey(params);
+    if (useCache) {
+      const hit = listCacheGet(k);
+      if (hit) return hit;
+    }
+    const res = await getProducts(params, signal); // pastikan getProducts menerima config { signal } di axios
+    const payload = {
+      items: res?.items || res?.data?.items || res?.data || [],
+      meta: res?.meta || res?.data?.meta || { current_page: 1, per_page: PER_PAGE, last_page: 1, total: 0 }
+    };
+    listCacheSet(k, payload);
+    return payload;
+  }, []);
+
+  const refetch = useCallback(async () => {
+    if (myStoreId === undefined) return;
+
+    // batalkan request sebelumnya
+    if (abortRef.current) { try { abortRef.current.abort(); } catch {} }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // coba ambil dari cache dulu biar UI cepat muncul
+    const cacheHit = listCacheGet(queryKey);
+    if (cacheHit) {
+      startTransition(() => {
+        setRows(cacheHit.items || []);
+        setMeta(cacheHit.meta || { current_page: 1, per_page: PER_PAGE, total: 0, last_page: 1 });
+      });
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      const { items, meta } = await fetchList(queryParams, { useCache: true, signal: controller.signal });
+      startTransition(() => {
+        setRows(items || []);
+        setMeta(meta || { current_page: 1, per_page: PER_PAGE, total: 0, last_page: 1 });
+      });
+
+      // Prefetch halaman berikutnya jika masih ada
+      if ((meta?.current_page ?? 1) < (meta?.last_page ?? 1)) {
+        const nextParams = { ...queryParams, page: (meta.current_page ?? 1) + 1 };
+        // jangan ganggu controller utama; prefetch tanpa overwrite UI
+        fetchList(nextParams, { useCache: true }).catch(() => {});
+      }
+    } catch (err) {
+      if (err?.name !== "CanceledError" && err?.name !== "AbortError") {
+        toast.error("Gagal memuat produk");
+      }
+    } finally {
+      if (!cacheHit) setLoading(false);
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  }, [fetchList, myStoreId, queryKey, queryParams]);
+
+  useEffect(() => {
+    if (myStoreId !== undefined && selectedStore !== undefined) refetch();
+    // cleanup: batalkan saat unmount
+    return () => { if (abortRef.current) { try { abortRef.current.abort(); } catch {} } };
+  }, [refetch, myStoreId, selectedStore]);
+
+  /* ====== filter stok FE (opsional) ====== */
+  const filteredRows = useMemo(() => {
+    let arr = rows;
+    if (stockStatus) {
+      const thr = (n) => Number(n ?? 0);
+      if (stockStatus === "out") arr = arr.filter((p) => thr(p.stock) === 0);
+      if (stockStatus === "low") arr = arr.filter((p) => thr(p.stock) > 0 && thr(p.stock) <= 5);
+      if (stockStatus === "in")  arr = arr.filter((p) => thr(p.stock) > 5);
+    }
+    return arr;
+  }, [rows, stockStatus]);
+
+  /* ====== UI helpers ====== */
   const toggleFilters = useCallback(() => {
     if (!showFilters) {
-      setDraftSearchTerm(searchTerm);
-      setDraftSkuExact(skuExact);
       setDraftCategoryId(categoryId);
       setDraftSubCategoryId(subCategoryId);
       setDraftStockStatus(stockStatus);
@@ -185,78 +353,23 @@ export default function ProductPage() {
       }
     }
     setShowFilters((s) => !s);
-  }, [showFilters, searchTerm, skuExact, categoryId, subCategoryId, stockStatus, priceRange]);
-
-  const debouncedSearch = useDebounce(searchTerm, 300);
-
-  const queryParams = useMemo(() => {
-    const p = { page: currentPage, per_page: PER_PAGE };
-    if (skuExact.trim()) p.sku = skuExact.trim();
-    else if (debouncedSearch.trim()) p.search = debouncedSearch.trim();
-    if (categoryId) p.category_id = categoryId;
-    if (subCategoryId) p.sub_category_id = subCategoryId;
-    if (priceRange.min) p.price_min = priceRange.min;
-    if (priceRange.max) p.price_max = priceRange.max;
-    return p;
-  }, [currentPage, debouncedSearch, skuExact, categoryId, subCategoryId, priceRange]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let cancelled = false;
-    setLoading(true);
-    getProducts(queryParams, controller.signal)
-      .then(({ items, meta }) => {
-        if (cancelled) return;
-        setRows(items || []);
-        setMeta(meta || { current_page: 1, last_page: 1, per_page: PER_PAGE, total: 0 });
-      })
-      .catch((err) => {
-        const isCanceled = err?.name === "CanceledError" || err?.code === "ERR_CANCELED";
-        if (!isCanceled) toast.error("Gagal memuat produk");
-      })
-      .finally(() => !cancelled && setLoading(false));
-    return () => { cancelled = true; controller.abort(); };
-  }, [queryParams]);
-
-  const displayRows = useMemo(() => {
-    if (!stockStatus) return rows;
-    const thr = (n) => Number(n ?? 0);
-    if (stockStatus === "out") return rows.filter((p) => thr(p.stock) === 0);
-    if (stockStatus === "low") return rows.filter((p) => thr(p.stock) > 0 && thr(p.stock) <= 5);
-    if (stockStatus === "in") return rows.filter((p) => thr(p.stock) > 5);
-    return rows;
-  }, [rows, stockStatus]);
-
-  const refetch = useCallback(() => {
-    getProducts(queryParams)
-      .then(({ items, meta }) => {
-        setRows(items || []);
-        setMeta(meta || { current_page: 1, last_page: 1, per_page: PER_PAGE, total: 0 });
-      })
-      .catch(() => {});
-  }, [queryParams]);
+  }, [showFilters, categoryId, subCategoryId, stockStatus, priceRange]);
 
   const applyFilters = useCallback(() => {
-    setSearchTerm(draftSearchTerm);
-    setSkuExact(draftSkuExact);
     setCategoryId(draftCategoryId);
     setSubCategoryId(draftSubCategoryId);
     setStockStatus(draftStockStatus);
     setPriceRange(draftPriceRange);
     setCurrentPage(1);
     setShowFilters(false);
-  }, [draftSearchTerm, draftSkuExact, draftCategoryId, draftSubCategoryId, draftStockStatus, draftPriceRange]);
+  }, [draftCategoryId, draftSubCategoryId, draftStockStatus, draftPriceRange]);
 
   const clearAllFilters = useCallback(() => {
-    setDraftSearchTerm("");
-    setDraftSkuExact("");
     setDraftCategoryId("");
     setDraftSubCategoryId("");
     setDraftStockStatus("");
     setDraftPriceRange({ min: "", max: "" });
 
-    setSearchTerm("");
-    setSkuExact("");
     setCategoryId("");
     setSubCategoryId("");
     setStockStatus("");
@@ -264,18 +377,8 @@ export default function ProductPage() {
     setCurrentPage(1);
   }, []);
 
+  /* ====== CRUD handlers ====== */
   const handleEdit = useCallback((row) => { setSelectedProduct(row); setShowEdit(true); }, []);
-  const openUpload = useCallback((row) => { setSelectedProduct(row); setFileToUpload(null); setShowUploadModal(true); }, []);
-  const confirmUpload = useCallback(async () => {
-    if (!selectedProduct || !fileToUpload) return;
-    try {
-      await uploadProductImage(selectedProduct.id, fileToUpload);
-      toast.success("Image uploaded");
-      setShowUploadModal(false);
-      refetch();
-    } catch { toast.error("Gagal upload image"); }
-  }, [fileToUpload, refetch, selectedProduct]);
-
   const onDelete = useCallback((row) => { setConfirmTarget(row); setConfirmOpen(true); }, []);
   const confirmDelete = useCallback(async () => {
     if (!confirmTarget) return;
@@ -283,35 +386,62 @@ export default function ProductPage() {
     try {
       await deleteProduct(confirmTarget.id);
       toast.success("Product deleted");
-      if (displayRows.length === 1 && (meta.current_page || 1) > 1) setCurrentPage((p) => p - 1);
+      // invalidasi cache list agar tidak stale
+      listCache.clear();
+      // jika hanya 1 item di halaman ini, mundurkan halaman biar pagination hidup
+      if (filteredRows.length === 1 && (meta.current_page || 1) > 1) setCurrentPage((p) => p - 1);
       else refetch();
-    } catch { toast.error("Gagal menghapus produk"); }
-    finally { setDeleting(false); setConfirmOpen(false); setConfirmTarget(null); }
-  }, [confirmTarget, displayRows.length, meta.current_page, refetch]);
+    } catch {
+      toast.error("Gagal menghapus produk");
+    } finally {
+      setDeleting(false);
+      setConfirmOpen(false);
+      setConfirmTarget(null);
+    }
+  }, [confirmTarget, filteredRows.length, meta.current_page, refetch]);
 
+  // create & update: selalu injeksi store_location_id = store milik user (/api/me)
   const handleCreate = useCallback(async (payload) => {
     try {
-      await createProductWithImages(payload);
+      if (myStoreId == null) {
+        toast.error("Akun ini belum memiliki store. Hubungi admin.");
+        return;
+      }
+      const body = { ...payload, store_location_id: myStoreId };
+      await createProductWithImages(body);
       toast.success("Produk berhasil dibuat");
       setShowAdd(false);
       setCurrentPage(1);
       localStorage.setItem(CACHE_DIRTY_KEY, "1");
+      listCache.clear(); // invalidasi cache list
       refetch();
-    } catch { toast.error("Gagal membuat produk"); }
-  }, [refetch]);
+    } catch (err) {
+      console.error(err?.response?.data || err);
+      toast.error(err?.response?.data?.message || "Gagal membuat produk");
+    }
+  }, [myStoreId, refetch]);
 
   const handleUpdate = useCallback(async (payload) => {
     try {
-      await updateProductWithImages(payload.id, payload);
+      if (myStoreId == null) {
+        toast.error("Akun ini belum memiliki store. Hubungi admin.");
+        return;
+      }
+      const body = { ...payload, store_location_id: myStoreId };
+      await updateProductWithImages(payload.id, body);
       toast.success("Produk berhasil diperbarui");
       setShowEdit(false);
       setSelectedProduct(null);
       localStorage.setItem(CACHE_DIRTY_KEY, "1");
+      listCache.clear(); // invalidasi cache list
       refetch();
-    } catch { toast.error("Gagal memperbarui produk"); }
-  }, [refetch]);
+    } catch (err) {
+      console.error(err?.response?.data || err);
+      toast.error(err?.response?.data?.message || "Gagal memperbarui produk");
+    }
+  }, [myStoreId, refetch]);
 
-  // ====== columns untuk DataTable ======
+  /* ====== columns ====== */
   const columns = useMemo(() => [
     {
       key: "sku",
@@ -339,7 +469,7 @@ export default function ProductPage() {
     {
       key: "name",
       header: "Product Name",
-      width: "240px",
+      width: "260px",
       cell: (row) => (
         <div className="flex flex-col">
           <span className="font-medium text-gray-900">{row.name}</span>
@@ -369,6 +499,16 @@ export default function ProductPage() {
       ),
     },
     {
+      key: "store",
+      header: "Store",
+      width: "180px",
+      cell: (row) => (
+        <span className="text-sm text-gray-600">
+          {row.store_location?.name || (row.store_location_id ? row.store_location_id : "Global")}
+        </span>
+      ),
+    },
+    {
       key: "created_at",
       header: "Created",
       width: "170px",
@@ -379,66 +519,45 @@ export default function ProductPage() {
         </div>
       ),
     },
-  ], []);
+    {
+      key: "__actions",
+      header: "Action",
+      width: "200px",
+      sticky: "right",
+      align: "center",
+      cell: (row) => (
+        <div className="flex items-center justify-center gap-1">
+          <button
+            onClick={() => handleEdit(row)}
+            className="w-8 h-8 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center"
+            title="Edit"
+          >
+            <Edit className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => { setConfirmTarget(row); setConfirmOpen(true); }}
+            className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center justify-center"
+            title="Delete"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      ),
+    },
+  ], [handleEdit]);
 
-  // ====== export CSV ======
-  const exportCSV = async () => {
-    try {
-      toast.loading("Menyiapkan CSV...", { id: "exp" });
-      const p = { ...queryParams, page: 1, per_page: meta?.total || 100000 };
-      const { items } = await getProducts(p);
-      const headers = ["SKU", "Product Name", "Category", "Sub Category", "Price", "Stock", "Created"];
-      const escape = (v) => { if (v == null) return ""; const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-      const rowsCsv = (items || []).map((r) =>
-        [r.sku, r.name, r.category_name || "", r.sub_category_name || "", formatIDR(r.price), Number(r.stock ?? 0), formatDateTime(r.created_at)]
-          .map(escape).join(",")
-      );
-      const csv = [headers.join(","), ...rowsCsv].join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-      a.download = `products-${ts}.csv`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success("CSV berhasil diunduh", { id: "exp" });
-    } catch { toast.error("Gagal mengekspor CSV", { id: "exp" }); }
-  };
+  if (myStoreId === undefined) {
+    return (
+      <div className="p-6">
+        <div className="bg-white rounded-lg p-4 border">Memuat informasi store user...</div>
+      </div>
+    );
+  }
 
-  // ====== subcategories filtered by selected category (popover) ======
-  const filteredDraftSubs = useMemo(() => {
-    if (!Array.isArray(subCategories)) return [];
-    if (!draftCategoryId) return subCategories;
-    const cid = Number(draftCategoryId);
-    return subCategories.filter((s) => Number(s.category_id) === cid);
-  }, [subCategories, draftCategoryId]);
-
-  const onDraftCategoryChange = (e) => {
-    const val = e.target.value;
-    setDraftCategoryId(val);
-    setDraftSubCategoryId((prev) => {
-      if (!prev) return "";
-      const ok = filteredDraftSubs.some((s) => String(s.id) === String(prev) && String(s.category_id) === String(val));
-      return ok ? prev : "";
-    });
-  };
-
-  /* ====== FILTER BADGE COUNT (yang aktif) ====== */
-  const appliedFilterCount = useMemo(() => {
-    let c = 0;
-    if (skuExact.trim()) c += 1;
-    if (categoryId) c += 1;
-    if (subCategoryId) c += 1;
-    if (stockStatus) c += 1;
-    if (priceRange.min) c += 1;
-    if (priceRange.max) c += 1;
-    return c;
-  }, [skuExact, categoryId, subCategoryId, stockStatus, priceRange.min, priceRange.max]);
-
+  /* ====== UI ====== */
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-4">
-      {/* Title */}
+      {/* Header */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <h2 className="text-lg font-semibold text-gray-800">Products</h2>
       </div>
@@ -446,48 +565,94 @@ export default function ProductPage() {
       {/* Controls */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <div className="flex flex-wrap items-center gap-3">
+          {/* Search */}
           <div className="relative flex-1 min-w-[240px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
               placeholder="Search name or SKU..."
               value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setSkuExact(""); setCurrentPage(1); }}
+              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              ref={btnRef}
-              onClick={toggleFilters}
-              className="flex items-center gap-2 px-4 py-2 text-sm border rounded-lg hover:bg-gray-50"
-            >
-              <Filter className="w-4 h-4" />
-              Filter
-              {appliedFilterCount > 0 && (
-                <span className="ml-1 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full">
-                  {appliedFilterCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={exportCSV}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
-            >
-              <Download className="w-4 h-4" />
-              Export CSV
-            </button>
-
-            <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Add Product
-            </button>
+          {/* Store filter */}
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <select
+                value={selectedStore}
+                onChange={(e) => { setSelectedStore(e.target.value); setCurrentPage(1); listCache.clear(); }} // clear cache ketika cabang berganti
+                disabled={storesLoading}
+                className="pl-9 pr-8 py-2 border rounded-lg text-sm appearance-none min-w-[220px] focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="ALL">Semua</option>
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <StoreIcon className="w-4 h-4 text-gray-500 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <svg className="w-4 h-4 text-gray-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
+            </div>
           </div>
+
+          {/* Filter popover */}
+          <button
+            ref={btnRef}
+            onClick={toggleFilters}
+            className="flex items-center gap-2 px-4 py-2 text-sm border rounded-lg hover:bg-gray-50"
+          >
+            <Filter className="w-4 h-4" />
+            Filter
+          </button>
+
+          {/* Export */}
+          <button
+            onClick={async () => {
+              try {
+                toast.loading("Menyiapkan CSV...", { id: "exp" });
+                const p = { ...queryParams, page: 1, per_page: meta?.total || 100000 };
+                // Manfaatkan cache jika ada
+                const k = stableKey(p);
+                const hit = listCacheGet(k);
+                const { items } = hit || await getProducts(p);
+                const list = (hit ? hit.items : (items || [])) || [];
+
+                const headers = ["SKU", "Product Name", "Category", "Sub Category", "Price", "Stock", "Store", "Created"];
+                const escape = (v) => { if (v == null) return ""; const s = String(v); return /[\",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+                const rowsCsv = list.map((r) =>
+                  [
+                    r.sku, r.name, r.category_name || "", r.sub_category_name || "", formatIDR(r.price),
+                    Number(r.stock ?? 0), r.store_location?.name || (r.store_location_id ? r.store_location_id : "Global"),
+                    formatDateTime(r.created_at)
+                  ].map(escape).join(",")
+                );
+                const csv = [headers.join(","), ...rowsCsv].join("\n");
+                const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+                a.download = `products-${ts}.csv`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                toast.success("CSV berhasil diunduh", { id: "exp" });
+              } catch { toast.error("Gagal mengekspor CSV", { id: "exp" }); }
+            }}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+
+          {/* Add */}
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+          >
+            <Plus className="w-4 h-4" />
+            Add Product
+          </button>
         </div>
       </div>
 
@@ -496,46 +661,12 @@ export default function ProductPage() {
         <div className="w-full overflow-x-auto overscroll-x-contain">
           <div className="min-w-full inline-block align-middle">
             <DataTable
-              columns={[
-                ...columns,
-                {
-                  key: "__actions",
-                  header: "Action",
-                  width: "200px",
-                  sticky: "right",
-                  align: "center",
-                  cell: (row) => (
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        onClick={() => handleEdit(row)}
-                        className="w-8 h-8 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center"
-                        title="Edit"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => openUpload(row)}
-                        className="w-8 h-8 bg-gray-700 text-white rounded-lg hover:bg-gray-800 flex items-center justify-center"
-                        title="Upload Image"
-                      >
-                        <ImageIcon className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => onDelete(row)}
-                        className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center justify-center"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ),
-                },
-              ]}
-              data={displayRows}
-              loading={loading}
+              columns={columns}
+              data={filteredRows}
+              loading={loading && !rows.length}         
               meta={meta}
               currentPage={meta.current_page}
-              onPageChange={setCurrentPage}
+              onPageChange={(p) => { setCurrentPage(p); }}  
               stickyHeader
               getRowKey={(row, i) => row.id ?? row.sku ?? i}
               className="border-0 shadow-none"
@@ -559,23 +690,20 @@ export default function ProductPage() {
             </div>
 
             <div className="p-4 space-y-4">
-              {/* SKU Exact (opsional, kalau kamu butuh exact match) */}
-              {/* <div>
-                <label className="block text-sm font-medium mb-1">SKU Exact</label>
-                <input
-                  type="text"
-                  value={draftSkuExact}
-                  onChange={(e) => setDraftSkuExact(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  placeholder="SKU-001"
-                />
-              </div> */}
-
               <div>
                 <label className="block text-sm font-medium mb-1">Category</label>
                 <select
                   value={draftCategoryId}
-                  onChange={onDraftCategoryChange}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDraftCategoryId(val);
+                    setDraftSubCategoryId((prev) => {
+                      if (!prev) return "";
+                      const cid = Number(val);
+                      const ok = subCategories.some((s) => String(s.id) === String(prev) && Number(s.category_id) === cid);
+                      return ok ? prev : "";
+                    });
+                  }}
                   className="w-full px-3 py-2 border rounded-lg"
                 >
                   <option value="">All</option>
@@ -593,9 +721,11 @@ export default function ProductPage() {
                   className="w-full px-3 py-2 border rounded-lg"
                 >
                   <option value="">All</option>
-                  {filteredDraftSubs.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
+                  {subCategories
+                    .filter((s) => !draftCategoryId || String(s.category_id) === String(draftCategoryId))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
                 </select>
               </div>
 
@@ -660,27 +790,6 @@ export default function ProductPage() {
           subCategories={subCategories}
           product={selectedProduct}
         />
-      )}
-
-      {showUploadModal && selectedProduct && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg w-full max-w-md mx-4 p-6">
-            <h3 className="text-lg font-semibold mb-4">Upload Image</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              {selectedProduct.name} (SKU: {selectedProduct.sku})
-            </p>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setFileToUpload(e.target.files?.[0])}
-              className="w-full border rounded-lg p-2 mb-4"
-            />
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowUploadModal(false)} className="px-4 py-2 border rounded-lg">Cancel</button>
-              <button onClick={confirmUpload} disabled={!fileToUpload} className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50">Upload</button>
-            </div>
-          </div>
-        </div>
       )}
 
       <ConfirmDialog

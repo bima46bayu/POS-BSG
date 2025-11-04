@@ -3,7 +3,8 @@ import {
   Search as SearchIcon,
   ChevronDown,
   ChevronUp,
-  ScanLine
+  ScanLine,
+  Store as StoreIcon,
 } from "lucide-react";
 
 export default function SearchBar({
@@ -13,6 +14,13 @@ export default function SearchBar({
   categories = [],
   subCategories = [],
   onPickCategory,
+
+  // ===== props selector cabang (admin) =====
+  showStoreSelector = false,                 // true => tampilkan selector
+  storeOptions = [],                         // [{value:'ALL', label:'Semua'}, {value:'1', label:'Instafactory'}, ...]
+  selectedStoreId,                           // string
+  onChangeStore,                             // (val:string)=>void
+  storeDisabled = false,                     // loading dsb.
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -29,68 +37,57 @@ export default function SearchBar({
   const timerRef = useRef(null);
   const focusCheckIntervalRef = useRef(null);
 
+  // store dropdown
+  const [storeOpen, setStoreOpen] = useState(false);
+  const storeRef = useRef(null);
+
   useEffect(() => { setSubCategoryId(""); }, [categoryId]);
 
-  // Auto-pause saat filter dropdown dibuka
+  // close store popover saat klik di luar
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!storeRef.current) return;
+      if (!storeRef.current.contains(e.target)) setStoreOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  // Auto-pause scanner saat filter dropdown dibuka
   useEffect(() => {
     if (open && scanActive) {
-      // Clear interval saat dropdown buka
-      if (focusCheckIntervalRef.current) {
-        clearInterval(focusCheckIntervalRef.current);
-      }
+      if (focusCheckIntervalRef.current) clearInterval(focusCheckIntervalRef.current);
     }
   }, [open, scanActive]);
 
-  // Focus management & auto re-focus
+  // Focus management & auto re-focus untuk scanner
   useEffect(() => {
     if (scanActive && !open) {
-      // Initial focus
       const t = setTimeout(() => hiddenInputRef.current?.focus(), 0);
-      
-      // Setup interval untuk auto re-focus
       focusCheckIntervalRef.current = setInterval(() => {
-        if (hiddenInputRef.current && document.activeElement !== hiddenInputRef.current) {
-          // Cek apakah user sedang mengetik di input/textarea lain
-          const activeEl = document.activeElement;
-          const isTypingInForm = 
-            activeEl?.tagName === 'INPUT' ||
-            activeEl?.tagName === 'TEXTAREA' ||
-            activeEl?.tagName === 'SELECT';
-          
-          // Hanya re-focus jika user TIDAK sedang mengetik di form lain
-          if (!isTypingInForm) {
-            hiddenInputRef.current.focus();
-          }
-        }
+        const el = hiddenInputRef.current;
+        if (!el) return;
+        const act = document.activeElement;
+        const typing =
+          act?.tagName === "INPUT" || act?.tagName === "TEXTAREA" || act?.tagName === "SELECT";
+        if (!typing && act !== el) el.focus();
       }, 300);
-      
       return () => {
         clearTimeout(t);
-        if (focusCheckIntervalRef.current) {
-          clearInterval(focusCheckIntervalRef.current);
-        }
+        if (focusCheckIntervalRef.current) clearInterval(focusCheckIntervalRef.current);
       };
     } else {
-      // Clear buffer dan interval saat tidak aktif
       setScanBuffer("");
       if (timerRef.current) clearTimeout(timerRef.current);
-      if (focusCheckIntervalRef.current) {
-        clearInterval(focusCheckIntervalRef.current);
-      }
+      if (focusCheckIntervalRef.current) clearInterval(focusCheckIntervalRef.current);
     }
   }, [scanActive, open]);
 
   const commitScan = () => {
     const code = scanBuffer.trim();
-    if (code) {
-      onScan?.(code);
-    }
+    if (code) onScan?.(code);
     setScanBuffer("");
-    
-    // Re-focus setelah scan
-    if (scanActive) {
-      setTimeout(() => hiddenInputRef.current?.focus(), 50);
-    }
+    if (scanActive) setTimeout(() => hiddenInputRef.current?.focus(), 50);
   };
 
   const handleHiddenKeyDown = (e) => {
@@ -100,15 +97,9 @@ export default function SearchBar({
       commitScan();
       return;
     }
-    
-    if (e.key.length === 1) {
-      setScanBuffer((prev) => prev + e.key);
-    }
-    
+    if (e.key.length === 1) setScanBuffer((prev) => prev + e.key);
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      commitScan();
-    }, 100);
+    timerRef.current = setTimeout(commitScan, 100);
   };
 
   const filteredSubcats = subCategories.filter(
@@ -124,9 +115,13 @@ export default function SearchBar({
     setOpen(false);
   };
 
+  const currentStoreLabel =
+    storeOptions.find((o) => String(o.value) === String(selectedStoreId))?.label ||
+    "Pilih Cabang";
+
   return (
     <>
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-2 mb-4">
         {/* Search pill */}
         <div className="relative flex-1">
           <input
@@ -230,15 +225,69 @@ export default function SearchBar({
           <ScanLine className="h-4 w-4" />
           {scanActive ? "Scanning…" : "Scanner"}
         </button>
-      </div>
 
-      {/* Hint saat scanner active */}
-      {/* {scanActive && (
-        <div className="mb-3 text-xs text-blue-700 bg-blue-50 p-2 rounded flex items-center gap-2 border border-blue-200">
-          <ScanLine className="h-4 w-4" />
-          <span>Scanner ready - scan barcode anytime</span>
-        </div>
-      )} */}
+        {/* Store selector pill (admin only, custom dropdown) */}
+        {showStoreSelector && (
+          <div className="relative" ref={storeRef}>
+            <button
+              type="button"
+              onClick={() => !storeDisabled && setStoreOpen((v) => !v)}
+              onKeyDown={(e) => {
+                if (storeDisabled) return;
+                if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+                  e.preventDefault();
+                  setStoreOpen((v) => !v);
+                }
+              }}
+              className={[
+                "h-11 inline-flex items-center gap-2 rounded-full px-4",
+                "border text-sm font-medium",
+                storeDisabled
+                  ? "border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed"
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
+              ].join(" ")}
+              aria-haspopup="listbox"
+              aria-expanded={storeOpen}
+            >
+              <StoreIcon className="w-4 h-4 text-gray-500" />
+              <span className="truncate max-w-[140px]">{currentStoreLabel}</span>
+              <ChevronDown className={`w-4 h-4 ml-1 transition-transform ${storeOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {storeOpen && (
+              <div
+                role="listbox"
+                tabIndex={-1}
+                className="absolute right-0 mt-2 w-56 z-30 rounded-2xl border border-gray-200 bg-white shadow-xl overflow-hidden"
+              >
+                <div className="max-h-64 overflow-auto py-1">
+                  {storeOptions.map((opt) => {
+                    const active = String(opt.value) === String(selectedStoreId);
+                    return (
+                      <button
+                        key={String(opt.value)}
+                        role="option"
+                        aria-selected={active}
+                        onClick={() => { onChangeStore?.(String(opt.value)); setStoreOpen(false); }}
+                        className={[
+                          "w-full text-left px-3 py-2 text-sm flex items-center gap-2",
+                          active ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50",
+                        ].join(" ")}
+                      >
+                        <span
+                          className="inline-block w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: active ? "#2563eb" : "transparent" }}
+                        />
+                        <span className="truncate">{opt.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Hidden input untuk scanner */}
       {scanActive && !open && (

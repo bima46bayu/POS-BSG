@@ -39,7 +39,8 @@ function normalizeList(d, fallbackPerPage = 10) {
     };
   }
 
-  // 3) Laravel paginator root: { current_page, data, per_page, last_page, total, next_page_url, prev_page_url }
+  // 3) Laravel paginator root
+  // { current_page, data, per_page, last_page, total, next_page_url, prev_page_url }
   if (d && Array.isArray(d.data)) {
     const per = Number(d.per_page ?? d.data.length ?? fallbackPerPage);
     const total = Number(d.total ?? d.data.length ?? 0);
@@ -72,22 +73,48 @@ function normalizeList(d, fallbackPerPage = 10) {
 
 /**
  * GET /api/products
- * params mendukung: search, sku, category_id, sub_category_id, min_price, max_price, page, per_page, sort, dir
+ * params mendukung:
+ * - pencarian: search, sku, category_id, sub_category_id, min_price/price_min, max_price/price_max
+ * - paging/sort: page, per_page, sort, dir
+ * - filter store: store_location_id (number), only_store (boolean | 0/1)
  * Selalu return { items, meta, links }
  */
 export async function getProducts(params = {}, signal) {
-  const { data } = await api.get("/api/products", { params, signal });
-  return normalizeList(data, Number(params?.per_page ?? 10));
+  const {
+    only_store,
+    store_location_id,
+    ...rest
+  } = params || {};
+
+  // BE menghendaki only_store sebagai 0/1 (jika dipakai)
+  const finalParams = {
+    ...rest,
+    ...(store_location_id != null ? { store_location_id } : {}),
+    ...(only_store != null ? { only_store: Number(Boolean(only_store)) } : {}),
+  };
+
+  const { data } = await api.get("/api/products", { params: finalParams, signal });
+  return normalizeList(data, Number(finalParams?.per_page ?? 10));
 }
 
 /**
  * Cari produk 1 item berdasarkan SKU (exact).
- * Menggunakan /api/products?sku=... agar cepat (exact match).
+ * Bisa dipersempit per store:
+ *   getProductBySKU("ABC123", { store_location_id: 2, only_store: true })
  * Return 1 object atau null.
  */
-export async function getProductBySKU(sku, signal) {
+export async function getProductBySKU(sku, opts = {}, signal) {
   if (!sku) return null;
-  const { data } = await api.get("/api/products", { params: { sku }, signal });
+
+  const { store_location_id, only_store, ...rest } = opts || {};
+  const params = {
+    sku,
+    ...(store_location_id != null ? { store_location_id } : {}),
+    ...(only_store != null ? { only_store: Number(Boolean(only_store)) } : {}),
+    ...rest,
+  };
+
+  const { data } = await api.get("/api/products", { params, signal });
   const { items } = normalizeList(data);
   return items[0] ?? null;
 }
@@ -109,7 +136,40 @@ export function deleteProduct(id, signal) {
   return api.delete(`/api/products/${id}`, { signal });
 }
 
-export async function createProduct(body, signal) {
+/**
+ * Create product
+ * - Staff/Kasir: tidak perlu kirim scope/store_location_id (BE bisa auto dari /api/me)
+ * - Admin:
+ *    - Global: set body.scope = "global"
+ *    - Khusus store: set body.scope = "store" + body.store_location_id = <id>
+ * - Jika body.image berupa File/Blob → otomatis pakai FormData (multipart)
+ */
+export async function createProduct(body = {}, signal) {
+  // deteksi perlu FormData
+  const hasFile = body?.image instanceof File || body?.image instanceof Blob;
+  if (hasFile) {
+    const fd = new FormData();
+    if (body.sku) fd.append("sku", body.sku);
+    fd.append("name", body.name ?? "");
+    fd.append("price", String(Number(body.price ?? 0)));
+    fd.append("stock", String(Number(body.stock ?? 0)));
+    if (body.description != null) fd.append("description", body.description);
+    if (body.category_id != null) fd.append("category_id", String(body.category_id));
+    if (body.sub_category_id != null) fd.append("sub_category_id", String(body.sub_category_id));
+    fd.append("image", body.image);
+
+    // opsional (admin-only, aman jika staff mengirim tidak dipakai BE)
+    if (body.scope) fd.append("scope", body.scope);
+    if (body.store_location_id != null) fd.append("store_location_id", String(body.store_location_id));
+
+    const { data } = await api.post("/api/products", fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+      signal,
+    });
+    return data?.data || data;
+  }
+
+  // JSON biasa
   const payload = {
     name: body.name ?? "",
     price: Number(body.price ?? 0),
@@ -118,9 +178,13 @@ export async function createProduct(body, signal) {
     description: body.description ?? "",
     category_id: body.category_id ?? null,
     sub_category_id: body.sub_category_id ?? null,
+
+    // opsional (admin-only)
+    ...(body.scope ? { scope: body.scope } : {}),
+    ...(body.store_location_id != null ? { store_location_id: body.store_location_id } : {}),
   };
+
   const { data } = await api.post("/api/products", payload, { signal });
-  // backend-mu mengembalikan object produk langsung (201) → kembalikan apa adanya
   return data?.data || data;
 }
 
@@ -145,12 +209,19 @@ export async function createProductWithImages(body, signal) {
   return product;
 }
 
-export async function updateProduct(id, body, signal) {
+/**
+ * Update product
+ * - Admin boleh kirim scope/store_location_id untuk ubah kepemilikan (global/store)
+ * - Staff tidak perlu mengirim field tersebut (BE akan tolak jika tidak berhak)
+ * - Jika body.image ada → gunakan updateProductWithImages atau endpoint upload terpisah
+ */
+export async function updateProduct(id, body = {}, signal) {
   if (!id) throw new Error("Missing product id");
 
   const toNull = (v) => (v === "" || v === undefined ? null : v);
   const toNum = (v) => Number(v ?? 0);
 
+  // JSON saja (untuk file gunakan updateProductWithImages)
   const payload = {
     name: body.name ?? "",
     price: toNum(body.price),
@@ -159,15 +230,18 @@ export async function updateProduct(id, body, signal) {
     description: toNull(body.description),
     category_id: body.category_id ? Number(body.category_id) : null,
     sub_category_id: body.sub_category_id ? Number(body.sub_category_id) : null,
+
+    // opsional (admin-only)
+    ...(body.scope ? { scope: body.scope } : {}),
+    ...(body.store_location_id != null ? { store_location_id: Number(body.store_location_id) } : {}),
   };
 
   const { data } = await api.put(`/api/products/${id}`, payload, { signal });
   return data?.data || data;
 }
 
-export async function updateProductWithImages(id, body, signal) {
+export async function updateProductWithImages(id, body = {}, signal) {
   const product = await updateProduct(id, body, signal);
-
   if (Array.isArray(body.images) && body.images.length) {
     await Promise.all(body.images.map((f) => uploadProductImage(id, f, signal)));
   }

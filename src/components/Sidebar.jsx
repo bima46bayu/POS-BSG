@@ -1,3 +1,4 @@
+// src/components/Sidebar.jsx
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import {
   Home, CreditCard, Package, Archive, ShoppingCart, Clock, LogOut, Menu, X, PackageCheck,
@@ -235,14 +236,24 @@ export default function Sidebar({
                 <button
                   key={item.id}
                   onClick={() => handleNavigate(item.id)}
-                  className={`relative flex flex-col items-center justify-center px-2 h-14 rounded-xl transition-all duration-200 ${
-                    isActive ? "bg-blue-50 text-blue-600 shadow-sm" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
-                  }`}
+                  className={[
+                    "relative flex flex-col items-center justify-center",
+                    "h-14 w-16",                     // ukuran konstan
+                    "rounded-xl transition-colors duration-200",
+                    isActive
+                      ? "bg-blue-50 text-blue-600 shadow-sm"
+                      : "text-gray-400 hover:text-gray-600 hover:bg-gray-50",
+                  ].join(" ")}
                   aria-current={isActive ? "page" : undefined}
                 >
-                  {isActive && (
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-600 rounded-r" />
-                  )}
+                  {/* indikator kiri absolut */}
+                  <span
+                    className={[
+                      "absolute left-0 top-1/2 -translate-y-1/2",
+                      "w-[3px] h-8 rounded-r",
+                      isActive ? "bg-blue-600" : "bg-transparent",
+                    ].join(" ")}
+                  />
                   <Icon size={24} className="mb-1" />
                   <span className="text-xs font-medium">{item.label}</span>
                 </button>
@@ -254,21 +265,26 @@ export default function Sidebar({
               <div className="w-full px-3 relative">
                 <div
                   ref={triggerRef}
-                  onClick={() => {
-                    // tap/click toggle (berlaku di semua device)
-                    setClickOpen((v) => !v);
-                    positionPopover();
-                  }}
+                  onClick={() => { setClickOpen((v) => !v); positionPopover(); }}
                   onMouseEnter={openByHover}
                   onMouseLeave={closeByHover}
-                  className={`relative w-full flex flex-col items-center justify-center h-14 rounded-xl transition-all duration-200 cursor-pointer ${
-                    isMasterGroupActive() ? "bg-blue-50 text-blue-600 shadow-sm" : "text-gray-400 hover:text-gray-600 hover:bg-gray-50"
-                  }`}
+                  className={[
+                    "relative w-full flex flex-col items-center justify-center",
+                    "h-14 rounded-xl transition-colors duration-200 cursor-pointer",
+                    isMasterGroupActive()
+                      ? "bg-blue-50 text-blue-600 shadow-sm"
+                      : "text-gray-400 hover:text-gray-600 hover:bg-gray-50",
+                  ].join(" ")}
                   aria-expanded={isOpen}
                 >
-                  {isMasterGroupActive() && (
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-600 rounded-r" />
-                  )}
+                  {/* indikator kiri absolut */}
+                  <span
+                    className={[
+                      "absolute left-0 top-1/2 -translate-y-1/2",
+                      "w-[3px] h-8 rounded-r",
+                      isMasterGroupActive() ? "bg-blue-600" : "bg-transparent",
+                    ].join(" ")}
+                  />
                   <FolderTree size={24} className="mb-1" />
                   <span className="text-xs font-medium">Master</span>
                 </div>
@@ -281,7 +297,7 @@ export default function Sidebar({
         <div className="mt-auto pt-2">
           <button
             onClick={handleLogout}
-            className="w-full flex flex-col items-center justify-center px-2 h-14 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all duration-200"
+            className="w-full flex flex-col items-center justify-center px-2 h-14 w-16 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors duration-200"
           >
             <LogOut size={24} className="mb-1" />
             <span className="text-xs font-medium">Sign Out</span>
@@ -300,13 +316,7 @@ export default function Sidebar({
           onMouseLeave={closeByHover}
         >
           <div className="py-2">
-            {[
-              { label: "User",           path: "/master/user",           icon: User },
-              { label: "Category",       path: "/master/category",       icon: Folder },
-              { label: "Sub-Category",   path: "/master/sub-category",   icon: GitBranch },
-              { label: "Supplier",       path: "/master/supplier",       icon: Truck },
-              { label: "Store Location", path: "/master/store-location", icon: MapPin },
-            ].map((mi) => {
+            {masterItems.map((mi) => {
               const active = isMasterItemActive(mi.path);
               const Icon = mi.icon;
               return (
@@ -379,12 +389,23 @@ export default function Sidebar({
                 <button
                   key={item.id}
                   onClick={() => handleNavigate(item.id)}
-                  className={`w-full flex items-center space-x-4 px-4 py-4 rounded-xl transition-all duration-200 mb-2 ${
+                  className={[
+                    "relative w-full flex items-center gap-4",
+                    "px-4 py-4 rounded-xl transition-colors duration-200 mb-2",
+                    "pl-5", // padding kiri konstan
                     isActive
-                      ? "bg-blue-50 text-blue-600 border-l-4 border-blue-600"
-                      : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-                  }`}
+                      ? "bg-blue-50 text-blue-600"
+                      : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
+                  ].join(" ")}
                 >
+                  {/* indikator kiri absolut */}
+                  <span
+                    className={[
+                      "absolute left-0 top-1/2 -translate-y-1/2",
+                      "w-[4px] h-7 rounded-r",
+                      isActive ? "bg-blue-600" : "bg-transparent",
+                    ].join(" ")}
+                  />
                   <Icon size={22} />
                   <span className="font-medium text-base">{item.label}</span>
                 </button>
@@ -396,13 +417,24 @@ export default function Sidebar({
               <div className="mt-2">
                 <button
                   onClick={() => setMasterOpenMobile((v) => !v)}
-                  className={`w-full flex items-center justify-between px-4 py-4 rounded-xl transition-all duration-200 mb-2 ${
+                  className={[
+                    "relative w-full flex items-center justify-between",
+                    "px-4 py-4 rounded-xl transition-colors duration-200 mb-2",
+                    "pl-5", // padding kiri konstan
                     (location.pathname || "").startsWith("/master/")
-                      ? "bg-blue-50 text-blue-600 border-l-4 border-blue-600"
-                      : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-                  }`}
+                      ? "bg-blue-50 text-blue-600"
+                      : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
+                  ].join(" ")}
                   aria-expanded={masterOpenMobile}
                 >
+                  {/* indikator kiri absolut */}
+                  <span
+                    className={[
+                      "absolute left-0 top-1/2 -translate-y-1/2",
+                      "w-[4px] h-7 rounded-r",
+                      (location.pathname || "").startsWith("/master/") ? "bg-blue-600" : "bg-transparent",
+                    ].join(" ")}
+                  />
                   <span className="flex items-center gap-3">
                     <FolderTree size={22} />
                     <span className="font-medium text-base">Master</span>
@@ -412,13 +444,7 @@ export default function Sidebar({
 
                 <div className={`overflow-hidden transition-[max-height] duration-300 ease-in-out ${masterOpenMobile ? "max-h-96" : "max-h-0"}`}>
                   <ul className="pl-2">
-                    {[
-                      { label: "User", path: "/master/user", icon: User },
-                      { label: "Category", path: "/master/category", icon: Folder },
-                      { label: "Sub-Category", path: "/master/sub-category", icon: GitBranch },
-                      { label: "Supplier", path: "/master/supplier", icon: Truck },
-                      { label: "Store Location", path: "/master/store-location", icon: MapPin },
-                    ].map((mi) => {
+                    {masterItems.map((mi) => {
                       const active = isMasterItemActive(mi.path);
                       const Icon = mi.icon;
                       return (
@@ -426,10 +452,20 @@ export default function Sidebar({
                           <Link
                             to={mi.path}
                             onClick={() => setIsMobileMenuOpen(false)}
-                            className={`flex items-center gap-2 w-full px-4 py-3 rounded-lg text-sm ${
-                              active ? "bg-blue-50 text-blue-600" : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"
-                            }`}
+                            className={[
+                              "relative flex items-center gap-2 w-full",
+                              "px-4 py-3 rounded-lg text-sm pl-5", // padding kiri konstan
+                              active ? "bg-blue-50 text-blue-600" : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
+                            ].join(" ")}
                           >
+                            {/* indikator kiri absolut */}
+                            <span
+                              className={[
+                                "absolute left-0 top-1/2 -translate-y-1/2",
+                                "w-[3px] h-6 rounded-r",
+                                active ? "bg-blue-600" : "bg-transparent",
+                              ].join(" ")}
+                            />
                             <Icon size={16} className="shrink-0 opacity-80" />
                             <span>{mi.label}</span>
                           </Link>
@@ -446,7 +482,7 @@ export default function Sidebar({
           <div className="sticky bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-white">
             <button
               onClick={handleLogout}
-              className="w-full flex items-center space-x-4 px-4 py-4 rounded-xl text-red-600 hover:bg-red-50 transition-all duration-200"
+              className="w-full flex items-center gap-4 px-4 py-4 rounded-xl text-red-600 hover:bg-red-50 transition-colors duration-200"
             >
               <LogOut size={22} />
               <span className="font-medium text-base">Sign Out</span>
