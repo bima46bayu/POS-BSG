@@ -18,40 +18,50 @@ export async function exportPurchasePdf({
   totalsTopSpacing = 30,
   titleTopOffset = 24,
   addressMaxLines = 3,
-  headerMaxWidthRatio = 0.5, // batasi max lebar teks header (setengah kertas)
+  headerMaxWidthRatio = 0.5,
 } = {}) {
   const safe = (v, d = "-") => (v == null || v === "" ? d : String(v));
   const fmtIDR = (n) =>
-    Number(n || 0).toLocaleString("id-ID", {
-      style: "currency",
-      currency: "IDR",
-      maximumFractionDigits: 0,
-    });
+    Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
   const fmtNum = (n) => Number(n || 0).toLocaleString("id-ID");
   const fmtDate = (s) => {
     if (!s) return "-";
     const d = new Date(s);
     if (isNaN(d)) return safe(s);
-    return d.toLocaleDateString("id-ID", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+    return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
+  // ---- image helpers (FIX transparansi → hitam)
+  const toAbs = (url) => {
+    try {
+      if (/^https?:\/\//i.test(url)) return url;
+      const base = typeof window !== "undefined" ? window.location.origin : "";
+      return url.startsWith("/") ? base + url : base + "/" + url;
+    } catch { return url; }
   };
 
   async function loadImage(url) {
     try {
       const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.src = url;
-      await new Promise((res, rej) => {
-        img.onload = () => res(true);
-        img.onerror = rej;
-      });
+      img.crossOrigin = "anonymous";                 // penting untuk server/CDN
+      img.decoding = "async";
+      img.src = toAbs(url);
+      await new Promise((res, rej) => { img.onload = () => res(true); img.onerror = rej; });
       return img;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
+  }
+
+  // Flatten PNG ke background putih (hilangkan alpha) → dataURL PNG sRGB
+  function flattenToPNG(img, bg = "#ffffff") {
+    const w = Math.max(1, img.naturalWidth || img.width || 1);
+    const h = Math.max(1, img.naturalHeight || img.height || 1);
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d", { colorSpace: "srgb", willReadFrequently: false });
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL("image/png");           // tetap PNG, tapi sudah opaque
   }
 
   // ====== data
@@ -59,19 +69,17 @@ export async function exportPurchasePdf({
   const poDate = fmtDate(po.order_date || po.date);
   const supplier = po?.supplier || {};
 
-  const subtotal = Number(
-    po?.subtotal ?? items.reduce((s, it) => s + Number(it.line_total || 0), 0)
-  );
+  const subtotal = Number(po?.subtotal ?? items.reduce((s, it) => s + Number(it.line_total || 0), 0));
   const discount = Number(po?.discount_total || 0);
-  const vat = Number(po?.tax_total || 0);
+  const vat      = Number(po?.tax_total || 0);
   const grandTotal = Number(po?.grand_total || subtotal - discount + vat);
 
   const rightMeta = {
     no: poNo,
     date: poDate,
     projectRef: metaRight.projectRef || po?.project_ref || "-",
-    purreqNo: metaRight.purreqNo || po?.purreq_no || po?.rq_no || "-",
-    revision: metaRight.revision || po?.revision || "-",
+    purreqNo:   metaRight.purreqNo   || po?.purreq_no || po?.rq_no || "-",
+    revision:   metaRight.revision   || po?.revision  || "-",
     currency: "IDR RUPIAH",
   };
 
@@ -80,44 +88,23 @@ export async function exportPurchasePdf({
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const M = 36;
-  const contentW = pageW - M * 2; // 523
+  const contentW = pageW - M * 2;
   const gap = 14;
 
-  // helpers
-  function writeWrap(
-    text,
-    x,
-    startY,
-    maxW,
-    lineH,
-    { fontStyle = "normal", fontSize = 9.5, maxLines = null } = {}
-  ) {
+  function writeWrap(text, x, startY, maxW, lineH, { fontStyle = "normal", fontSize = 9.5, maxLines = null } = {}) {
     if (!text) return startY;
     doc.setFont(undefined, fontStyle);
     doc.setFontSize(fontSize);
     let lines = doc.splitTextToSize(String(text), maxW);
     if (maxLines && lines.length > maxLines) {
-      lines = [
-        ...lines.slice(0, maxLines - 1),
-        lines[maxLines - 1].replace(/\s+$/, "") + " …",
-      ];
+      lines = [...lines.slice(0, maxLines - 1), lines[maxLines - 1].replace(/\s+$/, "") + " …"];
     }
     let yy = startY;
-    for (const ln of lines) {
-      doc.text(ln, x, yy);
-      yy += lineH;
-    }
+    for (const ln of lines) { doc.text(ln, x, yy); yy += lineH; }
     return yy;
   }
 
-  function measureWrapHeight(
-    text,
-    maxW,
-    lineH,
-    fontSize = 9.5,
-    maxLines = null,
-    fontStyle = "normal"
-  ) {
+  function measureWrapHeight(text, maxW, lineH, fontSize = 9.5, maxLines = null, fontStyle = "normal") {
     if (!text) return 0;
     doc.setFont(undefined, fontStyle);
     doc.setFontSize(fontSize);
@@ -126,51 +113,57 @@ export async function exportPurchasePdf({
     return lines.length * lineH;
   }
 
-  // ====== HEADER: logo menyesuaikan tinggi teks, teks dibatasi setengah kertas
+  // ====== HEADER
   let y = 26;
-  const headerLogo =
+
+  // load logo + flatten
+  let rawLogo =
     (await loadImage(logoUrl)) ||
     (await loadImage("/image/logo.png")) ||
     (await loadImage("/image/logo.jpg")) ||
     (await loadImage("/image/logo.webp"));
 
-  // ukur tinggi blok teks agar logo proporsional
+  let logoDataUrl = null;
+  if (rawLogo) {
+    logoDataUrl = flattenToPNG(rawLogo, "#ffffff");    // <— inti perbaikan
+  }
+
   const headerTextMaxW = contentW * (headerMaxWidthRatio || 0.5);
-  const nameH = measureWrapHeight(safe(company?.name), headerTextMaxW, 12, 10.5, null, "bold");
+  const nameH = measureWrapHeight(safe(company?.name),    headerTextMaxW, 12, 10.5, null, "bold");
   const addrH = measureWrapHeight(safe(company?.address), headerTextMaxW, 12.2, 9.5, addressMaxLines);
-  const telH  = measureWrapHeight(safe(company?.phone), headerTextMaxW, 12.2, 9.5);
+  const telH  = measureWrapHeight(safe(company?.phone),   headerTextMaxW, 12.2, 9.5);
   const faxH  = company?.fax ? measureWrapHeight(company.fax, headerTextMaxW, 12.2, 9.5) : 0;
   const textBlockH = Math.max(28, nameH + addrH + telH + faxH);
 
-  // logo
+  // hitung ukuran logo agar proporsional
   let logoW = 0, logoH = 0;
-  if (headerLogo) {
-    const ratio = headerLogo.width / (headerLogo.height || 1);
+  if (rawLogo && logoDataUrl) {
+    const ratio = rawLogo.width / (rawLogo.height || 1);
     const maxH = 72, minH = 28;
     logoH = Math.max(minH, Math.min(textBlockH, maxH));
     logoW = logoH * ratio;
     const maxW = 80;
     if (logoW > maxW) { logoW = maxW; logoH = logoW / ratio; }
     const logoY = y + (textBlockH - logoH) / 2;
-    doc.addImage(headerLogo, "PNG", M, logoY, logoW, logoH);
+
+    // background putih di bawah logo (double safety)
+    doc.setFillColor(255, 255, 255);
+    doc.rect(M, logoY, logoW, logoH, "F");
+
+    // pakai dataURL PNG yang sudah opaque
+    doc.addImage(logoDataUrl, "PNG", M, logoY, logoW, logoH);
   }
 
-  // teks header (wrap, max setengah kertas)
+  // teks header
   const headerX = M + (logoW ? logoW + 10 : 0);
   const headerTextW = Math.min(headerTextMaxW, pageW - M - headerX);
   let hy = y + 11;
   doc.setTextColor(40);
-  hy = writeWrap(safe(company?.name), headerX, hy, headerTextW, 12, {
-    fontStyle: "bold",
-    fontSize: 10.5,
-  });
-  hy = writeWrap(safe(company?.address), headerX, hy, headerTextW, 12.2, {
-    maxLines: addressMaxLines,
-  });
+  hy = writeWrap(safe(company?.name), headerX, hy, headerTextW, 12, { fontStyle: "bold", fontSize: 10.5 });
+  hy = writeWrap(safe(company?.address), headerX, hy, headerTextW, 12.2, { maxLines: addressMaxLines });
   hy = writeWrap(safe(company?.phone), headerX, hy, headerTextW, 12.2);
   if (company?.fax) hy = writeWrap(company.fax, headerX, hy, headerTextW, 12.2);
 
-  // lanjut
   y = Math.max(y + textBlockH, y + logoH) + 8 + (titleTopOffset || 0);
 
   // ====== TITLE
@@ -181,32 +174,27 @@ export async function exportPurchasePdf({
   doc.setFont(undefined, "normal");
   y += 20;
 
-  // ====== DUA KOLOM (LEFT supplier, RIGHT meta)
+  // ====== DUA KOLOM
   const leftW = (contentW - gap) * 0.55;
   const rightW = (contentW - gap) * 0.45;
 
-  // LEFT — supplier (tanpa “we would like…” — dipindah ke atas tabel)
   const leftLines = [
     "To :",
-    safe(supplier.name),
-    safe(supplier.address),
-    supplier.phone ? `Phone: ${supplier.phone}` : null,
-    supplier.email ? `Email: ${supplier.email}` : null,
-    supplier.pic_name ? `Attn: ${supplier.pic_name}` : null,
+    safe((po?.supplier && (po.supplier.name || po.supplier.company)) || supplier.name),
+    safe((po?.supplier && (po.supplier.address)) || supplier.address),
+    (po?.supplier?.phone || supplier.phone) ? `Phone: ${po?.supplier?.phone || supplier.phone}` : null,
+    (po?.supplier?.email || supplier.email) ? `Email: ${po?.supplier?.email || supplier.email}` : null,
+    (po?.supplier?.pic_name || supplier.pic_name) ? `Attn: ${po?.supplier?.pic_name || supplier.pic_name}` : null,
   ].filter(Boolean);
 
   doc.setFontSize(10);
   const lh = 12.8;
   let sy = y + 2;
   leftLines.forEach((line) => {
-    doc.splitTextToSize(line, leftW).forEach((ln) => {
-      doc.text(ln, M, sy);
-      sy += lh;
-    });
+    doc.splitTextToSize(line, leftW).forEach((ln) => { doc.text(ln, M, sy); sy += lh; });
   });
   const leftEnd = sy;
 
-  // RIGHT — meta
   const metaRows = [
     ["No.", rightMeta.no],
     ["Date", rightMeta.date],
@@ -221,32 +209,19 @@ export async function exportPurchasePdf({
     margin: { left: M + leftW + gap, right: M },
     tableWidth: rightW,
     styles: { fontSize: 10, cellPadding: { top: 1.6, bottom: 1.3, left: 2, right: 2 } },
-    body: metaRows.map(([k, v]) => [
-      { content: `${k} :`, styles: { fontStyle: "bold" } },
-      { content: String(v) },
-    ]),
-    columnStyles: {
-      0: { cellWidth: Math.floor(rightW * 0.42) },
-      1: { cellWidth: Math.ceil(rightW * 0.58) },
-    },
+    body: metaRows.map(([k, v]) => [{ content: `${k} :`, styles: { fontStyle: "bold" } }, { content: String(v) }]),
+    columnStyles: { 0: { cellWidth: Math.floor(rightW * 0.42) }, 1: { cellWidth: Math.ceil(rightW * 0.58) } },
   });
   const rightEnd = doc.lastAutoTable?.finalY || y;
   y = Math.max(leftEnd, rightEnd) + 10;
 
-  // ====== KALIMAT PENGANTAR TEPAT DI ATAS TABEL
-  doc.setFontSize(10);
-  doc.setTextColor(70);
-  doc.setFont(undefined, "italic");
-  const intro = "We would like to order below item to your company";
-  y = writeWrap(intro, M, y, contentW, 12);
-  doc.setFont(undefined, "normal");
-  doc.setTextColor(0);
-  y += 6; // spasi kecil sebelum tabel
+  // ====== INTRO
+  doc.setFontSize(10); doc.setTextColor(70); doc.setFont(undefined, "italic");
+  y = writeWrap("We would like to order below item to your company", M, y, contentW, 12);
+  doc.setFont(undefined, "normal"); doc.setTextColor(0); y += 6;
 
-  // ====== TABEL ITEMS (redesain)
-  // total kolom = 523: 30 + 245 + 50 + 60 + 60 + 78 = 523
+  // ====== TABLE
   const CW = { no: 30, desc: 245, unit: 50, qty: 60, unitPrice: 60, total: 78 };
-
   const head = [["No.", "Description", "Unit", "Quantity", "Unit Price", "Total Price"]];
   const body = (Array.isArray(items) ? items : []).map((it, i) => [
     String(i + 1),
@@ -267,19 +242,11 @@ export async function exportPurchasePdf({
     styles: {
       fontSize: 10,
       cellPadding: { top: 4, bottom: 3.6, left: 5, right: 5 },
-      lineWidth: 0.4,
-      lineColor: [205, 205, 205],
-      overflow: "linebreak",
-      valign: "middle",
+      lineWidth: 0.4, lineColor: [205, 205, 205],
+      overflow: "linebreak", valign: "middle",
     },
-    headStyles: {
-      fillColor: [242, 242, 242],
-      textColor: 0,
-      fontStyle: "bold",
-      lineWidth: 0.7,              // header border sedikit lebih tebal
-      lineColor: [180, 180, 180],
-    },
-    alternateRowStyles: { fillColor: [249, 249, 249] }, // striping lembut
+    headStyles: { fillColor: [242, 242, 242], textColor: 0, fontStyle: "bold", lineWidth: 0.7, lineColor: [180, 180, 180] },
+    alternateRowStyles: { fillColor: [249, 249, 249] },
     columnStyles: {
       0: { cellWidth: CW.no,   halign: "center" },
       1: { cellWidth: CW.desc },
@@ -292,7 +259,7 @@ export async function exportPurchasePdf({
 
   y = (doc.lastAutoTable?.finalY || y) + totalsTopSpacing;
 
-  // ====== TOTALS (tanpa border, kanan)
+  // ====== TOTALS
   const rightX = M + leftW + gap;
   const lineH = 13.8;
   const totals = [
@@ -309,10 +276,10 @@ export async function exportPurchasePdf({
   });
   y += totals.length * lineH + 22;
 
-  // ====== TANDA TANGAN
+  // ====== SIGNS
   const sigW = (pageW - M * 2) / 4;
   const sigTitles = ["Prepared by,", "Checked by,", "Approved by,", "Confirmed by,"];
-  const sigRoles = ["Purchasing", "GM Operational", "Director", "Vendor"];
+  const sigRoles  = ["Purchasing", "GM Operational", "Director", "Vendor"];
 
   doc.setFontSize(10);
   for (let i = 0; i < 4; i++) doc.text(sigTitles[i], M + i * sigW + 6, y);
@@ -332,12 +299,7 @@ export async function exportPurchasePdf({
   doc.setFontSize(8.5);
   doc.setTextColor(90);
   const pageCount = doc.getNumberOfPages();
-  doc.text(
-    `Page 1 of ${pageCount}    Printed by ${printedBy}`,
-    pageW - M,
-    pageH - 16,
-    { align: "right" }
-  );
+  doc.text(`Page 1 of ${pageCount}    Printed by ${printedBy}`, pageW - M, pageH - 16, { align: "right" });
 
   doc.save(`${poNo}.pdf`);
 }
