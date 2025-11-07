@@ -247,3 +247,24 @@ export async function updateProductWithImages(id, body = {}, signal) {
   }
   return product;
 }
+
+// Download template (Blob)
+export async function downloadProductImportTemplate(signal) {
+  const res = await api.get("/api/products/import/template", {
+    responseType: "blob",
+    signal,
+  });
+  return res.data; // Blob
+}
+
+// Import file excel
+export async function importProductsExcel({ file, mode = "upsert" }, signal) {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("mode", mode);
+  const { data } = await api.post("/api/products/import", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+    signal,
+  });
+  return data;
+}

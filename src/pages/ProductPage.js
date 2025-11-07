@@ -1,7 +1,7 @@
 // src/pages/ProductPage.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback, useTransition } from "react";
 import {
-  Calendar, Download, Filter, X, Edit, Trash2, Plus, Image as ImageIcon, Search, Store as StoreIcon
+  Calendar, Download, Filter, X, Edit, Trash2, Plus, Image as ImageIcon, Search, Store as StoreIcon, Upload
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -12,6 +12,7 @@ import {
   deleteProduct,
   createProductWithImages,
   updateProductWithImages,
+  downloadProductImportTemplate,   // ⬅️ NEW
 } from "../api/products";
 import { getCategories, getSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
@@ -21,6 +22,7 @@ import AddProduct from "../components/products/AddProduct";
 import UpdateProduct from "../components/products/UpdateProduct";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import DataTable from "../components/data-table/DataTable";
+import ImportExcelModal from "../components/products/ImportExcelModal"; // ⬅️ NEW
 
 const PER_PAGE = 10;
 
@@ -35,14 +37,13 @@ const isDirty = () => localStorage.getItem(CACHE_DIRTY_KEY) === "1";
 const clearDirty = () => localStorage.removeItem(CACHE_DIRTY_KEY);
 
 /* ========= LRU cache untuk list products ========= */
-const LIST_CACHE_TTL_MS = 60 * 1000;         // 60 detik: cukup agresif tapi aman
-const LIST_CACHE_MAX = 50;                   // maksimal 50 kombinasi query
-const listCache = new Map();                 // key -> { ts, payload }
+const LIST_CACHE_TTL_MS = 60 * 1000;
+const LIST_CACHE_MAX = 50;
+const listCache = new Map();
 const listCacheGet = (key) => {
   const hit = listCache.get(key);
   if (!hit) return null;
   if (Date.now() - hit.ts > LIST_CACHE_TTL_MS) { listCache.delete(key); return null; }
-  // refresh posisi LRU
   listCache.delete(key); listCache.set(key, hit);
   return hit.payload;
 };
@@ -81,7 +82,7 @@ const normalizeSubCategories = (cats = []) => {
   return out;
 };
 
-// Serialize params ke key yang stabil (urutkan kunci)
+// Serialize params ke key yang stabil
 const stableKey = (obj) => {
   const sorted = Object.keys(obj).sort().reduce((a, k) => (a[k] = obj[k], a), {});
   return JSON.stringify(sorted);
@@ -101,7 +102,7 @@ export default function ProductPage() {
   const [isPending, startTransition] = useTransition();
 
   /* ====== User store dari /api/me ====== */
-  const [myStoreId, setMyStoreId] = useState(undefined);   // undefined = belum tahu, null = tidak ada
+  const [myStoreId, setMyStoreId] = useState(undefined);
   const [storeName, setStoreName] = useState("-");
   useEffect(() => {
     let cancelled = false;
@@ -136,10 +137,9 @@ export default function ProductPage() {
     return () => { cancel = true; };
   }, []);
 
-  // store terpilih di dropdown; "ALL" berarti semua cabang
+  // store terpilih
   const [selectedStore, setSelectedStore] = useState("ALL");
 
-  // set default selectedStore = myStoreId setelah kedua data tersedia
   useEffect(() => {
     if (myStoreId !== undefined) {
       setSelectedStore((prev) => (prev === "ALL" || prev == null ? (myStoreId ?? "ALL") : prev));
@@ -149,7 +149,7 @@ export default function ProductPage() {
   /* ====== filters ====== */
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
-  const debouncedSearch = useDebouncedValue(searchTerm, 300);  // ⬅️ debounce
+  const debouncedSearch = useDebouncedValue(searchTerm, 300);
   const [categoryId, setCategoryId] = useState("");
   const [subCategoryId, setSubCategoryId] = useState("");
   const [stockStatus, setStockStatus] = useState("");
@@ -179,6 +179,9 @@ export default function ProductPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Import Excel modal
+  const [showImport, setShowImport] = useState(false);      // ⬅️ NEW
 
   /* ====== kategori (cache) ====== */
   useEffect(() => {
@@ -242,7 +245,7 @@ export default function ProductPage() {
   /* ====== query builder ====== */
   const queryParams = useMemo(() => {
     const p = { page: currentPage, per_page: PER_PAGE };
-    if (debouncedSearch.trim()) p.search = debouncedSearch.trim(); // ⬅️ pakai yang debounced
+    if (debouncedSearch.trim()) p.search = debouncedSearch.trim();
     if (categoryId) p.category_id = categoryId;
     if (subCategoryId) p.sub_category_id = subCategoryId;
     if (priceRange.min) p.min_price = priceRange.min;
@@ -257,7 +260,7 @@ export default function ProductPage() {
 
   const queryKey = useMemo(() => stableKey(queryParams), [queryParams]);
 
-  /* ====== fetch dengan cancellation + LRU cache + prefetch next ====== */
+  /* ====== fetch ====== */
   const abortRef = useRef(null);
 
   const fetchList = useCallback(async (params, { useCache = true, signal } = {}) => {
@@ -266,7 +269,7 @@ export default function ProductPage() {
       const hit = listCacheGet(k);
       if (hit) return hit;
     }
-    const res = await getProducts(params, signal); // pastikan getProducts menerima config { signal } di axios
+    const res = await getProducts(params, signal);
     const payload = {
       items: res?.items || res?.data?.items || res?.data || [],
       meta: res?.meta || res?.data?.meta || { current_page: 1, per_page: PER_PAGE, last_page: 1, total: 0 }
@@ -278,12 +281,10 @@ export default function ProductPage() {
   const refetch = useCallback(async () => {
     if (myStoreId === undefined) return;
 
-    // batalkan request sebelumnya
     if (abortRef.current) { try { abortRef.current.abort(); } catch {} }
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // coba ambil dari cache dulu biar UI cepat muncul
     const cacheHit = listCacheGet(queryKey);
     if (cacheHit) {
       startTransition(() => {
@@ -301,10 +302,8 @@ export default function ProductPage() {
         setMeta(meta || { current_page: 1, per_page: PER_PAGE, total: 0, last_page: 1 });
       });
 
-      // Prefetch halaman berikutnya jika masih ada
       if ((meta?.current_page ?? 1) < (meta?.last_page ?? 1)) {
         const nextParams = { ...queryParams, page: (meta.current_page ?? 1) + 1 };
-        // jangan ganggu controller utama; prefetch tanpa overwrite UI
         fetchList(nextParams, { useCache: true }).catch(() => {});
       }
     } catch (err) {
@@ -319,11 +318,10 @@ export default function ProductPage() {
 
   useEffect(() => {
     if (myStoreId !== undefined && selectedStore !== undefined) refetch();
-    // cleanup: batalkan saat unmount
     return () => { if (abortRef.current) { try { abortRef.current.abort(); } catch {} } };
   }, [refetch, myStoreId, selectedStore]);
 
-  /* ====== filter stok FE (opsional) ====== */
+  /* ====== filter stok FE ====== */
   const filteredRows = useMemo(() => {
     let arr = rows;
     if (stockStatus) {
@@ -386,9 +384,7 @@ export default function ProductPage() {
     try {
       await deleteProduct(confirmTarget.id);
       toast.success("Product deleted");
-      // invalidasi cache list agar tidak stale
       listCache.clear();
-      // jika hanya 1 item di halaman ini, mundurkan halaman biar pagination hidup
       if (filteredRows.length === 1 && (meta.current_page || 1) > 1) setCurrentPage((p) => p - 1);
       else refetch();
     } catch {
@@ -400,20 +396,16 @@ export default function ProductPage() {
     }
   }, [confirmTarget, filteredRows.length, meta.current_page, refetch]);
 
-  // create & update: selalu injeksi store_location_id = store milik user (/api/me)
   const handleCreate = useCallback(async (payload) => {
     try {
-      if (myStoreId == null) {
-        toast.error("Akun ini belum memiliki store. Hubungi admin.");
-        return;
-      }
+      if (myStoreId == null) { toast.error("Akun ini belum memiliki store. Hubungi admin."); return; }
       const body = { ...payload, store_location_id: myStoreId };
       await createProductWithImages(body);
       toast.success("Produk berhasil dibuat");
       setShowAdd(false);
       setCurrentPage(1);
       localStorage.setItem(CACHE_DIRTY_KEY, "1");
-      listCache.clear(); // invalidasi cache list
+      listCache.clear();
       refetch();
     } catch (err) {
       console.error(err?.response?.data || err);
@@ -423,17 +415,14 @@ export default function ProductPage() {
 
   const handleUpdate = useCallback(async (payload) => {
     try {
-      if (myStoreId == null) {
-        toast.error("Akun ini belum memiliki store. Hubungi admin.");
-        return;
-      }
+      if (myStoreId == null) { toast.error("Akun ini belum memiliki store. Hubungi admin."); return; }
       const body = { ...payload, store_location_id: myStoreId };
       await updateProductWithImages(payload.id, body);
       toast.success("Produk berhasil diperbarui");
       setShowEdit(false);
       setSelectedProduct(null);
       localStorage.setItem(CACHE_DIRTY_KEY, "1");
-      listCache.clear(); // invalidasi cache list
+      listCache.clear();
       refetch();
     } catch (err) {
       console.error(err?.response?.data || err);
@@ -582,9 +571,9 @@ export default function ProductPage() {
             <div className="relative">
               <select
                 value={selectedStore}
-                onChange={(e) => { setSelectedStore(e.target.value); setCurrentPage(1); listCache.clear(); }} // clear cache ketika cabang berganti
+                onChange={(e) => { setSelectedStore(e.target.value); setCurrentPage(1); listCache.clear(); }}
                 disabled={storesLoading}
-                className="pl-9 pr-8 py-2 border rounded-lg text-sm appearance-none min-w-[220px] focus:ring-2 focus:ring-blue-500"
+                className="pl-9 pr-8 py-2 border rounded-lg text-sm text-gray-700 appearance-none min-w-[220px] focus:ring-2 focus:ring-blue-500"
               >
                 <option value="ALL">Semua</option>
                 {stores.map((s) => (
@@ -600,19 +589,18 @@ export default function ProductPage() {
           <button
             ref={btnRef}
             onClick={toggleFilters}
-            className="flex items-center gap-2 px-4 py-2 text-sm border rounded-lg hover:bg-gray-50"
+            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
           >
             <Filter className="w-4 h-4" />
             Filter
           </button>
 
-          {/* Export */}
+          {/* Export CSV */}
           <button
             onClick={async () => {
               try {
                 toast.loading("Menyiapkan CSV...", { id: "exp" });
                 const p = { ...queryParams, page: 1, per_page: meta?.total || 100000 };
-                // Manfaatkan cache jika ada
                 const k = stableKey(p);
                 const hit = listCacheGet(k);
                 const { items } = hit || await getProducts(p);
@@ -639,10 +627,39 @@ export default function ProductPage() {
                 toast.success("CSV berhasil diunduh", { id: "exp" });
               } catch { toast.error("Gagal mengekspor CSV", { id: "exp" }); }
             }}
-            className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
+            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
           >
             <Download className="w-4 h-4" />
             Export CSV
+          </button>
+
+          {/* Download Template ⬇️ */}
+          <button
+            onClick={async () => {
+              try {
+                const blob = await downloadProductImportTemplate();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url; a.download = "product_import_template.xlsx"; a.click();
+                window.URL.revokeObjectURL(url);
+              } catch (e) {
+                console.error(e);
+                toast.error("Gagal mengunduh template");
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
+          >
+            <Download className="w-4 h-4" />
+            Download Template
+          </button>
+
+          {/* Import Excel ⬆️ */}
+          <button
+            onClick={() => setShowImport(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 border border-blue-600 rounded-lg hover:bg-blue-50"
+          >
+            <Upload className="w-4 h-4" />
+            Import Excel
           </button>
 
           {/* Add */}
@@ -663,10 +680,10 @@ export default function ProductPage() {
             <DataTable
               columns={columns}
               data={filteredRows}
-              loading={loading && !rows.length}         
+              loading={loading && !rows.length}
               meta={meta}
               currentPage={meta.current_page}
-              onPageChange={(p) => { setCurrentPage(p); }}  
+              onPageChange={(p) => { setCurrentPage(p); }}
               stickyHeader
               getRowKey={(row, i) => row.id ?? row.sku ?? i}
               className="border-0 shadow-none"
@@ -803,6 +820,19 @@ export default function ProductPage() {
         onConfirm={confirmDelete}
         onClose={() => { if (!deleting) { setConfirmOpen(false); setConfirmTarget(null); } }}
       />
+
+      {/* Import Excel Modal ⬇️ */}
+      {showImport && (
+        <ImportExcelModal
+          onClose={() => setShowImport(false)}
+          onImported={(summary) => {
+            toast.success(`Import selesai. Created: ${summary?.created ?? 0}, Updated: ${summary?.updated ?? 0}`);
+            listCache.clear();
+            setCurrentPage(1);
+            refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
