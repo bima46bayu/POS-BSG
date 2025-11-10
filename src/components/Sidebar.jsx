@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from "react";
 import {
   Home, CreditCard, Package, Archive, ShoppingCart, Clock, LogOut, Menu, X, PackageCheck,
-  FolderTree, ChevronDown, User, Folder, GitBranch, Truck, MapPin,
+  FolderTree, ChevronDown, User, Folder, GitBranch, Truck, MapPin, Scale,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -120,6 +120,7 @@ export default function Sidebar({
     { id: "pos", label: "POS", icon: CreditCard },
     { id: "products", label: "Product", icon: Package },
     { id: "inventory", label: "Inventory", icon: Archive },
+    { id: "reconciliation", label: "Rekonsiliasi", icon: Scale },
     { id: "purchase", label: "Purchase", icon: ShoppingCart },
     { id: "gr", label: "GR", icon: PackageCheck },
     { id: "history", label: "History", icon: Clock },
@@ -238,7 +239,7 @@ export default function Sidebar({
                   onClick={() => handleNavigate(item.id)}
                   className={[
                     "relative flex flex-col items-center justify-center",
-                    "h-14 w-16",                     // ukuran konstan
+                    "h-14 w-16",
                     "rounded-xl transition-colors duration-200",
                     isActive
                       ? "bg-blue-50 text-blue-600 shadow-sm"
@@ -392,7 +393,7 @@ export default function Sidebar({
                   className={[
                     "relative w-full flex items-center gap-4",
                     "px-4 py-4 rounded-xl transition-colors duration-200 mb-2",
-                    "pl-5", // padding kiri konstan
+                    "pl-5",
                     isActive
                       ? "bg-blue-50 text-blue-600"
                       : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
@@ -420,7 +421,7 @@ export default function Sidebar({
                   className={[
                     "relative w-full flex items-center justify-between",
                     "px-4 py-4 rounded-xl transition-colors duration-200 mb-2",
-                    "pl-5", // padding kiri konstan
+                    "pl-5",
                     (location.pathname || "").startsWith("/master/")
                       ? "bg-blue-50 text-blue-600"
                       : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
@@ -454,7 +455,7 @@ export default function Sidebar({
                             onClick={() => setIsMobileMenuOpen(false)}
                             className={[
                               "relative flex items-center gap-2 w-full",
-                              "px-4 py-3 rounded-lg text-sm pl-5", // padding kiri konstan
+                              "px-4 py-3 rounded-lg text-sm pl-5",
                               active ? "bg-blue-50 text-blue-600" : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
                             ].join(" ")}
                           >

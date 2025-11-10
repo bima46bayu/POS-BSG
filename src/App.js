@@ -16,8 +16,8 @@ import HomePage from "./pages/HomePage";
 import GRPage from "./pages/GRPage";
 import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
+import StockReconciliationPage from "./pages/StockReconciliationPage";
 
-// Master pages
 import MasterUserPage from "./pages/master/MasterUserPage";
 import MasterCategoryPage from "./pages/master/MasterCategoryPage";
 import MasterSubCategoryPage from "./pages/master/MasterSubCategoryPage";
@@ -43,7 +43,7 @@ const queryClient = new QueryClient({
       retry: (failureCount, err) => {
         if (err?.name === "CanceledError") return false;
         const status = err?.response?.status;
-        if (status === 401) return false; // biar langsung ditangani interceptor → /unauthorized
+        if (status === 401) return false;
         return failureCount < 2;
       },
       refetchOnWindowFocus: false,
@@ -64,7 +64,8 @@ const PAGE_PATH = {
   purchase: "/purchase",
   history: "/history",
   gr: "/gr",
-  master: "/master/users", // default child untuk grup Master
+  // FIX: samakan dengan route yang ada (singular)
+  master: "/master/user",
 };
 
 function getRoleFromStorage() {
@@ -80,7 +81,6 @@ function getRoleFromStorage() {
 
 function ProtectedRoute({ children, pageKey, allowedPages }) {
   if (!allowedPages.includes(pageKey)) {
-    // jika pageKey tak diizinkan, arahkan ke halaman pertama yang diizinkan
     const first = PAGE_PATH[(allowedPages[0] || "pos")] || "/pos";
     return <Navigate to={first} replace />;
   }
@@ -99,7 +99,6 @@ function AppShell() {
     [role]
   );
 
-  // Sinkron antar-tab
   useEffect(() => {
     const onStorage = () => {
       setLoggedIn(isLoggedIn());
@@ -109,7 +108,6 @@ function AppShell() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // Pasang listener 401 hanya kalau SUDAH login → redirect ke /unauthorized
   useEffect(() => {
     if (!loggedIn) return;
     const off1 = installUnauthorizedRedirect({
@@ -125,8 +123,7 @@ function AppShell() {
     return () => { off1(); off2(); };
   }, [loggedIn, navigate]);
 
-  // Normalisasi: khusus path /master (tanpa child) → /master/users.
-  // Selain itu, biarkan path tak dikenal jatuh ke wildcard (*) → NotFoundPage (404).
+  // FIX: redirect /master → /master/user (singular, sesuai routes di bawah)
   useEffect(() => {
     if (!loggedIn) return;
     if (location.pathname === "/master") {
@@ -134,7 +131,6 @@ function AppShell() {
     }
   }, [loggedIn, location.pathname, navigate]);
 
-  // Halaman login
   if (!loggedIn) {
     return (
       <LoginPages
@@ -154,22 +150,22 @@ function AppShell() {
     );
   }
 
-  // Sidebar navigate
   const handleNavigate = (pageKey) => {
     if (!allowedPages.includes(pageKey)) return;
     navigate(PAGE_PATH[pageKey] || "/pos");
   };
 
-  // Key aktif sidebar
+  // FIX: kenali /reconciliation sebagai bagian inventory (untuk highlight sidebar)
   const getActivePageKey = () => {
     const p = location.pathname;
     if (p.startsWith("/inventory")) return "inventory";
+    if (p.startsWith("/reconciliation")) return "inventory";
     if (p.startsWith("/master")) return "master";
     for (const [key, path] of Object.entries(PAGE_PATH)) {
       if (p === path) return key;
     }
     if (p === "/unauthorized") return null;
-    return null; // biar sidebar ga nabrak saat 404/unknown
+    return null;
   };
 
   return (
@@ -303,6 +299,24 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterStoreLocationPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ===== RECONCILIATION (pakai privilege inventory) ===== */}
+          <Route
+            path="inventory/reconciliation"
+            element={
+              <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
+                <StockReconciliationPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="inventory/reconciliation/:id"
+            element={
+              <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
+                <StockReconciliationPage />
               </ProtectedRoute>
             }
           />

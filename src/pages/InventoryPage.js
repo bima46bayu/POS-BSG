@@ -1,6 +1,7 @@
-// src/pages/InventoryPage.jsx  (atau InventoryProductsPage.jsx—sesuaikan di routes)
+// src/pages/InventoryPage.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, Filter, Download, X } from "lucide-react";
+import { ListChecks } from "lucide-react"; // NEW
 import toast from "react-hot-toast";
 import DataTable from "../components/data-table/DataTable";
 import { getProducts } from "../api/products";
@@ -172,7 +173,6 @@ export default function InventoryProductsPage() {
         const dir = sortDir === "desc" ? -1 : 1;
         list = [...list].sort((a, b) => {
           const pick = (row) => {
-            // khusus sorting tampil kategori/subkategori by label saat client mode
             if (sortKey === "category_id") return labelFromMap(catMap, row.category_id);
             if (sortKey === "sub_category_id") return labelFromMap(subMap, row.sub_category_id);
             return row[sortKey];
@@ -194,7 +194,7 @@ export default function InventoryProductsPage() {
   const catMap = useMemo(() => new Map((categories || []).map((c) => [c.id, c.name])), [categories]);
   const subMap = useMemo(() => new Map((subCategories || []).map((s) => [s.id, s.name])), [subCategories]);
 
-  // ===== paginate & NORMALIZE meta (seperti HistoryPage) =====
+  // ===== paginate & NORMALIZE meta =====
   const { pageRows, meta } = useMemo(() => {
     if (clientFilterActive) {
       const total = filteredSorted.length;
@@ -234,7 +234,7 @@ export default function InventoryProductsPage() {
     [sortKey]
   );
 
-  // ===== Columns: Product & SKU dipisah; Category & Sub Category dipisah =====
+  // ===== Columns =====
   const columns = [
     {
       key: "name",
@@ -251,7 +251,7 @@ export default function InventoryProductsPage() {
       cell: (row) => <span className="text-gray-700">{row.sku || "-"}</span>,
     },
     {
-      key: "category_id", // pakai id utk kompatibel sort server; client mode di-map ke label
+      key: "category_id",
       header: "Category",
       width: "200px",
       cell: (row) => <span>{labelFromMap(catMap, row.category_id)}</span>,
@@ -314,7 +314,7 @@ export default function InventoryProductsPage() {
     setShowFilters((s) => !s);
   };
 
-  // ===== Export CSV (sudah terpisah Product & SKU, Category & Sub Category) =====
+  // ===== Export CSV =====
   const exportCSV = async () => {
     try {
       toast.loading("Menyiapkan CSV...", { id: "exp" });
@@ -387,6 +387,7 @@ export default function InventoryProductsPage() {
               </button>
             )}
           </div>
+
           <div className="flex items-center gap-2">
             <button
               ref={btnRef}
@@ -401,6 +402,7 @@ export default function InventoryProductsPage() {
                 </span>
               )}
             </button>
+
             <button
               onClick={exportCSV}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -408,6 +410,16 @@ export default function InventoryProductsPage() {
             >
               <Download className="w-4 h-4" />
               Export
+            </button>
+
+            {/* NEW: tombol Reconciliation */}
+            <button
+              onClick={() => navigate("/inventory/reconciliation")}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700"
+              title="Stock Reconciliation"
+            >
+              <ListChecks className="w-4 h-4" />
+              Reconciliation
             </button>
           </div>
         </div>
@@ -452,7 +464,6 @@ export default function InventoryProductsPage() {
             </button>
           </div>
           <div className="p-4 space-y-4">
-            {/* Category */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
               <select
@@ -467,7 +478,6 @@ export default function InventoryProductsPage() {
               </select>
             </div>
 
-            {/* Sub Category */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Sub Category</label>
               <select
