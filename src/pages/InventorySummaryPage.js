@@ -267,24 +267,47 @@ export default function InventorySummaryPage() {
 
       setPeriod(sum?.period ?? { from: null, to: null });
 
-      const openingQty   = Number(sum?.opening_qty ?? 0);
-      const openingCost  = Number(sum?.opening_cost ?? 0);
-      const qtyIn        = Number(sum?.qty_in ?? 0);
-      const qtyOut       = Number(sum?.qty_out ?? 0);
-      const costIn       = Number(sum?.cost_in ?? 0);
-      const costOut      = Number(sum?.cost_out ?? 0);
+      const openingQty = Number(sum?.opening_qty ?? 0);
 
-      const stockEnding  = openingQty + qtyIn - qtyOut;
-      const costEnding   = sum?.stock_cost_total != null
-        ? Number(sum.stock_cost_total)
-        : (openingCost + costIn - costOut);
+      // Ambil unit-cost pembuka dari beberapa kemungkinan field
+      const openingUnitCost =
+        Number(
+          sum?.opening_unit_cost ??
+          sum?.avg_cost ??
+          sum?.unit_cost ??
+          0
+        );
+
+      // Total opening cost (prioritas):
+      // 1) opening_cost_total (kalau BE kirim)
+      // 2) openingQty * openingUnitCost
+      // 3) fallback: opening_cost (jika ternyata itu memang total)
+      let openingCostTotal =
+        sum?.opening_cost_total != null
+          ? Number(sum.opening_cost_total)
+          : openingQty * openingUnitCost;
+      if (!openingCostTotal && sum?.opening_cost != null) {
+        openingCostTotal = Number(sum.opening_cost);
+      }
+
+      const qtyIn   = Number(sum?.qty_in ?? 0);
+      const qtyOut  = Number(sum?.qty_out ?? 0);
+      const costIn  = Number(sum?.cost_in ?? 0);
+      const costOut = Number(sum?.cost_out ?? 0);
+
+      const stockEnding = openingQty + qtyIn - qtyOut;
+      const costEnding  =
+        sum?.stock_cost_total != null
+          ? Number(sum.stock_cost_total)
+          : (openingCostTotal + costIn - costOut);
 
       setSummary({
         stockBeginning: openingQty,
         stockIn: qtyIn,
         stockOut: qtyOut,
         stockEnding,
-        costBeginning: openingCost,
+        // Penting: total biaya awal (qty × unit_cost)
+        costBeginning: openingCostTotal,
         costIn,
         costOut,
         costEnding,
@@ -352,6 +375,12 @@ export default function InventorySummaryPage() {
   const logsWithBalancesAsc = useMemo(() => {
     return addRunningBalances(allLogs, summary.stockBeginning, summary.costBeginning);
   }, [allLogs, summary.stockBeginning, summary.costBeginning]);
+
+  const costEndingFromRows = useMemo(() => {
+    return logsWithBalancesAsc.length
+      ? logsWithBalancesAsc[logsWithBalancesAsc.length - 1]._cost_balance_after
+      : Number(summary.costBeginning || 0);
+  }, [logsWithBalancesAsc, summary.costBeginning]);
 
   // Tampilan sesuai sort
   const logsForDisplay = useMemo(() => {
@@ -512,7 +541,7 @@ export default function InventorySummaryPage() {
           costBeginning={summary.costBeginning}
           costIn={summary.costIn}
           costOut={summary.costOut}
-          costEnding={summary.costEnding}
+          costEnding={costEndingFromRows} 
         />
 
         {/* LOGS */}
