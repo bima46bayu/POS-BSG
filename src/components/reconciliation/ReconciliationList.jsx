@@ -119,10 +119,10 @@ function AddReconciliationModal({ open, onClose, onCreated }) {
       // Auto-download Excel untuk periode & store yang dipilih
       try {
         const blob = await downloadTemplate({
-          store_id: Number(storeId),
+          recon_id: id,                           // ⬅️ prioritas: rute baru /{id}/template
+          store_id: Number(storeId),              // fallback untuk rute lama (aman disertakan)
           date_from: dateFrom,
           date_to: dateTo,
-          recon_id: id, // opsional untuk BE
         });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -273,10 +273,10 @@ export default function ReconciliationList({ onOpenDetail }) {
       setDownloadingId(dlId);
 
       const blob = await downloadTemplate({
-        store_id: Number(sid),
-        ...(df ? { date_from: df } : {}),
-        ...(dt ? { date_to: dt } : {}),
-        // recon_id: row.id, // opsional jika BE ingin
+      recon_id: row.id,                       // ⬅️ pakai id baris jika ada
+      store_id: Number(sid),                  // fallback
+      ...(df ? { date_from: df } : {}),
+      ...(dt ? { date_to: dt } : {}),
       });
 
       const url = URL.createObjectURL(blob);
@@ -413,18 +413,18 @@ export default function ReconciliationList({ onOpenDetail }) {
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-800">Stock Reconciliation</h2>
-          <p className="text-sm text-gray-500">Daftar rekonsiliasi stok.</p>
-        </div>
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center justify-start gap-4">
         <button
           onClick={() => navigate("/inventory/products")}
           className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium border rounded-lg hover:bg-gray-50"
           title="Kembali ke Inventory"
         >
-          <ArrowLeft size={16} /> Back
+          <ArrowLeft size={16} /> 
         </button>
+        <div>
+          <h2 className="text-lg font-semibold text-gray-800">Stock Reconciliation</h2>
+          <p className="text-sm text-gray-500">Daftar rekonsiliasi stok.</p>
+        </div>
       </div>
 
       {/* Controls */}
@@ -458,7 +458,7 @@ export default function ReconciliationList({ onOpenDetail }) {
 
           <button
             onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
             title="Add Reconciliation"
           >
             <Plus className="w-4 h-4" />

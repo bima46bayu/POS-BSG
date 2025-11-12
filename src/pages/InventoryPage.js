@@ -415,7 +415,7 @@ export default function InventoryProductsPage() {
             {/* NEW: tombol Reconciliation */}
             <button
               onClick={() => navigate("/inventory/reconciliation")}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
               title="Stock Reconciliation"
             >
               <ListChecks className="w-4 h-4" />
