@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 
 import KpiCard from "../components/dashboard/KpiCard";
-import ChartCard from "../components/dashboard/ChartCard";
 import SimpleTable from "../components/dashboard/SimpleTable";
 import FilterBar from "../components/dashboard/FilterBar";
 import DailyMatrixModal from "../components/dashboard/DailyMatrixModal";
@@ -20,9 +19,10 @@ import DailyMatrixModal from "../components/dashboard/DailyMatrixModal";
 import { api } from "../api/client";
 import { listSalesForDashboard } from "../api/sales";
 import { getMe } from "../api/users";
+import { getProductsSummaryBatch } from "../api/inventory"; // batch summary semua produk
 
 import {
-  IDR, N, shortIDR, formatDate, generateDateRange, dayKey, PIE_COLORS, isDiscountSale,
+  IDR, N, shortIDR, formatDate, generateDateRange, dayKey, PIE_COLORS,
   payBadgeClass, methodLabel, normMethodKey
 } from "../lib/fmt";
 import { aggregateForRange } from "../lib/aggregate";
@@ -54,8 +54,55 @@ const pickMe = (raw) => {
   return {
     id: me.id ?? null,
     role: String(me.role ?? "").toLowerCase(),
-    store_location_id: me.store_location_id ?? me.storeLocationId ?? me.store_location?.id ?? null,
+    store_location_id:
+      me.store_location_id ?? me.storeLocationId ?? me.store_location?.id ?? null,
   };
+};
+
+// ==== Helper: deteksi transaksi diskon (robust di berbagai shape) ====
+const hasDiscount = (sale) => {
+  if (!sale) return false;
+
+  // kandidat field diskon di header/transaksi
+  const headerDiscountFields = [
+    "discount", "discount_amount", "discount_value", "discount_total",
+    "disc", "disc_amount", "total_discount"
+  ];
+  for (const k of headerDiscountFields) {
+    const v = Number(sale?.[k] ?? 0);
+    if (Number.isFinite(v) && v > 0) return true;
+  }
+
+  // beberapa API simpan "grand_total" + "total_before_discount"
+  const total = Number(sale?.total ?? sale?.grand_total ?? 0);
+  const before = Number(sale?.total_before_discount ?? sale?.subtotal ?? 0);
+  if (Number.isFinite(total) && Number.isFinite(before) && before > 0 && total < before) {
+    return true;
+  }
+
+  // cek per item
+  const items = Array.isArray(sale?.items) ? sale.items : [];
+  for (const it of items) {
+    const discCandidates = [
+      "discount", "discount_amount", "discount_value", "disc", "disc_amount"
+    ];
+    if (discCandidates.some((k) => Number(it?.[k] ?? 0) > 0)) return true;
+
+    const qty = Number(it?.qty ?? it?.quantity ?? 1);
+    const unitPrice = Number(it?.unit_price ?? it?.price ?? it?.selling_price ?? 0);
+    const listPrice = Number(it?.list_price ?? it?.price_before ?? it?.regular_price ?? unitPrice);
+    const subtotal = Number(it?.subtotal ?? it?.line_total ?? qty * unitPrice);
+
+    // if ada list price & unit price turun
+    if (Number.isFinite(listPrice) && listPrice > 0 && unitPrice < listPrice) return true;
+
+    // Jika subtotal < qty * unitPrice (indikasi diskon baris)
+    if (Number.isFinite(qty) && qty > 0 && Number.isFinite(unitPrice)) {
+      if (subtotal < qty * unitPrice - 1e-6) return true;
+    }
+  }
+
+  return false;
 };
 
 export default function HomePage() {
@@ -110,7 +157,8 @@ export default function HomePage() {
       from: filters.from,
       to: filters.to,
       store_location_id: filters.storeId || undefined,
-      only_discount: filters.onlyDiscount || undefined,
+      only_discount: filters.onlyDiscount ? 1 : undefined, // kirim 1 kalau true
+      is_discount:   filters.onlyDiscount ? 1 : undefined, // mirror untuk kompat
       code: filters.search || undefined,
     }],
     queryFn: async ({ queryKey, signal }) => {
@@ -140,7 +188,8 @@ export default function HomePage() {
       const sid = sl?.id ?? s?.store_location_id ?? null;
       if (String(sid || "") !== String(filters.storeId)) return false;
     }
-    if (filters.onlyDiscount && !isDiscountSale(s)) return false;
+    // pakai deteksi diskon robust
+    if (filters.onlyDiscount && !hasDiscount(s)) return false;
     if (filters.search) {
       const hay = `${s?.code || ""} ${s?.customer_name || ""} ${s?.cashier?.name || ""} ${JSON.stringify(s?.items || [])}`.toLowerCase();
       if (!hay.includes(filters.search.toLowerCase())) return false;
@@ -157,6 +206,19 @@ export default function HomePage() {
       return filterNonDate(s);
     });
   }, [salesRaw, filters.from, filters.to, filterNonDate]);
+
+  // Kumpulkan semua product_id yang ada di transaksi range terpilih
+  const productIdsInRange = React.useMemo(() => {
+    const set = new Set();
+    for (const s of rangeSales) {
+      const items = Array.isArray(s?.items) ? s.items : [];
+      for (const it of items) {
+        const pid = it.product_id ?? it.productId ?? it.id;
+        if (pid != null) set.add(Number(pid));
+      }
+    }
+    return Array.from(set);
+  }, [rangeSales]);
 
   // Periode sebelumnya (delta %)
   const prevFrom = React.useMemo(() => {
@@ -181,17 +243,62 @@ export default function HomePage() {
     () => aggregateForRange(rangeSales, filters.from, filters.to, categoriesMap, subCategoriesMap),
     [rangeSales, filters.from, filters.to, categoriesMap, subCategoriesMap]
   );
-  const aggPrev = React.useMemo(() => {
-    const prevFromKey = dayKey(prevFrom.start);
-    const prevToKey = dayKey(prevFrom.end);
-    return aggregateForRange(prevSales, prevFromKey, prevToKey, categoriesMap, subCategoriesMap);
-  }, [prevSales, prevFrom, categoriesMap, subCategoriesMap]);
+  const prevFromKey = React.useMemo(() => dayKey(prevFrom.start), [prevFrom.start]);
+  const prevToKey   = React.useMemo(() => dayKey(prevFrom.end), [prevFrom.end]);
+  const aggPrev = React.useMemo(
+    () => aggregateForRange(prevSales, prevFromKey, prevToKey, categoriesMap, subCategoriesMap),
+    [prevSales, prevFromKey, prevToKey, categoriesMap, subCategoriesMap]
+  );
 
   const pctDelta = React.useCallback((now, prev) => {
     const EPS = 1e-6;
     if (prev == null || !isFinite(prev) || Math.abs(prev) < EPS) return null;
     return ((now - prev) / prev) * 100;
   }, []);
+
+  // ===== Batch Summary: COGS & GP untuk SEMUA produk pada periode & store terpilih
+  const allSummariesQ = useQuery({
+    queryKey: ["all-product-summaries-batch", {
+      ids: productIdsInRange,
+      from: filters.from,
+      to: filters.to,
+      storeId: filters.storeId || null,
+    }],
+    queryFn: async ({ queryKey, signal }) => {
+      const [, { ids, from, to, storeId }] = queryKey;
+      if (!ids || ids.length === 0) {
+        return { items: [], totals: { cogs: 0, gross_profit: 0 }, count: 0 };
+      }
+      const params = {
+        from, to,
+        date_from: from, // kompat dengan BE kamu
+        date_to: to,
+        store_id: storeId || undefined,
+        max: 1000,
+      };
+      return getProductsSummaryBatch(ids, params, signal);
+    },
+    enabled: !!filters.from && !!filters.to && productIdsInRange.length > 0 && !meQ.isLoading,
+    keepPreviousData: true,
+    staleTime: 60_000,
+  });
+
+  // ===== Robust extraction + fallback hitung dari items
+  const _batch = allSummariesQ.data || {};
+  const _items = Array.isArray(_batch.items) ? _batch.items : [];
+  const totalCogsAll =
+    Number(_batch?.totals?.cogs ?? 0) ||
+    _items.reduce((a, x) => a + Number(x?.cogs ?? 0), 0);
+  const totalGrossProfitAll =
+    Number(_batch?.totals?.gross_profit ?? 0) ||
+    _items.reduce((a, x) => a + Number(x?.gross_profit ?? 0), 0);
+  const summaryProductCount = Number(_batch?.count ?? _items.length ?? 0);
+
+  // (opsional debug dev)
+  if (process.env.NODE_ENV !== "production") {
+    // eslint-disable-next-line no-console
+    console.debug("[BATCH SUMMARY]", { _batch });
+  }
 
   // Tabel turunan
   const categories = React.useMemo(() => {
@@ -252,7 +359,6 @@ export default function HomePage() {
 
   /* ===== UI ===== */
 
-  // Section sekarang bisa terima className untuk grid span 8/4
   const Section = ({ title, right, className = "", children }) => (
     <div className={`rounded-2xl border border-slate-200 bg-white overflow-hidden ${className}`}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
@@ -283,7 +389,7 @@ export default function HomePage() {
               <TableIcon className="w-4 h-4" />
               <span className="text-sm font-medium">Matriks Harian</span>
             </button>
-            {salesQ.isFetching && (
+            {(salesQ.isFetching || allSummariesQ.isFetching) && (
               <div className="text-sm text-slate-600 flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
                 Memuat data...
@@ -312,7 +418,7 @@ export default function HomePage() {
                 setFilters={setFilters}
                 stores={storesQ.data || []}
                 onExport={handleExport}
-                isLoading={salesQ.isFetching}
+                isLoading={salesQ.isFetching || allSummariesQ.isFetching}
                 locked={isCashier}
               />
             </div>
@@ -320,11 +426,26 @@ export default function HomePage() {
         </div>
 
         {/* KPIs */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-5">
           <KpiCard title="Total Revenue" value={IDR(aggRange.revenue)} delta={pctDelta(aggRange.revenue, aggPrev.revenue)} icon={DollarSign} trend="vs periode sebelumnya" />
           <KpiCard title="Total Transaksi" value={aggRange.tx.toLocaleString("id-ID")} delta={pctDelta(aggRange.tx, aggPrev.tx)} icon={Receipt} trend="vs periode sebelumnya" />
           <KpiCard title="Average Order Value" value={IDR(aggRange.aov)} delta={pctDelta(aggRange.aov, aggPrev.aov)} icon={ShoppingCart} trend="rata-rata per transaksi" />
           <KpiCard title="Total Diskon" value={IDR(aggRange.discounts)} delta={pctDelta(aggRange.discounts, aggPrev.discounts)} icon={Percent} trend={`${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon`} />
+          {/* === KPI BARU: total semua produk via endpoint batch === */}
+          <KpiCard
+            title="COGS (Sale)"
+            value={IDR(totalCogsAll)}
+            delta={null}
+            icon={Tag}
+            trend={`${summaryProductCount} produk pada periode`}
+          />
+          <KpiCard
+            title="Gross Profit (Sale)"
+            value={IDR(totalGrossProfitAll)}
+            delta={null}
+            icon={TableIcon}
+            trend={`${summaryProductCount} produk pada periode`}
+          />
         </div>
 
         {/* Charts 1 → 12-col grid, span 8/4 */}
