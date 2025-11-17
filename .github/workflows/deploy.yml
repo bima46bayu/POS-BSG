@@ -1,4 +1,4 @@
-name: Deploy React to Hostinger (FTPS)
+name: Deploy React to Plesk (FTPS)
 
 on:
   push:
@@ -21,16 +21,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # Inject ENV ke proses build (CRA akan baca REACT_APP_* di sini)
       - name: Build
         env:
           REACT_APP_API_BASE_URL: ${{ secrets.REACT_APP_API_BASE_URL }}
           REACT_APP_STORAGE_KEY: ${{ secrets.REACT_APP_STORAGE_KEY }}
-          # Jika perlu NODE_ENV bisa ditentukan, tapi npm run build otomatis set production untuk CRA
-          # NODE_ENV: production
-        run: npm run build   # CRA -> output ke build/
+        run: npm run build   # CRA -> build/
 
-      # Copy .htaccess (opsional, untuk routing SPA agar /path di-refresh tidak 404)
       - name: Ensure .htaccess copied
         run: |
           if [ -d build ] && [ -f public/.htaccess ] && [ ! -f build/.htaccess ]; then cp public/.htaccess build/.htaccess; fi
@@ -43,6 +39,5 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           local-dir: build/
-          server-dir: ${{ secrets.FTP_SERVER_DIR || './' }}
-          # hati-hati: ini menghapus file di server-dir yang tidak ada di build/
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
           dangerous-clean-slate: true
