@@ -11,7 +11,7 @@ export default function WizardTabs({ step = 0, onStep }) {
   return (
     <div className="w-full md:w-auto">
       <div
-        className="rounded-2xl p-1.5 border border-gray-200 bg-gradient-to-b from-gray-100 to-gray-50"
+        className="rounded-lg p-1.5 border border-gray-200 bg-gradient-to-b from-gray-100 to-gray-50"
       >
         {/* grid 2 kolom agar lebar tombol sama */}
         <div className="grid grid-cols-2 gap-1.5 min-w-[320px] md:min-w-[420px]">
@@ -21,7 +21,7 @@ export default function WizardTabs({ step = 0, onStep }) {
               <button
                 key={i}
                 onClick={() => onStep?.(i)}
-                className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 h-10
+                className={`flex items-center justify-center gap-2 rounded-lg px-4 py-2 h-10
                   text-sm font-medium transition-all border
                   ${
                     active

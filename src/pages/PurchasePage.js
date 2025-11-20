@@ -132,12 +132,16 @@ export default function PurchasePage() {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+    {/* Header + Tabs container */}
+    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Purchases</h1>
-          <p className="text-sm text-gray-500">Kelola purchase order berdasarkan supplier atau item.</p>
+          <p className="text-sm text-gray-500">
+            Kelola purchase order berdasarkan supplier atau item.
+          </p>
         </div>
+
         <WizardTabs
           step={step}
           onStep={(s) => {
@@ -146,6 +150,7 @@ export default function PurchasePage() {
           }}
         />
       </div>
+    </div>
 
       {/* FilterBar */}
       <div className="mb-6">

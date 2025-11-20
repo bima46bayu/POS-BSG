@@ -1,18 +1,17 @@
 // src/pages/ProductPage.jsx
 import React, { useEffect, useMemo, useRef, useState, useCallback, useTransition } from "react";
 import {
-  Calendar, Download, Filter, X, Edit, Trash2, Plus, Image as ImageIcon, Search, Store as StoreIcon, Upload
+  Calendar, Download, Filter, X, Edit, Trash2, Plus, Search, Store as StoreIcon, Upload
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { toAbsoluteUrl } from "../api/client";
 import {
   getProducts,
-  uploadProductImage,
   deleteProduct,
-  createProductWithImages,
+  createProduct,
   updateProductWithImages,
-  downloadProductImportTemplate,   // ⬅️ NEW
+  downloadProductImportTemplate,
 } from "../api/products";
 import { getCategories, getSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
@@ -22,7 +21,7 @@ import AddProduct from "../components/products/AddProduct";
 import UpdateProduct from "../components/products/UpdateProduct";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import DataTable from "../components/data-table/DataTable";
-import ImportExcelModal from "../components/products/ImportExcelModal"; // ⬅️ NEW
+import ImportExcelModal from "../components/products/ImportExcelModal";
 
 const PER_PAGE = 10;
 
@@ -181,7 +180,7 @@ export default function ProductPage() {
   const [deleting, setDeleting] = useState(false);
 
   // Import Excel modal
-  const [showImport, setShowImport] = useState(false);      // ⬅️ NEW
+  const [showImport, setShowImport] = useState(false);
 
   /* ====== kategori (cache) ====== */
   useEffect(() => {
@@ -398,9 +397,20 @@ export default function ProductPage() {
 
   const handleCreate = useCallback(async (payload) => {
     try {
-      if (myStoreId == null) { toast.error("Akun ini belum memiliki store. Hubungi admin."); return; }
+      if (myStoreId == null) {
+        toast.error("Akun ini belum memiliki store. Hubungi admin.");
+        return;
+      }
+
       const body = { ...payload, store_location_id: myStoreId };
-      await createProductWithImages(body);
+
+      // Antisipasi kalau AddProduct kirim images[] atau image tunggal:
+      if (!body.image && Array.isArray(body.images) && body.images[0]) {
+        body.image = body.images[0];
+      }
+
+      await createProduct(body);
+
       toast.success("Produk berhasil dibuat");
       setShowAdd(false);
       setCurrentPage(1);

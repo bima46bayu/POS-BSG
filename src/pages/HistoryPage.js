@@ -12,55 +12,71 @@ const TABS = [
 export default function HistoryPage() {
   const [sp, setSp] = useSearchParams();
   const active = sp.get("tab") || localStorage.getItem(TAB_KEY) || "tx";
-  const current = useMemo(() => (TABS.some(t => t.id === active) ? active : "tx"), [active]);
+  const current = useMemo(
+    () => (TABS.some((t) => t.id === active) ? active : "tx"),
+    [active]
+  );
 
   useEffect(() => {
     if (sp.get("tab") !== current) {
-      sp.set("tab", current);
-      setSp(sp, { replace: true });
+      const next = new URLSearchParams(sp);
+      next.set("tab", current);
+      setSp(next, { replace: true });
     }
     localStorage.setItem(TAB_KEY, current);
-  }, [current]);
+  }, [current, sp, setSp]);
 
   const setTab = (id) => {
-    const next = TABS.some(t => t.id === id) ? id : "tx";
-    localStorage.setItem(TAB_KEY, next);
-    sp.set("tab", next);
-    setSp(sp, { replace: false });
+    const nextId = TABS.some((t) => t.id === id) ? id : "tx";
+    localStorage.setItem(TAB_KEY, nextId);
+    const next = new URLSearchParams(sp);
+    next.set("tab", nextId);
+    setSp(next, { replace: false });
   };
 
-  const ActiveIcon = TABS.find(t => t.id === current)?.icon ?? CalendarClock;
+  const ActiveIcon = TABS.find((t) => t.id === current)?.icon ?? CalendarClock;
+
+// ...import & logika tetap sama
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center gap-2">
-        <ActiveIcon className="w-5 h-5 text-blue-600" />
-        <h2 className="text-lg font-semibold text-gray-800">History</h2>
-      </div>
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center gap-4">
+        {/* Kiri: icon + title */}
+        <div className="flex items-center gap-2">
+          <ActiveIcon className="w-5 h-5 text-blue-600" />
+          <h2 className="text-lg font-semibold text-gray-800">History</h2>
+        </div>
 
-      {/* Wizard Tabs */}
-      <div className="bg-white mt-4 p-2 rounded-lg shadow-sm border border-gray-200">
-        <div className="flex flex-wrap gap-2">
-          {TABS.map((t) => {
-            const Icon = t.icon;
-            const isActive = current === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={
-                  "inline-flex items-center gap-2 px-4 py-2 rounded-xl border transition " +
-                  (isActive
-                    ? "bg-blue-600 text-white border-blue-600 shadow"
-                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50")
-                }
-              >
-                <Icon className="w-4 h-4" />
-                {t.label}
-              </button>
-            );
-          })}
+        {/* Kanan: segmented wizard */}
+        <div className="ml-auto">
+          <div className="inline-flex bg-white border border-gray-200 rounded-lg p-1 shadow-sm grid grid-cols-2 gap-1.5 min-w-[320px] md:min-w-[420px]">
+            {TABS.map((t) => {
+              const Icon = t.icon;
+              const isActive = current === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id)}
+                  className={
+                    // flex-1 + basis-0 => lebar semua tombol dibagi rata
+                    "flex-1 basis-0 inline-flex items-center justify-center gap-2 px-6 py-2 text-sm font-medium rounded-lg transition " +
+                    (isActive
+                      ? "bg-blue-600 text-white shadow"
+                      : "bg-transparent text-gray-500 hover:bg-gray-50")
+                  }
+                >
+                  <Icon
+                    className={
+                      "w-4 h-4 " +
+                      (isActive ? "text-white" : "text-gray-400")
+                    }
+                  />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

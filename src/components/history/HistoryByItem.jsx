@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Calendar, Download, Package, MapPin, X } from "lucide-react";
+import { Search, Calendar, Download, Package, MapPin, X, Filter as FilterIcon } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../data-table/DataTable";
 import { listSaleItems } from "../../api/reports";
 import { getMe } from "../../api/users";
 import { listStoreLocations } from "../../api/storeLocations";
+import { getProducts } from "../../api/products";
+import { getCategories, getSubCategories } from "../../api/categories";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import * as XLSX from "xlsx";
 
@@ -26,7 +28,7 @@ function defaultStoreFromMe(me) {
 }
 function normalizeStores(arr = []) {
   return (arr || [])
-    .filter((s) => s && (s.id != null) && s.name)
+    .filter((s) => s && s.id != null && s.name)
     .map((s) => ({ id: String(s.id), name: s.name }));
 }
 
@@ -41,6 +43,18 @@ export default function HistoryByItem() {
   const [dateFrom, setDateFrom] = useState(todayStr());
   const [dateTo, setDateTo] = useState(todayStr());
 
+  // category filters (real value)
+  const [categoryId, setCategoryId] = useState("");
+  const [subCategoryId, setSubCategoryId] = useState("");
+
+  // draft filters (di dalam popover)
+  const [draftCategoryId, setDraftCategoryId] = useState("");
+  const [draftSubCategoryId, setDraftSubCategoryId] = useState("");
+
+  // category lists
+  const [categories, setCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState([]);
+
   // store (admin boleh "", kasir terkunci myStoreId)
   const [storeId, setStoreId] = useState("");
   const [stores, setStores] = useState([]);
@@ -51,12 +65,81 @@ export default function HistoryByItem() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
 
-  // popover
+  // products (untuk ambil category/subcategory dari API product)
+  const [products, setProducts] = useState([]);
+
+  // maps
+  const productMap = useMemo(() => {
+    const m = {};
+    (products || []).forEach((p) => {
+      if (p?.id != null) m[p.id] = p;
+    });
+    return m;
+  }, [products]);
+
+  const categoryNameMap = useMemo(() => {
+    const m = {};
+    (categories || []).forEach((c) => {
+      if (c?.id != null) m[c.id] = c.name;
+    });
+    return m;
+  }, [categories]);
+
+  const subCategoryNameMap = useMemo(() => {
+    const m = {};
+    (subCategories || []).forEach((s) => {
+      if (s?.id != null) m[s.id] = s.name;
+    });
+    return m;
+  }, [subCategories]);
+
+  // popover store
   const storeBtnRef = useRef(null);
   const store = useAnchoredPopover();
   useEffect(() => {
     store.setAnchor(storeBtnRef.current);
   }, [store]);
+
+  // popover filter
+  const filterBtnRef = useRef(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterPos, setFilterPos] = useState({ top: 0, left: 0, width: 320 });
+
+  const openFilterPopover = () => {
+    const el = filterBtnRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      const width = 320;
+      const left = Math.min(Math.max(rect.right - width, 8), window.innerWidth - width - 8);
+      const top = Math.min(rect.bottom + 8, window.innerHeight - 8);
+      setFilterPos({ top, left, width });
+    }
+    setDraftCategoryId(categoryId);
+    setDraftSubCategoryId(subCategoryId);
+    setShowFilters(true);
+  };
+
+  const applyFilters = () => {
+    setCategoryId(draftCategoryId);
+    setSubCategoryId(draftSubCategoryId);
+    setPage(1);
+    setShowFilters(false);
+  };
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (categoryId) n++;       // category terpilih
+    if (subCategoryId) n++;    // subcategory terpilih
+    return n;
+  }, [categoryId, subCategoryId]);
+
+  const clearFilters = () => {
+    setDraftCategoryId("");
+    setDraftSubCategoryId("");
+    setCategoryId("");
+    setSubCategoryId("");
+    setPage(1);
+  };
 
   // load me & stores (default dari getMe)
   useEffect(() => {
@@ -89,26 +172,98 @@ export default function HistoryByItem() {
     })();
   }, []);
 
+  // load categories + subcategories LIST (buat pilihan filter)
+  useEffect(() => {
+    (async () => {
+      try {
+        const catRes = await getCategories().catch(() => null);
+        let cats = [];
+        const payload = catRes?.data ?? catRes;
+        if (Array.isArray(payload)) cats = payload;
+        else if (Array.isArray(payload?.data)) cats = payload.data;
+        setCategories(cats || []);
+
+        // coba ambil sub dari nested categories dulu
+        let subs = [];
+        (cats || []).forEach((c) => {
+          const children = c.sub_categories || c.subCategories || c.children || c.subs || [];
+          (children || []).forEach((sc) => {
+            subs.push({
+              id: sc.id,
+              name: sc.name,
+              category_id: sc.category_id ?? sc.categoryId ?? c.id,
+            });
+          });
+        });
+
+        // kalau tidak ada di nested, fallback ke endpoint sub-categories
+        if (!subs.length) {
+          const subRes = await getSubCategories().catch(() => null);
+          const subPayload = subRes?.data ?? subRes;
+          const rawSubs = Array.isArray(subPayload)
+            ? subPayload
+            : Array.isArray(subPayload?.data)
+            ? subPayload.data
+            : [];
+          subs = rawSubs.map((s) => ({
+            id: s.id,
+            name: s.name,
+            category_id: s.category_id ?? s.categoryId ?? s.parent_id ?? s.parentId ?? null,
+          }));
+        }
+
+        setSubCategories(subs || []);
+      } catch {
+        // kalau gagal, tanpa filter kategori
+      }
+    })();
+  }, []);
+
+  // load products (supaya kita bisa baca category/subcategory by product_id)
+  useEffect(() => {
+    (async () => {
+      try {
+        const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
+        const params = {
+          per_page: 1000,
+          ...(chosenStore ? { store_location_id: chosenStore, only_store: 1 } : {}),
+        };
+        const { items } = await getProducts(params);
+        setProducts(items || []);
+      } catch {
+        // kalau gagal, category/subcategory di table jadi "-"
+      }
+    })();
+  }, [isAdmin, storeId, myStoreId]);
+
   const fetchList = useCallback(() => {
     const controller = new AbortController();
     setLoading(true);
 
     // Admin: "" = All (pakai { all:1 } agar backend ambil semua), ada nilai → { store_id }
     // Kasir: { store_id: myStoreId }
-    const chosenStore = isAdmin ? storeId : (myStoreId ? String(myStoreId) : "");
+    const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
     const params = {
       page,
       per_page: PER_PAGE,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       q: q || undefined,
-      ...(isAdmin ? (chosenStore ? { store_id: chosenStore } : { all: 1 }) : (myStoreId ? { store_id: String(myStoreId) } : {})),
+      ...(isAdmin ? (chosenStore ? { store_id: chosenStore } : { all: 1 }) : myStoreId ? { store_id: String(myStoreId) } : {}),
+      // filter category/subcategory sengaja TIDAK dikirim ke BE, kita filter di FE
     };
 
     listSaleItems(params, controller.signal)
       .then(({ items, meta }) => {
         setRows(items || []);
-        setMeta(meta || { current_page: page, last_page: 1, per_page: PER_PAGE, total: (items || []).length });
+        setMeta(
+          meta || {
+            current_page: page,
+            last_page: 1,
+            per_page: PER_PAGE,
+            total: (items || []).length,
+          }
+        );
       })
       .catch((err) => {
         const isCanceled = err?.name === "CanceledError" || err?.code === "ERR_CANCELED";
@@ -121,6 +276,31 @@ export default function HistoryByItem() {
   useEffect(() => {
     fetchList();
   }, [fetchList]);
+
+  // apply filter category/subcategory di FE
+  const filteredRows = useMemo(() => {
+    let arr = rows || [];
+    if (categoryId) {
+      arr = arr.filter((r) => {
+        const p = productMap[r.product_id];
+        if (!p?.category_id) return false;
+        return String(p.category_id) === String(categoryId);
+      });
+    }
+    if (subCategoryId) {
+      arr = arr.filter((r) => {
+        const p = productMap[r.product_id];
+        if (!p?.sub_category_id) return false;
+        return String(p.sub_category_id) === String(subCategoryId);
+      });
+    }
+    return arr;
+  }, [rows, categoryId, subCategoryId, productMap]);
+
+  const filteredSubCategories = useMemo(() => {
+    if (!draftCategoryId) return subCategories;
+    return subCategories.filter((s) => String(s.category_id) === String(draftCategoryId));
+  }, [subCategories, draftCategoryId]);
 
   const columns = useMemo(
     () => [
@@ -145,8 +325,34 @@ export default function HistoryByItem() {
           </div>
         ),
       },
-      { key: "qty", header: "Qty", align: "right", cell: (r) => <span className="tabular-nums">{toNumber(r.qty)}</span> },
-      { key: "gross", header: "Gross Sales", align: "right", cell: (r) => <span className="tabular-nums">{formatIDR(r.gross)}</span> },
+      {
+        key: "category",
+        header: "Category",
+        className: "hidden sm:table-cell min-w-[200px]",
+        cell: (r) => {
+          const p = productMap[r.product_id];
+          const catName = p?.category_id ? categoryNameMap[p.category_id] : "-";
+          const subName = p?.sub_category_id ? subCategoryNameMap[p.sub_category_id] : "";
+          return (
+            <div className="flex flex-col">
+              <span className="text-sm text-gray-900">{catName || "-"}</span>
+              <span className="text-xs text-gray-500">{subName || ""}</span>
+            </div>
+          );
+        },
+      },
+      {
+        key: "qty",
+        header: "Qty",
+        align: "right",
+        cell: (r) => <span className="tabular-nums">{toNumber(r.qty)}</span>,
+      },
+      {
+        key: "gross",
+        header: "Gross Sales",
+        align: "right",
+        cell: (r) => <span className="tabular-nums">{formatIDR(r.gross)}</span>,
+      },
       {
         key: "avg_price",
         header: "Avg Price",
@@ -172,25 +378,40 @@ export default function HistoryByItem() {
         ),
       },
     ],
-    []
+    [productMap, categoryNameMap, subCategoryNameMap]
   );
 
   const exportExcel = () => {
     try {
       toast.loading("Menyiapkan Excel…", { id: "exp-xlsx" });
 
-      const header = ["SKU", "Product", "Qty", "Gross Sales (IDR)", "Avg Price (IDR)", "Last Sold At", "Store"];
-      const chosenStore = isAdmin ? storeId : (myStoreId ? String(myStoreId) : "");
+      const header = [
+        "SKU",
+        "Product",
+        "Category",
+        "Subcategory",
+        "Qty",
+        "Gross Sales (IDR)",
+        "Avg Price (IDR)",
+        "Last Sold At",
+        "Store",
+      ];
+      const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
       const storeName = chosenStore
         ? stores.find((s) => s.id === chosenStore)?.name || chosenStore
         : "All Stores";
 
-      const rowsX = rows.map((r) => {
+      const rowsX = filteredRows.map((r) => {
         const qty = toNumber(r.qty) || 1;
         const avg = Math.round(toNumber(r.gross) / qty);
+        const p = productMap[r.product_id];
+        const catName = p?.category_id ? categoryNameMap[p.category_id] : "-";
+        const subName = p?.sub_category_id ? subCategoryNameMap[p.sub_category_id] : "";
         return [
           r.sku || "-",
           r.product_name || "-",
+          catName || "-",
+          subName || "",
           toNumber(r.qty),
           toNumber(r.gross),
           avg,
@@ -211,10 +432,9 @@ export default function HistoryByItem() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "SalesByItem");
 
-      const note = `${dateFrom || "all"}_to_${dateTo || "all"}_${chosenStore ? `store_${chosenStore}` : "all-stores"}`.replace(
-        /[:\/\\]/g,
-        "-"
-      );
+      const note = `${dateFrom || "all"}_to_${dateTo || "all"}_${
+        chosenStore ? `store_${chosenStore}` : "all-stores"
+      }`.replace(/[:\/\\]/g, "-");
       XLSX.writeFile(wb, `history-by-item_${note}.xlsx`);
       toast.success("Excel berhasil diunduh", { id: "exp-xlsx" });
     } catch {
@@ -286,7 +506,7 @@ export default function HistoryByItem() {
                       <X className="w-5 h-5" />
                     </button>
                   </div>
-                  <div className="p-3 max-h={[300]} overflow-auto">
+                  <div className="p-3 max-h-[300px] overflow-auto">
                     <div className="mb-2">
                       <button
                         className={`w-full text-left px-3 py-2 rounded-md border ${
@@ -304,7 +524,9 @@ export default function HistoryByItem() {
                       <button
                         key={`${s.id}-${s.name}`}
                         className={`w-full text-left px-3 py-2 rounded-md border ${
-                          storeId === String(s.id) ? "bg-blue-50 border-blue-200" : "border-transparent hover:bg-gray-50"
+                          storeId === String(s.id)
+                            ? "bg-blue-50 border-blue-200"
+                            : "border-transparent hover:bg-gray-50"
                         }`}
                         onClick={() => {
                           onChangeStore(String(s.id));
@@ -343,6 +565,24 @@ export default function HistoryByItem() {
             />
           </div>
 
+          {/* Filter button (Category & Subcategory) */}
+          <button
+            ref={filterBtnRef}
+            onClick={openFilterPopover}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border text-gray-700 bg-white border-gray-300 hover:bg-gray-50"
+          >
+            <FilterIcon className="w-4 h-4" />
+            <span>Filter</span>
+
+            {activeFilterCount > 0 && (
+              <span
+                className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-xs font-semibold rounded-full bg-blue-600 text-white"
+              >
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
           {/* export */}
           <button
             onClick={exportExcel}
@@ -354,13 +594,87 @@ export default function HistoryByItem() {
         </div>
       </div>
 
+      {/* Filter Popover */}
+      {showFilters && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
+          <div
+            className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200"
+            style={{ top: filterPos.top, left: filterPos.left, width: filterPos.width }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b flex justify-between items-center">
+              <h3 className="text-sm font-semibold text-gray-900">Filter</h3>
+              <button onClick={() => setShowFilters(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Category</label>
+                <select
+                  value={draftCategoryId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDraftCategoryId(val);
+                    // reset subcategory yang tidak cocok
+                    setDraftSubCategoryId((prev) => {
+                      if (!prev) return "";
+                      const ok = subCategories.some(
+                        (s) => String(s.id) === String(prev) && String(s.category_id) === String(val)
+                      );
+                      return ok ? prev : "";
+                    });
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                >
+                  <option value="">All Category</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Subcategory</label>
+                <select
+                  value={draftSubCategoryId}
+                  onChange={(e) => setDraftSubCategoryId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                >
+                  <option value="">All Subcategory</option>
+                  {filteredSubCategories.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t flex justify-between items-center">
+              <button onClick={clearFilters} className="text-sm text-gray-600">
+                Clear
+              </button>
+              <button
+                onClick={applyFilters}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Table */}
       <div className="bg-white border border-gray-200 rounded-lg mt-4">
         <div className="relative w-full overflow-x-auto">
           <div className="inline-block align-middle w-full">
             <DataTable
               columns={columns}
-              data={rows}
+              data={filteredRows}
               loading={loading}
               meta={meta}
               currentPage={meta.current_page}
