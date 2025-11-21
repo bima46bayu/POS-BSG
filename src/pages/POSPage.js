@@ -153,6 +153,19 @@ export default function POSPage() {
     return Array.from(map.values());
   }, [productsQuery.data]);
 
+  // ===== Filter stok di FE =====
+  const filteredProducts = useMemo(() => {
+    let arr = flatProducts;
+
+    if (filters.stock_status === "available") {
+      arr = arr.filter((p) => Number(p.stock ?? 0) > 0);
+    } else if (filters.stock_status === "out") {
+      arr = arr.filter((p) => Number(p.stock ?? 0) <= 0);
+    }
+
+    return arr;
+  }, [flatProducts, filters.stock_status]);
+
   const hasMore = !!productsQuery.hasNextPage;
   const loading =
     (productsQuery.isFetching && !productsQuery.isFetchingNextPage) ||
@@ -272,9 +285,8 @@ export default function POSPage() {
       {/* Main Content */}
       <main className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-24 md:pb-0 relative z-0">
         <div className="max-w-6xl mx-auto">
-          {/* Toolbar: dibuat satu bar dengan SearchBar + tombol filter/scan, selector cabang nempel kanan */}
+          {/* Toolbar */}
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-4">
-            {/* kiri: komponen search+filter+scanner kamu */}
             <div className="flex-1">
               <SearchBar
                 onSearch={handleSearch}
@@ -283,8 +295,7 @@ export default function POSPage() {
                 categories={categories}
                 subCategories={subCategories}
                 onPickCategory={setPickedCategory}
-
-                /* ====== baru: selector cabang ====== */
+                /* selector cabang untuk admin */
                 showStoreSelector={isAdmin}
                 storeOptions={[
                   { value: "ALL", label: "Semua" },
@@ -299,17 +310,23 @@ export default function POSPage() {
 
           {loading && <div className="text-gray-500 mt-3">Loading products…</div>}
           {err && <div className="text-red-600 mt-3">{err}</div>}
-          {!loading && !err && flatProducts.length === 0 && (
+          {!loading && !err && filteredProducts.length === 0 && (
             <div className="text-gray-500 mt-3">
-              {isAdmin && selectedStoreId === "ALL" ? "Tidak ada produk (semua cabang)." : "Tidak ada produk di cabang ini."}
+              {isAdmin && selectedStoreId === "ALL"
+                ? "Tidak ada produk (semua cabang)."
+                : "Tidak ada produk di cabang ini."}
             </div>
           )}
 
-          <ProductGrid products={flatProducts} onAddToCart={handleAddToCart} />
+          <ProductGrid products={filteredProducts} onAddToCart={handleAddToCart} />
 
-          {loadingMore && <div className="text-center py-3 text-gray-500">Loading more…</div>}
-          {!hasMore && flatProducts.length > 0 && (
-            <div className="text-center py-3 text-gray-400 text-sm">Semua produk sudah ditampilkan</div>
+          {loadingMore && (
+            <div className="text-center py-3 text-gray-500">Loading more…</div>
+          )}
+          {!hasMore && filteredProducts.length > 0 && (
+            <div className="text-center py-3 text-gray-400 text-sm">
+              Semua produk sudah ditampilkan
+            </div>
           )}
         </div>
       </main>
@@ -341,7 +358,9 @@ export default function POSPage() {
               prev.map((it) => (it.id === id ? { ...it, ...d } : it))
             );
           }}
-          onRemoveItem={(id) => setCartItems((prev) => prev.filter((i) => i.id !== id))}
+          onRemoveItem={(id) =>
+            setCartItems((prev) => prev.filter((i) => i.id !== id))
+          }
         />
 
         <SaleSubmitter
@@ -351,13 +370,17 @@ export default function POSPage() {
           total={total}
           onSuccess={(res) => {
             setCartItems([]);
-            toast.success(`Transaction success! Code: ${res?.code || res?.id || "-"}`);
+            toast.success(
+              `Transaction success! Code: ${res?.code || res?.id || "-"}`
+            );
           }}
           onCancel={() => setCartItems([])}
           showSummary={true}
           extraPayload={{
             store_location_id:
-              selectedStoreId && selectedStoreId !== "ALL" ? Number(selectedStoreId) : undefined,
+              selectedStoreId && selectedStoreId !== "ALL"
+                ? Number(selectedStoreId)
+                : undefined,
           }}
         />
       </aside>
@@ -370,11 +393,15 @@ export default function POSPage() {
         >
           <div className="flex items-center gap-2">
             <ShoppingCart className="h-5 w-5 text-gray-700" />
-            <span className="text-sm font-medium">Cart ({cartItems.length})</span>
+            <span className="text-sm font-medium">
+              Cart ({cartItems.length})
+            </span>
           </div>
           <div className="text-right">
             <div className="text-xs text-gray-500">Total</div>
-            <div className="text-sm font-semibold">Rp{total.toLocaleString("id-ID")}</div>
+            <div className="text-sm font-semibold">
+              Rp{total.toLocaleString("id-ID")}
+            </div>
           </div>
           <ChevronUp className="h-5 w-5 text-gray-500" />
         </button>
@@ -403,7 +430,9 @@ export default function POSPage() {
             prev.map((it) => (it.id === id ? { ...it, ...d } : it))
           );
         }}
-        onRemoveItem={(id) => setCartItems((prev) => prev.filter((i) => i.id !== id))}
+        onRemoveItem={(id) =>
+          setCartItems((prev) => prev.filter((i) => i.id !== id))
+        }
         subtotal={subtotalItems}
         tax={tax}
         total={total}

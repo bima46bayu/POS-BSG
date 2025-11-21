@@ -583,7 +583,7 @@ export default function ProductPage() {
                 value={selectedStore}
                 onChange={(e) => { setSelectedStore(e.target.value); setCurrentPage(1); listCache.clear(); }}
                 disabled={storesLoading}
-                className="pl-9 pr-8 py-2 border rounded-lg text-sm text-gray-700 appearance-none min-w-[220px] focus:ring-2 focus:ring-blue-500"
+                className="pl-9 pr-8 py-2 border rounded-lg text-sm text-gray-700 appearance-none min-w-[160px] focus:ring-2 focus:ring-blue-500"
               >
                 <option value="ALL">Semua</option>
                 {stores.map((s) => (

@@ -1,5 +1,6 @@
+// src/components/reports/HistoryByItem.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Calendar, Download, Package, MapPin, X, Filter as FilterIcon } from "lucide-react";
+import { Search, Calendar, Download, Package, MapPin, X, Filter as FilterIcon, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../data-table/DataTable";
 import { listSaleItems } from "../../api/reports";
@@ -9,9 +10,19 @@ import { getProducts } from "../../api/products";
 import { getCategories, getSubCategories } from "../../api/categories";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import * as XLSX from "xlsx";
+import HistoryItemDetailModal from "./HistoryItemDetailModal";
 
 const PER_PAGE = 10;
 const STORE_KEY = "history_store_id";
+
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "", label: "All Methods" },
+  { value: "cash", label: "Cash" },
+  { value: "qris", label: "QRIS" },
+  { value: "transfer", label: "Transfer" },
+  { value: "debit", label: "Debit" },
+  { value: "credit", label: "Credit Card" },
+];
 
 const toNumber = (v) => (v == null ? 0 : Number(v));
 const formatIDR = (v) =>
@@ -47,9 +58,13 @@ export default function HistoryByItem() {
   const [categoryId, setCategoryId] = useState("");
   const [subCategoryId, setSubCategoryId] = useState("");
 
+  // payment method filter (real value)
+  const [paymentMethod, setPaymentMethod] = useState("");
+
   // draft filters (di dalam popover)
   const [draftCategoryId, setDraftCategoryId] = useState("");
   const [draftSubCategoryId, setDraftSubCategoryId] = useState("");
+  const [draftPaymentMethod, setDraftPaymentMethod] = useState("");
 
   // category lists
   const [categories, setCategories] = useState([]);
@@ -67,6 +82,10 @@ export default function HistoryByItem() {
 
   // products (untuk ambil category/subcategory dari API product)
   const [products, setProducts] = useState([]);
+
+  // detail modal state
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailRow, setDetailRow] = useState(null);
 
   // maps
   const productMap = useMemo(() => {
@@ -116,28 +135,33 @@ export default function HistoryByItem() {
     }
     setDraftCategoryId(categoryId);
     setDraftSubCategoryId(subCategoryId);
+    setDraftPaymentMethod(paymentMethod);
     setShowFilters(true);
   };
 
   const applyFilters = () => {
     setCategoryId(draftCategoryId);
     setSubCategoryId(draftSubCategoryId);
+    setPaymentMethod(draftPaymentMethod);
     setPage(1);
     setShowFilters(false);
   };
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
-    if (categoryId) n++;       // category terpilih
-    if (subCategoryId) n++;    // subcategory terpilih
+    if (categoryId) n++; // category terpilih
+    if (subCategoryId) n++; // subcategory terpilih
+    if (paymentMethod) n++; // metode pembayaran terpilih
     return n;
-  }, [categoryId, subCategoryId]);
+  }, [categoryId, subCategoryId, paymentMethod]);
 
   const clearFilters = () => {
     setDraftCategoryId("");
     setDraftSubCategoryId("");
+    setDraftPaymentMethod("");
     setCategoryId("");
     setSubCategoryId("");
+    setPaymentMethod("");
     setPage(1);
   };
 
@@ -249,7 +273,14 @@ export default function HistoryByItem() {
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
       q: q || undefined,
-      ...(isAdmin ? (chosenStore ? { store_id: chosenStore } : { all: 1 }) : myStoreId ? { store_id: String(myStoreId) } : {}),
+      payment_method: paymentMethod || undefined,
+      ...(isAdmin
+        ? chosenStore
+          ? { store_id: chosenStore }
+          : { all: 1 }
+        : myStoreId
+        ? { store_id: String(myStoreId) }
+        : {}),
       // filter category/subcategory sengaja TIDAK dikirim ke BE, kita filter di FE
     };
 
@@ -271,7 +302,7 @@ export default function HistoryByItem() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [page, dateFrom, dateTo, q, storeId, isAdmin, myStoreId]);
+  }, [page, dateFrom, dateTo, q, storeId, isAdmin, myStoreId, paymentMethod]);
 
   useEffect(() => {
     fetchList();
@@ -301,6 +332,16 @@ export default function HistoryByItem() {
     if (!draftCategoryId) return subCategories;
     return subCategories.filter((s) => String(s.category_id) === String(draftCategoryId));
   }, [subCategories, draftCategoryId]);
+
+  const handleOpenDetail = (row) => {
+    setDetailRow(row);
+    setDetailOpen(true);
+  };
+
+  const handleCloseDetail = () => {
+    setDetailOpen(false);
+    setDetailRow(null);
+  };
 
   const columns = useMemo(
     () => [
@@ -348,6 +389,14 @@ export default function HistoryByItem() {
         cell: (r) => <span className="tabular-nums">{toNumber(r.qty)}</span>,
       },
       {
+        key: "transaction_count",
+        header: "# Transaction",
+        align: "right",
+        className: "hidden sm:table-cell",
+        // pastikan BE mengirim field `transaction_count`
+        cell: (r) => <span className="tabular-nums">{toNumber(r.transaction_count)}</span>,
+      },
+      {
         key: "gross",
         header: "Gross Sales",
         align: "right",
@@ -377,6 +426,22 @@ export default function HistoryByItem() {
           </div>
         ),
       },
+      {
+        key: "actions",
+        header: "Action",
+        align: "right",
+        className: "w-px",
+        cell: (r) => (
+          <button
+            type="button"
+            onClick={() => handleOpenDetail(r)}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100"
+          >
+            <Eye className="w-3 h-3" />
+            Detail
+          </button>
+        ),
+      },
     ],
     [productMap, categoryNameMap, subCategoryNameMap]
   );
@@ -391,15 +456,20 @@ export default function HistoryByItem() {
         "Category",
         "Subcategory",
         "Qty",
+        "# Transaction",
         "Gross Sales (IDR)",
         "Avg Price (IDR)",
         "Last Sold At",
         "Store",
+        "Payment Method Filter",
       ];
       const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
       const storeName = chosenStore
         ? stores.find((s) => s.id === chosenStore)?.name || chosenStore
         : "All Stores";
+
+      const paymentLabel =
+        PAYMENT_METHOD_OPTIONS.find((opt) => opt.value === paymentMethod)?.label || "All Methods";
 
       const rowsX = filteredRows.map((r) => {
         const qty = toNumber(r.qty) || 1;
@@ -413,10 +483,12 @@ export default function HistoryByItem() {
           catName || "-",
           subName || "",
           toNumber(r.qty),
+          toNumber(r.transaction_count),
           toNumber(r.gross),
           avg,
           r.last_sold_at ? new Date(r.last_sold_at).toLocaleString("id-ID") : "-",
           storeName,
+          paymentLabel,
         ];
       });
 
@@ -429,12 +501,9 @@ export default function HistoryByItem() {
       });
       ws["!cols"] = colWidths;
 
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "SalesByItem");
-
       const note = `${dateFrom || "all"}_to_${dateTo || "all"}_${
         chosenStore ? `store_${chosenStore}` : "all-stores"
-      }`.replace(/[:\/\\]/g, "-");
+      }_${paymentMethod || "all-methods"}`.replace(/[:\/\\]/g, "-");
       XLSX.writeFile(wb, `history-by-item_${note}.xlsx`);
       toast.success("Excel berhasil diunduh", { id: "exp-xlsx" });
     } catch {
@@ -565,7 +634,7 @@ export default function HistoryByItem() {
             />
           </div>
 
-          {/* Filter button (Category & Subcategory) */}
+          {/* Filter button (Category, Subcategory, Payment Method) */}
           <button
             ref={filterBtnRef}
             onClick={openFilterPopover}
@@ -573,11 +642,8 @@ export default function HistoryByItem() {
           >
             <FilterIcon className="w-4 h-4" />
             <span>Filter</span>
-
             {activeFilterCount > 0 && (
-              <span
-                className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-xs font-semibold rounded-full bg-blue-600 text-white"
-              >
+              <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-xs font-semibold rounded-full bg-blue-600 text-white">
                 {activeFilterCount}
               </span>
             )}
@@ -652,6 +718,21 @@ export default function HistoryByItem() {
                   ))}
                 </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Payment Method</label>
+                <select
+                  value={draftPaymentMethod}
+                  onChange={(e) => setDraftPaymentMethod(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg text-sm"
+                >
+                  {PAYMENT_METHOD_OPTIONS.map((opt) => (
+                    <option key={opt.value || "all"} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="px-4 py-3 border-t flex justify-between items-center">
               <button onClick={clearFilters} className="text-sm text-gray-600">
@@ -686,6 +767,21 @@ export default function HistoryByItem() {
           </div>
         </div>
       </div>
+
+      {/* Detail Modal */}
+      <HistoryItemDetailModal
+        open={detailOpen}
+        onClose={handleCloseDetail}
+        row={detailRow}
+        filters={{
+          dateFrom,
+          dateTo,
+          paymentMethod,
+          isAdmin,
+          storeId,
+          myStoreId,
+        }}
+      />
     </>
   );
 }

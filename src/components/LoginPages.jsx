@@ -68,15 +68,21 @@ const LoginPages = ({ onLogin }) => {
     setLoading(true);
     setError("");
     try {
-      // BE mengembalikan { token, user }; loginRequest akan simpan ke localStorage
       await loginRequest(email, password);
-      onLogin?.(); // biar App setLoggedIn(true)
+      onLogin?.();
     } catch (err) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        "Login gagal. Periksa email/password.";
-      setError(msg);
+      const status = err?.response?.status;
+
+      if (status === 422) {
+        // kredensial salah
+        setError("Email atau password yang Anda masukkan salah.");
+      } else if (status === 429) {
+        // rate limit (kalau pakai throttle di backend)
+        setError("Terlalu banyak percobaan login. Coba lagi beberapa saat lagi.");
+      } else {
+        console.error(err);
+        setError("Terjadi kesalahan saat login. Silakan coba lagi.");
+      }
     } finally {
       setLoading(false);
     }
