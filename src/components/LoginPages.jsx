@@ -112,10 +112,10 @@ const LoginPages = ({ onLogin }) => {
               className="h-7 w-auto mr-2 select-none"
               draggable="false"
             />
-            <span className="text-gray-800 font-semibold text-lg">SHITPOS</span>
+            <span className="text-gray-800 font-semibold text-lg">PTSD</span>
           </div>
           <p className="text-white text-sm font-medium">
-            System for Handling Integrated Transactions – Point of Sale
+            Point of Transaction and Sales Dashboard
           </p>
         </div>
 
