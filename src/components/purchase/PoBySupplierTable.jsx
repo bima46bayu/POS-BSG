@@ -7,7 +7,11 @@ import { Check, X as XIcon, Eye, Calendar, Loader2 } from "lucide-react";
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const formatIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+  Number(v ?? 0).toLocaleString("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  });
 const formatDateTime = (s) =>
   s
     ? new Date(s).toLocaleString("id-ID", {
@@ -24,8 +28,10 @@ function normalizeStatus(raw) {
   const s = String(raw || "").trim().toLowerCase();
   if (s === "approved") return "approved";
   if (s.includes("cancel")) return "canceled";
-  if (["closed", "received", "completed", "done", "finished"].includes(s)) return "closed";
-  if (["partial", "partially_received", "in_progress", "progress"].includes(s)) return "partial_gr";
+  if (["closed", "received", "completed", "done", "finished"].includes(s))
+    return "closed";
+  if (["partial", "partially_received", "in_progress", "progress"].includes(s))
+    return "partial_gr";
   if (s === "pending") return "pending";
   return "draft";
 }
@@ -54,8 +60,17 @@ export default function PoBySupplierTable({
 
   // === 1) HANYA 1 FETCH UNTUK LIST ===
   const { data, isLoading: listLoading } = useQuery({
-    queryKey: ["purchases", { ...filters, search: search ?? "", page, per_page: perPage }],
-    queryFn: () => listPurchases({ ...filters, search, page, per_page: perPage }),
+    queryKey: [
+      "purchases",
+      { ...(filters || {}), search: search ?? "", page, per_page: perPage },
+    ],
+    queryFn: () =>
+      listPurchases({
+        ...(filters || {}),
+        search,
+        page,
+        per_page: perPage,
+      }),
     keepPreviousData: true,
     staleTime: 30_000,
   });
@@ -63,16 +78,38 @@ export default function PoBySupplierTable({
   // Adapter: dukung 3 bentuk (normalized, laravel root, array)
   const items = useMemo(() => {
     if (!data) return [];
-    if (Array.isArray(data)) return data;                 // array murni (jarang)
-    if (Array.isArray(data.items)) return data.items;     // normalized
-    if (Array.isArray(data.data)) return data.data;       // laravel paginator root
+    if (Array.isArray(data)) return data; // array murni (jarang)
+    if (Array.isArray(data.items)) return data.items; // normalized
+    if (Array.isArray(data.data)) return data.data; // laravel paginator root
     return [];
   }, [data]);
 
+  // === 1b) CLIENT FILTER BY user_id (dan teman2 kalau mau) ===
+  const filteredItems = useMemo(() => {
+    let rows = items;
+
+    // filter by user_id (yang kita isi dari PurchasePage untuk kasir)
+    if (filters?.user_id) {
+      const uid = String(filters.user_id);
+      rows = rows.filter(
+        (r) => String(r.user_id ?? "") === uid
+      );
+    }
+
+    // kalau kamu nanti mau tambahin filter status / date di FE:
+    // if (filters?.status) { ... }
+    // if (filters?.from || filters?.to) { ... }
+
+    return rows;
+  }, [items, filters]);
+
   const meta = useMemo(() => {
-    if (!data) return { current_page: page || 1, last_page: 1, per_page: perPage, total: 0 };
+    if (!data)
+      return { current_page: page || 1, last_page: 1, per_page: perPage, total: 0 };
+
     // normalized
     if (data.meta) return data.meta;
+
     // laravel root
     if (data.current_page != null) {
       return {
@@ -82,8 +119,14 @@ export default function PoBySupplierTable({
         total: Number(data.total ?? items.length),
       };
     }
+
     // fallback
-    return { current_page: page || 1, last_page: 1, per_page: perPage, total: items.length };
+    return {
+      current_page: page || 1,
+      last_page: 1,
+      per_page: perPage,
+      total: items.length,
+    };
   }, [data, page, perPage, items.length]);
 
   // === 2) OPSIONAL: PREFETCH DETAIL SAAT HOVER TOMBOL DETAIL ===
@@ -101,13 +144,12 @@ export default function PoBySupplierTable({
   // === 3) Kolom tabel pakai data yang SUDAH ada di list (cepat) ===
   const getTotals = (row) => {
     // gunakan field dari list yang sudah disiapkan backend
-    // prefer grand_total → subtotal → total_price, dsb
-    const totalPrice = num(row.grand_total ?? row.total ?? row.total_price ?? row.subtotal ?? 0);
+    const totalPrice = num(
+      row.grand_total ?? row.total ?? row.total_price ?? row.subtotal ?? 0
+    );
     const qtyOrder =
-      // dari index patch: qty_total (selectSub SUM(qty_order))
-      num(row.qty_total) ||
-      // fallback ke items_count kalau memang hanya ingin jumlah baris item (bukan total qty)
-      num(row.items_count) ||
+      num(row.qty_total) || // SUM(qty_order)
+      num(row.items_count) || // fallback
       0;
     return { qtyOrder, totalPrice };
   };
@@ -171,7 +213,11 @@ export default function PoBySupplierTable({
         cell: (r) => {
           const st = normalizeStatus(r?.status);
           return (
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${STATUS_STYLE[st] || STATUS_STYLE.draft}`}>
+            <span
+              className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
+                STATUS_STYLE[st] || STATUS_STYLE.draft
+              }`}
+            >
               {st}
             </span>
           );
@@ -200,7 +246,11 @@ export default function PoBySupplierTable({
                     className="px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
                     title="Approve"
                   >
-                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    {busy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
                   </button>
                   <button
                     onClick={() => onCancelPO?.(r)}
@@ -208,12 +258,16 @@ export default function PoBySupplierTable({
                     className="px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
                     title="Tolak"
                   >
-                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XIcon className="w-3.5 h-3.5" />}
+                    {busy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <XIcon className="w-3.5 h-3.5" />
+                    )}
                   </button>
                 </>
               )}
               <button
-                onMouseEnter={() => prefetchDetail(r.id)}   // prefetch biar modal cepat
+                onMouseEnter={() => prefetchDetail(r.id)} // prefetch biar modal cepat
                 onFocus={() => prefetchDetail(r.id)}
                 onClick={() => onDetailPO?.(r)}
                 className="px-2 py-1 text-xs font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
@@ -235,7 +289,7 @@ export default function PoBySupplierTable({
         <div className="min-w-full inline-block align-middle">
           <DataTable
             columns={columns}
-            data={items}
+            data={filteredItems}
             loading={listLoading}
             meta={meta}
             currentPage={meta.current_page}

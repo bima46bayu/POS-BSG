@@ -16,13 +16,73 @@ import AddPurchaseModal from "../components/purchase/AddPurchaseModal";
 import SupplierBreakdownDrawer from "../components/purchase/SupplierBreakdownDrawer";
 
 import { approvePurchase, cancelPurchase } from "../api/purchases";
+import { getMe } from "../api/users";
+import { listStoreLocations } from "../api/storeLocations";
 
 export default function PurchasePage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // UI states
+  // ===== user & role =====
+  const [me, setMe] = useState(null);
+
+  const isAdmin = useMemo(
+    () => String(me?.role || "").toLowerCase() === "admin",
+    [me]
+  );
+  const myStoreId = useMemo(
+    () => me?.store_location_id ?? me?.store_location?.id ?? null,
+    [me]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getMe();
+        if (!cancelled) setMe(res || null);
+      } catch {
+        if (!cancelled) setMe(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ===== store list + storeId yang dipilih =====
+  const [stores, setStores] = useState([]);
+  const [storeId, setStoreId] = useState("");
+
+  // ambil daftar store (untuk admin dropdown)
+  useEffect(() => {
+    let cancel = false;
+    listStoreLocations({ per_page: 100 })
+      .then(({ items }) => {
+        if (cancel) return;
+        setStores(Array.isArray(items) ? items : []);
+      })
+      .catch(() => {
+        if (!cancel) toast.error("Gagal memuat daftar store");
+      });
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  // set default store = store user begitu me kebaca
+  useEffect(() => {
+    if (!myStoreId) return;
+    setStoreId((prev) => (prev ? prev : String(myStoreId)));
+  }, [myStoreId]);
+
+  const handleChangeStore = useCallback((val) => {
+    // kosongkan = semua store (hanya bisa admin)
+    setStoreId(val || "");
+  }, []);
+
+  // ===== UI states =====
   const [step, setStep] = useState(0);
   const [filters, setFilters] = useState({});
   const [search, setSearch] = useState("");
@@ -60,13 +120,17 @@ export default function PurchasePage() {
     return Math.max(0, order - received);
   }, []);
 
-  const canGR = useCallback((row) => {
-    const status = String(row?.status || "").toLowerCase();
-    if (["cancelled", "canceled", "closed", "rejected"].includes(status)) return false;
-    const allowed = ["approved", "partially_received"];
-    if (!allowed.includes(status)) return false;
-    return getRemainCount(row) > 0;
-  }, [getRemainCount]);
+  const canGR = useCallback(
+    (row) => {
+      const status = String(row?.status || "").toLowerCase();
+      if (["cancelled", "canceled", "closed", "rejected"].includes(status))
+        return false;
+      const allowed = ["approved", "partially_received"];
+      if (!allowed.includes(status)) return false;
+      return getRemainCount(row) > 0;
+    },
+    [getRemainCount]
+  );
 
   // ===== Mutations =====
   const approveMut = useMutation({
@@ -76,7 +140,8 @@ export default function PurchasePage() {
       toast.success("PO approved");
       qc.invalidateQueries({ queryKey: ["purchases"] });
     },
-    onError: (e) => toast.error(e?.response?.data?.message || "Gagal approve PO"),
+    onError: (e) =>
+      toast.error(e?.response?.data?.message || "Gagal approve PO"),
     onSettled: () => setActingId(null),
   });
 
@@ -87,11 +152,12 @@ export default function PurchasePage() {
       toast.success("PO cancelled");
       qc.invalidateQueries({ queryKey: ["purchases"] });
     },
-    onError: (e) => toast.error(e?.response?.data?.message || "Gagal cancel PO"),
+    onError: (e) =>
+      toast.error(e?.response?.data?.message || "Gagal cancel PO"),
     onSettled: () => setActingId(null),
   });
 
-  // ===== Actions dipass ke tabel =====
+  // ===== Actions ke tabel =====
   const onDetail = useCallback((row) => {
     setDrawerPurchaseId(row.id);
     setDrawerOpen(true);
@@ -101,8 +167,11 @@ export default function PurchasePage() {
     (row) => {
       if (!canGR(row)) {
         const remain = getRemainCount(row);
-        if (remain <= 0) return toast.error("Tidak ada sisa yang bisa di-GR.");
-        return toast.error("PO belum memenuhi syarat GR (harus Approved/Partially Received).");
+        if (remain <= 0)
+          return toast.error("Tidak ada sisa yang bisa di-GR.");
+        return toast.error(
+          "PO belum memenuhi syarat GR (harus Approved/Partially Received)."
+        );
       }
       setGrPurchaseId(row.id);
       setGrOpen(true);
@@ -110,15 +179,44 @@ export default function PurchasePage() {
     [canGR, getRemainCount]
   );
 
-  const onApprove = useCallback((row) => approveMut.mutate(row.id), [approveMut]);
-  const onCancel = useCallback((row) => cancelMut.mutate(row.id), [cancelMut]);
+  const onApprove = useCallback(
+    (row) => approveMut.mutate(row.id),
+    [approveMut]
+  );
+  const onCancel = useCallback(
+    (row) => cancelMut.mutate(row.id),
+    [cancelMut]
+  );
 
   const tableActions = useMemo(
-    () => ({ onDetailPO: onDetail, onGR, onApprovePO: onApprove, onCancelPO: onCancel, actingId }),
+    () => ({
+      onDetailPO: onDetail,
+      onGR,
+      onApprovePO: onApprove,
+      onCancelPO: onCancel,
+      actingId,
+    }),
     [onDetail, onGR, onApprove, onCancel, actingId]
   );
 
-  // ======= Supplier Breakdown Handler =======
+  // ====== Filters yang benar2 dikirim ke API ======
+  const effectiveFilters = useMemo(() => {
+    const base = filters || {};
+    const out = { ...base };
+
+    // PRIORITAS:
+    // 1) Kalau ada storeId dari dropdown → pakai itu
+    // 2) Kalau user BUKAN admin → paksa ke store dia
+    if (storeId) {
+      out.store_location_id = storeId;
+    } else if (!isAdmin && myStoreId) {
+      out.store_location_id = String(myStoreId);
+    }
+
+    return out;
+  }, [filters, storeId, isAdmin, myStoreId]);
+
+  // ======= Supplier Breakdown =======
   const handleOpenSupplierBreakdown = (row) => {
     setSupplierDrawerData(row);
     setSupplierDrawerOpen(true);
@@ -127,30 +225,29 @@ export default function PurchasePage() {
   const handleOpenPoFromSupplierDrawer = (id) => {
     setDrawerPurchaseId(id);
     setDrawerOpen(true);
-    // penting: tidak menutup supplierDrawer
   };
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-    {/* Header + Tabs container */}
-    <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Purchases</h1>
-          <p className="text-sm text-gray-500">
-            Kelola purchase order berdasarkan supplier atau item.
-          </p>
-        </div>
+      {/* Header + Tabs container */}
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Purchases</h1>
+            <p className="text-sm text-gray-500">
+              Kelola purchase order berdasarkan supplier atau item.
+            </p>
+          </div>
 
-        <WizardTabs
-          step={step}
-          onStep={(s) => {
-            setStep(s);
-            setPage(1);
-          }}
-        />
+          <WizardTabs
+            step={step}
+            onStep={(s) => {
+              setStep(s);
+              setPage(1);
+            }}
+          />
+        </div>
       </div>
-    </div>
 
       {/* FilterBar */}
       <div className="mb-6">
@@ -162,6 +259,13 @@ export default function PurchasePage() {
           }}
           filters={filters}
           setFilters={setFilters}
+          stores={stores}
+          storeId={storeId || (myStoreId ? String(myStoreId) : "")}
+          onChangeStore={(val) => {
+            handleChangeStore(val);
+            setPage(1);
+          }}
+          isAdmin={isAdmin}
           onExport={() => toast("Export CSV")}
           onAdd={() => setAddOpen(true)}
         />
@@ -171,7 +275,7 @@ export default function PurchasePage() {
       {step === 0 ? (
         <PoBySupplierTable
           search={search}
-          filters={filters}
+          filters={effectiveFilters}
           page={page}
           setPage={setPage}
           {...tableActions}
@@ -181,7 +285,7 @@ export default function PurchasePage() {
       ) : (
         <PoByItemTable
           search={search}
-          filters={filters}
+          filters={effectiveFilters}
           page={page}
           setPage={setPage}
           canGR={canGR}
@@ -210,7 +314,11 @@ export default function PurchasePage() {
       />
 
       {/* GR Modal */}
-      <GRModal open={grOpen} onClose={() => setGrOpen(false)} purchaseId={grPurchaseId} />
+      <GRModal
+        open={grOpen}
+        onClose={() => setGrOpen(false)}
+        purchaseId={grPurchaseId}
+      />
 
       {/* Add Purchase Modal */}
       <AddPurchaseModal open={addOpen} onClose={() => setAddOpen(false)} />

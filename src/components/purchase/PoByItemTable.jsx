@@ -1,9 +1,7 @@
-// src/components/purchases/PoByItemTable.jsx
+// src/components/purchase/PoByItemTable.jsx
 import React, { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { listPurchases, getPurchase } from "../../api/purchases";
-import { Search, Filter, Download } from "lucide-react";
-import toast from "react-hot-toast";
 import DataTable from "../data-table/DataTable";
 
 function aggregateByProduct(purchaseDetails) {
@@ -53,25 +51,37 @@ export default function PoByItemTable({
   page,
   setPage,
   onOpenSupplierBreakdown,
-  onSearchChange,      // opsional: (value) => void
-  onToggleFilters,     // opsional: () => void  (untuk buka popover/filter modal di parent)
-  exportFileName = "po-by-item",
 }) {
   // Fetch purchase list (paginated)
   const { data: list, isLoading: listLoading } =
     useQueries({
       queries: [
         {
-          queryKey: ["purchases", { ...filters, search, page }],
-          queryFn: () => listPurchases({ ...filters, search, page }),
+          queryKey: [
+            "purchases",
+            { ...(filters || {}), search: search ?? "", page },
+          ],
+          queryFn: () =>
+            listPurchases({
+              ...(filters || {}),
+              search,
+              page,
+            }),
           keepPreviousData: true,
         },
       ],
     })[0] || {};
 
   // Normalize rows (list bisa berupa array atau {data, meta})
-  const rows = Array.isArray(list) ? list : list?.data || [];
+  const rowsRaw = Array.isArray(list) ? list : list?.data || [];
   const metaFromList = (!Array.isArray(list) && list?.meta) || null;
+
+  // CLIENT filter per user_id
+  const rows = useMemo(() => {
+    if (!filters?.user_id) return rowsRaw;
+    const uid = String(filters.user_id);
+    return rowsRaw.filter((po) => String(po.user_id ?? "") === uid);
+  }, [rowsRaw, filters]);
 
   // Fetch details untuk setiap purchase (agar bisa agregasi per item)
   const detailQueries = useQueries({
@@ -81,7 +91,9 @@ export default function PoByItemTable({
     })),
   });
 
-  const details = detailQueries.map((q, idx) => q.data || rows[idx]).filter(Boolean);
+  const details = detailQueries
+    .map((q, idx) => q.data || rows[idx])
+    .filter(Boolean);
   const isLoadingDetails = detailQueries.some((q) => q.isLoading);
 
   const aggregated = useMemo(() => aggregateByProduct(details), [details]);
@@ -144,12 +156,8 @@ export default function PoByItemTable({
     };
   }, [metaFromList, page, aggregated.length]);
 
-
   return (
     <div className="space-y-4">
-
-
-      {/* SECTION 3: Table (horizontal scroll) */}
       <div className="bg-white border border-gray-200 rounded-lg">
         <div className="w-full overflow-x-auto overscroll-x-contain">
           <div className="min-w-full inline-block align-middle">
@@ -157,7 +165,6 @@ export default function PoByItemTable({
               columns={columns}
               data={aggregated}
               loading={listLoading || isLoadingDetails}
-              // Pagination (pakai meta dari API kalau ada)
               meta={meta}
               currentPage={meta.current_page}
               onPageChange={setPage}
