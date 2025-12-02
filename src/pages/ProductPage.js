@@ -1,7 +1,23 @@
 // src/pages/ProductPage.jsx
-import React, { useEffect, useMemo, useRef, useState, useCallback, useTransition } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+  useTransition,
+} from "react";
 import {
-  Calendar, Download, Filter, X, Edit, Trash2, Plus, Search, Store as StoreIcon, Upload
+  Calendar,
+  Download,
+  Filter,
+  X,
+  Edit,
+  Trash2,
+  Plus,
+  Search,
+  Store as StoreIcon,
+  Upload,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -29,9 +45,23 @@ const PER_PAGE = 10;
 const CACHE_KEY = "POS_CATEGORIES_CACHE_V1";
 const CACHE_DIRTY_KEY = "POS_CATS_DIRTY";
 const CAT_CACHE_TTL_MS = 5 * 60 * 1000;
-const readCache = () => { try { const raw = localStorage.getItem(CACHE_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; } };
-const writeCache = (payload) => { try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ...payload, ts: Date.now() })); } catch {} };
-const isCacheStale = (ts) => !ts || (Date.now() - ts > CAT_CACHE_TTL_MS);
+const readCache = () => {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+const writeCache = (payload) => {
+  try {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ ...payload, ts: Date.now() })
+    );
+  } catch {}
+};
+const isCacheStale = (ts) => !ts || Date.now() - ts > CAT_CACHE_TTL_MS;
 const isDirty = () => localStorage.getItem(CACHE_DIRTY_KEY) === "1";
 const clearDirty = () => localStorage.removeItem(CACHE_DIRTY_KEY);
 
@@ -42,8 +72,13 @@ const listCache = new Map();
 const listCacheGet = (key) => {
   const hit = listCache.get(key);
   if (!hit) return null;
-  if (Date.now() - hit.ts > LIST_CACHE_TTL_MS) { listCache.delete(key); return null; }
-  listCache.delete(key); listCache.set(key, hit);
+  if (Date.now() - hit.ts > LIST_CACHE_TTL_MS) {
+    listCache.delete(key);
+    return null;
+  }
+  // refresh order
+  listCache.delete(key);
+  listCache.set(key, hit);
   return hit.payload;
 };
 const listCacheSet = (key, payload) => {
@@ -63,19 +98,36 @@ const badgeClass = (n) => {
   return "bg-blue-100 text-blue-800";
 };
 const formatIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
+  Number(v ?? 0).toLocaleString("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  });
 const formatDateTime = (s) => {
   if (!s) return "-";
   try {
-    return new Date(s).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  } catch { return s; }
+    return new Date(s).toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return s;
+  }
 };
 const normalizeSubCategories = (cats = []) => {
   const out = [];
   cats.forEach((c) => {
-    const children = c.sub_categories || c.subCategories || c.children || c.subs || [];
+    const children =
+      c.sub_categories || c.subCategories || c.children || c.subs || [];
     children.forEach((sc) => {
-      out.push({ id: sc.id, name: sc.name, category_id: sc.category_id ?? sc.categoryId ?? c.id });
+      out.push({
+        id: sc.id,
+        name: sc.name,
+        category_id: sc.category_id ?? sc.categoryId ?? c.id,
+      });
     });
   });
   return out;
@@ -83,7 +135,9 @@ const normalizeSubCategories = (cats = []) => {
 
 // Serialize params ke key yang stabil
 const stableKey = (obj) => {
-  const sorted = Object.keys(obj).sort().reduce((a, k) => (a[k] = obj[k], a), {});
+  const sorted = Object.keys(obj)
+    .sort()
+    .reduce((a, k) => ((a[k] = obj[k]), a), {});
   return JSON.stringify(sorted);
 };
 
@@ -98,7 +152,7 @@ function useDebouncedValue(value, delay = 300) {
 }
 
 export default function ProductPage() {
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
 
   /* ====== User store dari /api/me ====== */
   const [myStoreId, setMyStoreId] = useState(undefined);
@@ -114,10 +168,15 @@ export default function ProductPage() {
           setStoreName(me?.store_location?.name ?? "-");
         }
       } catch {
-        if (!cancelled) { setMyStoreId(null); setStoreName("-"); }
+        if (!cancelled) {
+          setMyStoreId(null);
+          setStoreName("-");
+        }
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   /* ====== daftar store untuk dropdown ====== */
@@ -131,9 +190,15 @@ export default function ProductPage() {
         if (cancel) return;
         setStores(Array.isArray(items) ? items : []);
       })
-      .catch(() => { if (!cancel) toast.error("Gagal memuat daftar cabang"); })
-      .finally(() => { if (!cancel) setStoresLoading(false); });
-    return () => { cancel = true; };
+      .catch(() => {
+        if (!cancel) toast.error("Gagal memuat daftar cabang");
+      })
+      .finally(() => {
+        if (!cancel) setStoresLoading(false);
+      });
+    return () => {
+      cancel = true;
+    };
   }, []);
 
   // store terpilih
@@ -141,7 +206,9 @@ export default function ProductPage() {
 
   useEffect(() => {
     if (myStoreId !== undefined) {
-      setSelectedStore((prev) => (prev === "ALL" || prev == null ? (myStoreId ?? "ALL") : prev));
+      setSelectedStore((prev) =>
+        prev === "ALL" || prev == null ? myStoreId ?? "ALL" : prev
+      );
     }
   }, [myStoreId]);
 
@@ -162,11 +229,19 @@ export default function ProductPage() {
   const [draftCategoryId, setDraftCategoryId] = useState("");
   const [draftSubCategoryId, setDraftSubCategoryId] = useState("");
   const [draftStockStatus, setDraftStockStatus] = useState("");
-  const [draftPriceRange, setDraftPriceRange] = useState({ min: "", max: "" });
+  const [draftPriceRange, setDraftPriceRange] = useState({
+    min: "",
+    max: "",
+  });
 
   /* ====== data ====== */
   const [rows, setRows] = useState([]);
-  const [meta, setMeta] = useState({ current_page: 1, per_page: PER_PAGE, total: 0, last_page: 1 });
+  const [meta, setMeta] = useState({
+    current_page: 1,
+    per_page: PER_PAGE,
+    total: 0,
+    last_page: 1,
+  });
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
@@ -217,7 +292,12 @@ export default function ProductPage() {
               subs = rawSubs.map((s) => ({
                 id: s.id,
                 name: s.name,
-                category_id: s.category_id ?? s.categoryId ?? s.parent_id ?? s.parentId ?? null,
+                category_id:
+                  s.category_id ??
+                  s.categoryId ??
+                  s.parent_id ??
+                  s.parentId ??
+                  null,
               }));
             }
           } catch {}
@@ -236,9 +316,14 @@ export default function ProductPage() {
     const cached = useCacheFirst();
     if (!cached || isCacheStale(cached.ts) || isDirty()) fetchFresh();
 
-    const onStorage = (e) => { if (e.key === CACHE_DIRTY_KEY && e.newValue === "1") fetchFresh(); };
+    const onStorage = (e) => {
+      if (e.key === CACHE_DIRTY_KEY && e.newValue === "1") fetchFresh();
+    };
     window.addEventListener("storage", onStorage);
-    return () => { cancel = true; window.removeEventListener("storage", onStorage); };
+    return () => {
+      cancel = true;
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
 
   /* ====== query builder ====== */
@@ -250,37 +335,63 @@ export default function ProductPage() {
     if (priceRange.min) p.min_price = priceRange.min;
     if (priceRange.max) p.max_price = priceRange.max;
 
-    if (selectedStore !== "ALL" && selectedStore != null && selectedStore !== "") {
+    if (
+      selectedStore !== "ALL" &&
+      selectedStore != null &&
+      selectedStore !== ""
+    ) {
       p.store_id = selectedStore;
       p.only_store = 1;
     }
     return p;
-  }, [currentPage, debouncedSearch, categoryId, subCategoryId, priceRange.min, priceRange.max, selectedStore]);
+  }, [
+    currentPage,
+    debouncedSearch,
+    categoryId,
+    subCategoryId,
+    priceRange.min,
+    priceRange.max,
+    selectedStore,
+  ]);
 
   const queryKey = useMemo(() => stableKey(queryParams), [queryParams]);
 
   /* ====== fetch ====== */
   const abortRef = useRef(null);
 
-  const fetchList = useCallback(async (params, { useCache = true, signal } = {}) => {
-    const k = stableKey(params);
-    if (useCache) {
-      const hit = listCacheGet(k);
-      if (hit) return hit;
-    }
-    const res = await getProducts(params, signal);
-    const payload = {
-      items: res?.items || res?.data?.items || res?.data || [],
-      meta: res?.meta || res?.data?.meta || { current_page: 1, per_page: PER_PAGE, last_page: 1, total: 0 }
-    };
-    listCacheSet(k, payload);
-    return payload;
-  }, []);
+  const fetchList = useCallback(
+    async (params, { useCache = true, signal } = {}) => {
+      const k = stableKey(params);
+      if (useCache) {
+        const hit = listCacheGet(k);
+        if (hit) return hit;
+      }
+      const res = await getProducts(params, signal);
+      const payload = {
+        items: res?.items || res?.data?.items || res?.data || [],
+        meta:
+          res?.meta ||
+          res?.data?.meta || {
+            current_page: 1,
+            per_page: PER_PAGE,
+            last_page: 1,
+            total: 0,
+          },
+      };
+      listCacheSet(k, payload);
+      return payload;
+    },
+    []
+  );
 
   const refetch = useCallback(async () => {
     if (myStoreId === undefined) return;
 
-    if (abortRef.current) { try { abortRef.current.abort(); } catch {} }
+    if (abortRef.current) {
+      try {
+        abortRef.current.abort();
+      } catch {}
+    }
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -288,21 +399,41 @@ export default function ProductPage() {
     if (cacheHit) {
       startTransition(() => {
         setRows(cacheHit.items || []);
-        setMeta(cacheHit.meta || { current_page: 1, per_page: PER_PAGE, total: 0, last_page: 1 });
+        setMeta(
+          cacheHit.meta || {
+            current_page: 1,
+            per_page: PER_PAGE,
+            total: 0,
+            last_page: 1,
+          }
+        );
       });
     } else {
       setLoading(true);
     }
 
     try {
-      const { items, meta } = await fetchList(queryParams, { useCache: true, signal: controller.signal });
+      const { items, meta } = await fetchList(queryParams, {
+        useCache: true,
+        signal: controller.signal,
+      });
       startTransition(() => {
         setRows(items || []);
-        setMeta(meta || { current_page: 1, per_page: PER_PAGE, total: 0, last_page: 1 });
+        setMeta(
+          meta || {
+            current_page: 1,
+            per_page: PER_PAGE,
+            total: 0,
+            last_page: 1,
+          }
+        );
       });
 
       if ((meta?.current_page ?? 1) < (meta?.last_page ?? 1)) {
-        const nextParams = { ...queryParams, page: (meta.current_page ?? 1) + 1 };
+        const nextParams = {
+          ...queryParams,
+          page: (meta.current_page ?? 1) + 1,
+        };
         fetchList(nextParams, { useCache: true }).catch(() => {});
       }
     } catch (err) {
@@ -313,11 +444,17 @@ export default function ProductPage() {
       if (!cacheHit) setLoading(false);
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [fetchList, myStoreId, queryKey, queryParams]);
+  }, [fetchList, myStoreId, queryKey, queryParams, startTransition]);
 
   useEffect(() => {
     if (myStoreId !== undefined && selectedStore !== undefined) refetch();
-    return () => { if (abortRef.current) { try { abortRef.current.abort(); } catch {} } };
+    return () => {
+      if (abortRef.current) {
+        try {
+          abortRef.current.abort();
+        } catch {}
+      }
+    };
   }, [refetch, myStoreId, selectedStore]);
 
   /* ====== filter stok FE ====== */
@@ -326,8 +463,9 @@ export default function ProductPage() {
     if (stockStatus) {
       const thr = (n) => Number(n ?? 0);
       if (stockStatus === "out") arr = arr.filter((p) => thr(p.stock) === 0);
-      if (stockStatus === "low") arr = arr.filter((p) => thr(p.stock) > 0 && thr(p.stock) <= 5);
-      if (stockStatus === "in")  arr = arr.filter((p) => thr(p.stock) > 5);
+      if (stockStatus === "low")
+        arr = arr.filter((p) => thr(p.stock) > 0 && thr(p.stock) <= 5);
+      if (stockStatus === "in") arr = arr.filter((p) => thr(p.stock) > 5);
     }
     return arr;
   }, [rows, stockStatus]);
@@ -344,7 +482,10 @@ export default function ProductPage() {
       if (el) {
         const rect = el.getBoundingClientRect();
         const width = 384;
-        const left = Math.min(Math.max(rect.right - width, 8), window.innerWidth - width - 8);
+        const left = Math.min(
+          Math.max(rect.right - width, 8),
+          window.innerWidth - width - 8
+        );
         const top = Math.min(rect.bottom + 8, window.innerHeight - 8);
         setPopoverPos({ top, left });
       }
@@ -359,7 +500,12 @@ export default function ProductPage() {
     setPriceRange(draftPriceRange);
     setCurrentPage(1);
     setShowFilters(false);
-  }, [draftCategoryId, draftSubCategoryId, draftStockStatus, draftPriceRange]);
+  }, [
+    draftCategoryId,
+    draftSubCategoryId,
+    draftStockStatus,
+    draftPriceRange,
+  ]);
 
   const clearAllFilters = useCallback(() => {
     setDraftCategoryId("");
@@ -375,8 +521,14 @@ export default function ProductPage() {
   }, []);
 
   /* ====== CRUD handlers ====== */
-  const handleEdit = useCallback((row) => { setSelectedProduct(row); setShowEdit(true); }, []);
-  const onDelete = useCallback((row) => { setConfirmTarget(row); setConfirmOpen(true); }, []);
+  const handleEdit = useCallback((row) => {
+    setSelectedProduct(row);
+    setShowEdit(true);
+  }, []);
+  const onDelete = useCallback((row) => {
+    setConfirmTarget(row);
+    setConfirmOpen(true);
+  }, []);
   const confirmDelete = useCallback(async () => {
     if (!confirmTarget) return;
     setDeleting(true);
@@ -384,7 +536,8 @@ export default function ProductPage() {
       await deleteProduct(confirmTarget.id);
       toast.success("Product deleted");
       listCache.clear();
-      if (filteredRows.length === 1 && (meta.current_page || 1) > 1) setCurrentPage((p) => p - 1);
+      if (filteredRows.length === 1 && (meta.current_page || 1) > 1)
+        setCurrentPage((p) => p - 1);
       else refetch();
     } catch {
       toast.error("Gagal menghapus produk");
@@ -395,160 +548,209 @@ export default function ProductPage() {
     }
   }, [confirmTarget, filteredRows.length, meta.current_page, refetch]);
 
-  const handleCreate = useCallback(async (payload) => {
-    try {
-      if (myStoreId == null) {
-        toast.error("Akun ini belum memiliki store. Hubungi admin.");
-        return;
+  const handleCreate = useCallback(
+    async (payload) => {
+      try {
+        if (myStoreId == null) {
+          toast.error("Akun ini belum memiliki store. Hubungi admin.");
+          return;
+        }
+
+        const body = { ...payload, store_location_id: myStoreId };
+
+        // Antisipasi kalau AddProduct kirim images[] atau image tunggal:
+        if (!body.image && Array.isArray(body.images) && body.images[0]) {
+          body.image = body.images[0];
+        }
+
+        await createProduct(body);
+
+        toast.success("Produk berhasil dibuat");
+        setShowAdd(false);
+        setCurrentPage(1);
+        localStorage.setItem(CACHE_DIRTY_KEY, "1");
+        listCache.clear();
+        refetch();
+      } catch (err) {
+        console.error(err?.response?.data || err);
+        toast.error(err?.response?.data?.message || "Gagal membuat produk");
       }
+    },
+    [myStoreId, refetch]
+  );
 
-      const body = { ...payload, store_location_id: myStoreId };
-
-      // Antisipasi kalau AddProduct kirim images[] atau image tunggal:
-      if (!body.image && Array.isArray(body.images) && body.images[0]) {
-        body.image = body.images[0];
+  const handleUpdate = useCallback(
+    async (payload) => {
+      try {
+        if (myStoreId == null) {
+          toast.error("Akun ini belum memiliki store. Hubungi admin.");
+          return;
+        }
+        const body = { ...payload, store_location_id: myStoreId };
+        await updateProductWithImages(payload.id, body);
+        toast.success("Produk berhasil diperbarui");
+        setShowEdit(false);
+        setSelectedProduct(null);
+        localStorage.setItem(CACHE_DIRTY_KEY, "1");
+        listCache.clear();
+        refetch();
+      } catch (err) {
+        console.error(err?.response?.data || err);
+        toast.error(
+          err?.response?.data?.message || "Gagal memperbarui produk"
+        );
       }
-
-      await createProduct(body);
-
-      toast.success("Produk berhasil dibuat");
-      setShowAdd(false);
-      setCurrentPage(1);
-      localStorage.setItem(CACHE_DIRTY_KEY, "1");
-      listCache.clear();
-      refetch();
-    } catch (err) {
-      console.error(err?.response?.data || err);
-      toast.error(err?.response?.data?.message || "Gagal membuat produk");
-    }
-  }, [myStoreId, refetch]);
-
-  const handleUpdate = useCallback(async (payload) => {
-    try {
-      if (myStoreId == null) { toast.error("Akun ini belum memiliki store. Hubungi admin."); return; }
-      const body = { ...payload, store_location_id: myStoreId };
-      await updateProductWithImages(payload.id, body);
-      toast.success("Produk berhasil diperbarui");
-      setShowEdit(false);
-      setSelectedProduct(null);
-      localStorage.setItem(CACHE_DIRTY_KEY, "1");
-      listCache.clear();
-      refetch();
-    } catch (err) {
-      console.error(err?.response?.data || err);
-      toast.error(err?.response?.data?.message || "Gagal memperbarui produk");
-    }
-  }, [myStoreId, refetch]);
+    },
+    [myStoreId, refetch]
+  );
 
   /* ====== columns ====== */
-  const columns = useMemo(() => [
-    {
-      key: "sku",
-      header: "SKU",
-      width: "140px",
-      sticky: "left",
-      className: "font-medium",
-      cell: (row) => <span className="font-medium text-gray-900">{row.sku}</span>,
-    },
-    {
-      key: "image",
-      header: "Image",
-      width: "100px",
-      align: "center",
-      cell: (row) => (
-        <div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center border">
-          {row.image_url ? (
-            <img src={toAbsoluteUrl(row.image_url)} alt={row.name} className="w-full h-full object-cover" />
-          ) : (
-            <span className="text-xs text-gray-500">{(row?.name || "?")[0].toUpperCase()}</span>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: "name",
-      header: "Product Name",
-      width: "260px",
-      cell: (row) => (
-        <div className="flex flex-col">
-          <span className="font-medium text-gray-900">{row.name}</span>
-          <span className="text-xs text-gray-500">
-            {row?.category_name || "-"}
-            {row?.sub_category_name ? ` • ${row.sub_category_name}` : ""}
+  const columns = useMemo(
+    () => [
+      {
+        key: "sku",
+        header: "SKU",
+        width: "140px",
+        sticky: "left",
+        className: "font-medium",
+        cell: (row) => (
+          <span className="font-medium text-gray-900">{row.sku}</span>
+        ),
+      },
+      {
+        key: "image",
+        header: "Image",
+        width: "100px",
+        align: "center",
+        cell: (row) => (
+          <div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center border">
+            {row.image_url ? (
+              <img
+                src={toAbsoluteUrl(row.image_url)}
+                alt={row.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <span className="text-xs text-gray-500">
+                {(row?.name || "?")[0].toUpperCase()}
+              </span>
+            )}
+          </div>
+        ),
+      },
+      {
+        key: "name",
+        header: "Product Name",
+        width: "260px",
+        cell: (row) => (
+          <div className="flex flex-col">
+            <span className="font-medium text-gray-900">{row.name}</span>
+            <span className="text-xs text-gray-500">
+              {row?.category_name || "-"}
+              {row?.sub_category_name ? ` • ${row.sub_category_name}` : ""}
+            </span>
+          </div>
+        ),
+      },
+      {
+        key: "price",
+        header: "Price",
+        width: "130px",
+        align: "right",
+        cell: (row) => (
+          <span className="font-medium">{formatIDR(row.price)}</span>
+        ),
+      },
+      {
+        key: "stock",
+        header: "Stock",
+        width: "110px",
+        align: "center",
+        cell: (row) => (
+          <span
+            className={`px-2.5 py-1 rounded-full text-xs font-medium ${badgeClass(
+              row.stock
+            )}`}
+          >
+            {Number(row.stock ?? 0)}
           </span>
-        </div>
-      ),
-    },
-    {
-      key: "price",
-      header: "Price",
-      width: "130px",
-      align: "right",
-      cell: (row) => <span className="font-medium">{formatIDR(row.price)}</span>,
-    },
-    {
-      key: "stock",
-      header: "Stock",
-      width: "110px",
-      align: "center",
-      cell: (row) => (
-        <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${badgeClass(row.stock)}`}>
-          {Number(row.stock ?? 0)}
-        </span>
-      ),
-    },
-    {
-      key: "store",
-      header: "Store",
-      width: "180px",
-      cell: (row) => (
-        <span className="text-sm text-gray-600">
-          {row.store_location?.name || (row.store_location_id ? row.store_location_id : "Global")}
-        </span>
-      ),
-    },
-    {
-      key: "created_at",
-      header: "Created",
-      width: "170px",
-      cell: (row) => (
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-gray-400" />
-          {formatDateTime(row.created_at)}
-        </div>
-      ),
-    },
-    {
-      key: "__actions",
-      header: "Action",
-      width: "200px",
-      sticky: "right",
-      align: "center",
-      cell: (row) => (
-        <div className="flex items-center justify-center gap-1">
-          <button
-            onClick={() => handleEdit(row)}
-            className="w-8 h-8 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center"
-            title="Edit"
-          >
-            <Edit className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => { setConfirmTarget(row); setConfirmOpen(true); }}
-            className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center justify-center"
-            title="Delete"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-      ),
-    },
-  ], [handleEdit]);
+        ),
+      },
+      {
+        key: "unit",
+        header: "Unit",
+        width: "120px",
+        align: "center",
+        cell: (row) => {
+          const unitName =
+            row.unit?.name || row.unit_name || row.unit || "-";
+          return (
+            <span className="text-xs text-gray-700 whitespace-nowrap">
+              {unitName}
+            </span>
+          );
+        },
+      },
+      {
+        key: "store",
+        header: "Store",
+        width: "180px",
+        cell: (row) => (
+          <span className="text-sm text-gray-600">
+            {row.store_location?.name ||
+              (row.store_location_id ? row.store_location_id : "Global")}
+          </span>
+        ),
+      },
+      {
+        key: "created_at",
+        header: "Created",
+        width: "170px",
+        cell: (row) => (
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-gray-400" />
+            {formatDateTime(row.created_at)}
+          </div>
+        ),
+      },
+      {
+        key: "__actions",
+        header: "Action",
+        width: "200px",
+        sticky: "right",
+        align: "center",
+        cell: (row) => (
+          <div className="flex items-center justify-center gap-1">
+            <button
+              onClick={() => handleEdit(row)}
+              className="w-8 h-8 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center"
+              title="Edit"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => {
+                setConfirmTarget(row);
+                setConfirmOpen(true);
+              }}
+              className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center justify-center"
+              title="Delete"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        ),
+      },
+    ],
+    [handleEdit]
+  );
 
   if (myStoreId === undefined) {
     return (
       <div className="p-6">
-        <div className="bg-white rounded-lg p-4 border">Memuat informasi store user...</div>
+        <div className="bg-white rounded-lg p-4 border">
+          Memuat informasi store user...
+        </div>
       </div>
     );
   }
@@ -557,8 +759,11 @@ export default function ProductPage() {
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-4">
       {/* Header */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-800">Products</h2>
+        <p className="text-xs text-gray-500">
+          Store aktif: <span className="font-medium">{storeName}</span>
+        </p>
       </div>
 
       {/* Controls */}
@@ -571,7 +776,10 @@ export default function ProductPage() {
               type="text"
               placeholder="Search name or SKU..."
               value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
@@ -581,17 +789,29 @@ export default function ProductPage() {
             <div className="relative">
               <select
                 value={selectedStore}
-                onChange={(e) => { setSelectedStore(e.target.value); setCurrentPage(1); listCache.clear(); }}
+                onChange={(e) => {
+                  setSelectedStore(e.target.value);
+                  setCurrentPage(1);
+                  listCache.clear();
+                }}
                 disabled={storesLoading}
                 className="pl-9 pr-8 py-2 border rounded-lg text-sm text-gray-700 appearance-none min-w-[160px] focus:ring-2 focus:ring-blue-500"
               >
                 <option value="ALL">Semua</option>
                 {stores.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
                 ))}
               </select>
               <StoreIcon className="w-4 h-4 text-gray-500 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <svg className="w-4 h-4 text-gray-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
+              <svg
+                className="w-4 h-4 text-gray-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
+              </svg>
             </div>
           </div>
 
@@ -610,32 +830,72 @@ export default function ProductPage() {
             onClick={async () => {
               try {
                 toast.loading("Menyiapkan CSV...", { id: "exp" });
-                const p = { ...queryParams, page: 1, per_page: meta?.total || 100000 };
+                const p = {
+                  ...queryParams,
+                  page: 1,
+                  per_page: meta?.total || 100000,
+                };
                 const k = stableKey(p);
                 const hit = listCacheGet(k);
-                const { items } = hit || await getProducts(p);
-                const list = (hit ? hit.items : (items || [])) || [];
+                const { items } = hit || (await getProducts(p));
+                const list = (hit ? hit.items : items || []) || [];
 
-                const headers = ["SKU", "Product Name", "Category", "Sub Category", "Price", "Stock", "Store", "Created"];
-                const escape = (v) => { if (v == null) return ""; const s = String(v); return /[\",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-                const rowsCsv = list.map((r) =>
-                  [
-                    r.sku, r.name, r.category_name || "", r.sub_category_name || "", formatIDR(r.price),
-                    Number(r.stock ?? 0), r.store_location?.name || (r.store_location_id ? r.store_location_id : "Global"),
-                    formatDateTime(r.created_at)
-                  ].map(escape).join(",")
-                );
+                const headers = [
+                  "SKU",
+                  "Product Name",
+                  "Category",
+                  "Sub Category",
+                  "Price",
+                  "Stock",
+                  "Unit",
+                  "Store",
+                  "Created",
+                ];
+                const escape = (v) => {
+                  if (v == null) return "";
+                  const s = String(v);
+                  return /[\",\n]/.test(s)
+                    ? `"${s.replace(/"/g, '""')}"`
+                    : s;
+                };
+                const rowsCsv = list.map((r) => {
+                  const unitName =
+                    r.unit?.name || r.unit_name || r.unit || "";
+                  return [
+                    r.sku,
+                    r.name,
+                    r.category_name || "",
+                    r.sub_category_name || "",
+                    formatIDR(r.price),
+                    Number(r.stock ?? 0),
+                    unitName,
+                    r.store_location?.name ||
+                      (r.store_location_id ? r.store_location_id : "Global"),
+                    formatDateTime(r.created_at),
+                  ]
+                    .map(escape)
+                    .join(",");
+                });
                 const csv = [headers.join(","), ...rowsCsv].join("\n");
-                const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                const blob = new Blob([csv], {
+                  type: "text/csv;charset=utf-8;",
+                });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+                const ts = new Date()
+                  .toISOString()
+                  .slice(0, 19)
+                  .replace(/[:T]/g, "-");
                 a.download = `products-${ts}.csv`;
-                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 toast.success("CSV berhasil diunduh", { id: "exp" });
-              } catch { toast.error("Gagal mengekspor CSV", { id: "exp" }); }
+              } catch {
+                toast.error("Gagal mengekspor CSV", { id: "exp" });
+              }
             }}
             className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
           >
@@ -650,7 +910,9 @@ export default function ProductPage() {
                 const blob = await downloadProductImportTemplate();
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement("a");
-                a.href = url; a.download = "product_import_template.xlsx"; a.click();
+                a.href = url;
+                a.download = "product_import_template.xlsx";
+                a.click();
                 window.URL.revokeObjectURL(url);
               } catch (e) {
                 console.error(e);
@@ -693,7 +955,9 @@ export default function ProductPage() {
               loading={loading && !rows.length}
               meta={meta}
               currentPage={meta.current_page}
-              onPageChange={(p) => { setCurrentPage(p); }}
+              onPageChange={(p) => {
+                setCurrentPage(p);
+              }}
               stickyHeader
               getRowKey={(row, i) => row.id ?? row.sku ?? i}
               className="border-0 shadow-none"
@@ -705,7 +969,10 @@ export default function ProductPage() {
       {/* Filter Popover */}
       {showFilters && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setShowFilters(false)}
+          />
           <div
             className="fixed z-50 w-96 bg-white rounded-lg shadow-lg border"
             style={{ top: popoverPos.top, left: popoverPos.left }}
@@ -713,12 +980,16 @@ export default function ProductPage() {
           >
             <div className="px-4 py-3 border-b flex justify-between items-center">
               <h3 className="font-semibold">Filters</h3>
-              <button onClick={() => setShowFilters(false)}><X className="w-5 h-5" /></button>
+              <button onClick={() => setShowFilters(false)}>
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
             <div className="p-4 space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Category</label>
+                <label className="block text-sm font-medium mb-1">
+                  Category
+                </label>
                 <select
                   value={draftCategoryId}
                   onChange={(e) => {
@@ -727,7 +998,11 @@ export default function ProductPage() {
                     setDraftSubCategoryId((prev) => {
                       if (!prev) return "";
                       const cid = Number(val);
-                      const ok = subCategories.some((s) => String(s.id) === String(prev) && Number(s.category_id) === cid);
+                      const ok = subCategories.some(
+                        (s) =>
+                          String(s.id) === String(prev) &&
+                          Number(s.category_id) === cid
+                      );
                       return ok ? prev : "";
                     });
                   }}
@@ -735,13 +1010,17 @@ export default function ProductPage() {
                 >
                   <option value="">All</option>
                   {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Subcategory</label>
+                <label className="block text-sm font-medium mb-1">
+                  Subcategory
+                </label>
                 <select
                   value={draftSubCategoryId}
                   onChange={(e) => setDraftSubCategoryId(e.target.value)}
@@ -749,15 +1028,23 @@ export default function ProductPage() {
                 >
                   <option value="">All</option>
                   {subCategories
-                    .filter((s) => !draftCategoryId || String(s.category_id) === String(draftCategoryId))
+                    .filter(
+                      (s) =>
+                        !draftCategoryId ||
+                        String(s.category_id) === String(draftCategoryId)
+                    )
                     .map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
                     ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Stock</label>
+                <label className="block text-sm font-medium mb-1">
+                  Stock
+                </label>
                 <select
                   value={draftStockStatus}
                   onChange={(e) => setDraftStockStatus(e.target.value)}
@@ -771,20 +1058,32 @@ export default function ProductPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1">Price Range</label>
+                <label className="block text-sm font-medium mb-1">
+                  Price Range
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   <input
                     type="number"
                     placeholder="Min"
                     value={draftPriceRange.min}
-                    onChange={(e) => setDraftPriceRange((p) => ({ ...p, min: e.target.value }))}
+                    onChange={(e) =>
+                      setDraftPriceRange((p) => ({
+                        ...p,
+                        min: e.target.value,
+                      }))
+                    }
                     className="px-3 py-2 border rounded-lg"
                   />
                   <input
                     type="number"
                     placeholder="Max"
                     value={draftPriceRange.max}
-                    onChange={(e) => setDraftPriceRange((p) => ({ ...p, max: e.target.value }))}
+                    onChange={(e) =>
+                      setDraftPriceRange((p) => ({
+                        ...p,
+                        max: e.target.value,
+                      }))
+                    }
                     className="px-3 py-2 border rounded-lg"
                   />
                 </div>
@@ -792,8 +1091,18 @@ export default function ProductPage() {
             </div>
 
             <div className="px-4 py-3 border-t flex justify-between">
-              <button onClick={clearAllFilters} className="text-sm text-gray-600">Clear All</button>
-              <button onClick={applyFilters} className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg">Apply</button>
+              <button
+                onClick={clearAllFilters}
+                className="text-sm text-gray-600"
+              >
+                Clear All
+              </button>
+              <button
+                onClick={applyFilters}
+                className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg"
+              >
+                Apply
+              </button>
             </div>
           </div>
         </>
@@ -811,7 +1120,10 @@ export default function ProductPage() {
       {showEdit && selectedProduct && (
         <UpdateProduct
           open={showEdit}
-          onClose={() => { setShowEdit(false); setSelectedProduct(null); }}
+          onClose={() => {
+            setShowEdit(false);
+            setSelectedProduct(null);
+          }}
           onSubmit={handleUpdate}
           categories={categories}
           subCategories={subCategories}
@@ -828,7 +1140,12 @@ export default function ProductPage() {
         variant="danger"
         loading={deleting}
         onConfirm={confirmDelete}
-        onClose={() => { if (!deleting) { setConfirmOpen(false); setConfirmTarget(null); } }}
+        onClose={() => {
+          if (!deleting) {
+            setConfirmOpen(false);
+            setConfirmTarget(null);
+          }
+        }}
       />
 
       {/* Import Excel Modal ⬇️ */}
@@ -836,7 +1153,11 @@ export default function ProductPage() {
         <ImportExcelModal
           onClose={() => setShowImport(false)}
           onImported={(summary) => {
-            toast.success(`Import selesai. Created: ${summary?.created ?? 0}, Updated: ${summary?.updated ?? 0}`);
+            toast.success(
+              `Import selesai. Created: ${
+                summary?.created ?? 0
+              }, Updated: ${summary?.updated ?? 0}`
+            );
             listCache.clear();
             setCurrentPage(1);
             refetch();

@@ -1,5 +1,10 @@
 // src/pages/PurchasePage.jsx
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, {
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+} from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
@@ -19,6 +24,8 @@ import { approvePurchase, cancelPurchase } from "../api/purchases";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
 
+const STORAGE_KEY = "purchase_store_id";
+
 export default function PurchasePage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -26,6 +33,24 @@ export default function PurchasePage() {
 
   // ===== user & role =====
   const [me, setMe] = useState(null);
+  const [meLoading, setMeLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getMe();
+        if (!cancelled) setMe(res || null);
+      } catch {
+        if (!cancelled) setMe(null);
+      } finally {
+        if (!cancelled) setMeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isAdmin = useMemo(
     () => String(me?.role || "").toLowerCase() === "admin",
@@ -36,24 +61,26 @@ export default function PurchasePage() {
     [me]
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await getMe();
-        if (!cancelled) setMe(res || null);
-      } catch {
-        if (!cancelled) setMe(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // ===== store list + storeId yang dipilih =====
+  // ===== store list + storeId yang dipilih (disimpan di storage) =====
   const [stores, setStores] = useState([]);
-  const [storeId, setStoreId] = useState("");
+  const [storeId, setStoreId] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return window.localStorage.getItem(STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
+
+  // sync ke localStorage setiap kali storeId berubah
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, storeId || "");
+    } catch {
+      // abaikan error storage
+    }
+  }, [storeId]);
 
   // ambil daftar store (untuk admin dropdown)
   useEffect(() => {
@@ -71,11 +98,21 @@ export default function PurchasePage() {
     };
   }, []);
 
-  // set default store = store user begitu me kebaca
+  // default & lock store berdasarkan role
   useEffect(() => {
     if (!myStoreId) return;
+
+    if (!isAdmin) {
+      // kasir: selalu pakai store dia, abaikan storage
+      setStoreId(String(myStoreId));
+      return;
+    }
+
+    // admin:
+    // - kalau storeId masih kosong (nggak ada di storage / belum pernah pilih) → default ke store dia
+    // - kalau sudah ada value → pakai yang lama (termasuk kasus "Semua Store" = "")
     setStoreId((prev) => (prev ? prev : String(myStoreId)));
-  }, [myStoreId]);
+  }, [myStoreId, isAdmin]);
 
   const handleChangeStore = useCallback((val) => {
     // kosongkan = semua store (hanya bisa admin)
@@ -87,6 +124,13 @@ export default function PurchasePage() {
   const [filters, setFilters] = useState({});
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+
+  // ===== debounce search biar fetch nggak tiap ketik =====
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(id);
+  }, [search]);
 
   // ===== Drawer states =====
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -205,11 +249,15 @@ export default function PurchasePage() {
     const out = { ...base };
 
     // PRIORITAS:
-    // 1) Kalau ada storeId dari dropdown → pakai itu
-    // 2) Kalau user BUKAN admin → paksa ke store dia
-    if (storeId) {
-      out.store_location_id = storeId;
-    } else if (!isAdmin && myStoreId) {
+    // - Admin: pakai storeId dari dropdown ('' = semua store → hapus store_location_id)
+    // - Non-admin: paksa ke store miliknya
+    if (isAdmin) {
+      if (storeId) {
+        out.store_location_id = String(storeId);
+      } else {
+        delete out.store_location_id;
+      }
+    } else if (myStoreId) {
       out.store_location_id = String(myStoreId);
     }
 
@@ -227,13 +275,27 @@ export default function PurchasePage() {
     setDrawerOpen(true);
   };
 
+  // Opsional: jangan render tabel dulu kalau user belum kebaca
+  if (meLoading) {
+    return (
+      <div className="p-6 bg-gray-50 min-h-screen">
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+          <div className="h-6 w-40 bg-gray-200 rounded mb-2 animate-pulse" />
+          <div className="h-4 w-64 bg-gray-200 rounded animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header + Tabs container */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Purchases</h1>
+            <h1 className="text-2xl font-semibold text-gray-900">
+              Purchases
+            </h1>
             <p className="text-sm text-gray-500">
               Kelola purchase order berdasarkan supplier atau item.
             </p>
@@ -260,8 +322,11 @@ export default function PurchasePage() {
           filters={filters}
           setFilters={setFilters}
           stores={stores}
-          storeId={storeId || (myStoreId ? String(myStoreId) : "")}
+          // admin: pakai state storeId (boleh kosong = semua store)
+          // non-admin: lock ke myStoreId
+          storeId={isAdmin ? storeId : myStoreId ? String(myStoreId) : ""}
           onChangeStore={(val) => {
+            if (!isAdmin) return; // guard tambahan (meski di FilterBar juga sudah disable)
             handleChangeStore(val);
             setPage(1);
           }}
@@ -274,7 +339,7 @@ export default function PurchasePage() {
       {/* CONTENT */}
       {step === 0 ? (
         <PoBySupplierTable
-          search={search}
+          search={debouncedSearch}
           filters={effectiveFilters}
           page={page}
           setPage={setPage}
@@ -284,7 +349,7 @@ export default function PurchasePage() {
         />
       ) : (
         <PoByItemTable
-          search={search}
+          search={debouncedSearch}
           filters={effectiveFilters}
           page={page}
           setPage={setPage}

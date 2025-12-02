@@ -1,6 +1,8 @@
+// src/components/products/AddProduct.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
 import { getMe } from "../../api/users";
+import UnitDropdown from "./UnitDropdown"; // ⬅️ PENTING
 
 /**
  * Props:
@@ -25,6 +27,7 @@ export default function AddProduct({
     stock: "",
     sku: "",
     description: "",
+    unit_id: "", // ⬅️ baru
   });
 
   const [files, setFiles] = useState([]);
@@ -54,7 +57,9 @@ export default function AddProduct({
         if (!cancelled) setMeLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Filter subcategory berdasarkan category
@@ -80,6 +85,7 @@ export default function AddProduct({
         stock: "",
         sku: "",
         description: "",
+        unit_id: "",
       });
       setFiles([]);
       setSubmitting(false);
@@ -148,8 +154,9 @@ export default function AddProduct({
     if (submitting) return;
 
     if (storeLocationId == null) {
-      // cegah kirim tanpa store; BE akan menolak kalau perlu store
-      alert("Lokasi store user tidak ditemukan. Silakan relogin atau hubungi admin.");
+      alert(
+        "Lokasi store user tidak ditemukan. Silakan relogin atau hubungi admin."
+      );
       return;
     }
 
@@ -160,9 +167,14 @@ export default function AddProduct({
         price: form.price ? Number(form.price) : 0,
         stock: form.stock ? Number(form.stock) : 0,
         images: files.map((f) => f.file),
-        // auto inject store dari /api/me:
         store_location_id: storeLocationId,
       };
+
+      // normalisasi unit_id: kalau string kosong → null
+      if (!payload.unit_id) {
+        payload.unit_id = null;
+      }
+
       await onSubmit?.(payload);
     } finally {
       setSubmitting(false);
@@ -186,7 +198,11 @@ export default function AddProduct({
           <h2 className="text-xl leading-6 font-semibold text-gray-900">
             Tambah Produk
           </h2>
-          {meLoading && <p className="text-xs text-gray-500 mt-1">Memuat store user…</p>}
+          {meLoading && (
+            <p className="text-xs text-gray-500 mt-1">
+              Memuat store user…
+            </p>
+          )}
           {!meLoading && storeLocationId == null && (
             <p className="text-xs text-red-600 mt-1">
               {meError || "Store user tidak ditemukan. Produk tidak bisa disimpan."}
@@ -217,6 +233,7 @@ export default function AddProduct({
             />
           </Field>
 
+          {/* Category + Subcategory */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="Category">
               <Select
@@ -236,16 +253,29 @@ export default function AddProduct({
             </Field>
           </div>
 
-          <Field label="Stock">
-            <Input
-              type="number"
-              inputMode="numeric"
-              placeholder="10"
-              value={form.stock}
-              onChange={onChange("stock")}
-              min="0"
-            />
-          </Field>
+          {/* Stock + Unit */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Stock">
+              <Input
+                type="number"
+                inputMode="numeric"
+                placeholder="10"
+                value={form.stock}
+                onChange={onChange("stock")}
+                min="0"
+              />
+            </Field>
+
+            <Field label="Unit">
+              <UnitDropdown
+                value={form.unit_id}
+                onChange={(id) =>
+                  setForm((f) => ({ ...f, unit_id: id ?? "" }))
+                }
+                placeholder="Pilih / kelola satuan"
+              />
+            </Field>
+          </div>
 
           <Field label="SKU">
             <Input
@@ -279,7 +309,9 @@ export default function AddProduct({
               onDrop={onDrop}
               className={[
                 "rounded-xl border-2 border-dashed transition-colors p-6 text-center select-none",
-                isDragOver ? "border-blue-400 bg-blue-50" : "border-blue-300 bg-white",
+                isDragOver
+                  ? "border-blue-400 bg-blue-50"
+                  : "border-blue-300 bg-white",
               ].join(" ")}
             >
               <div className="mx-auto w-10 h-10 mb-2 rounded-full border border-blue-200 flex items-center justify-center">
@@ -321,7 +353,9 @@ export default function AddProduct({
                     <p className="text-sm text-gray-800 truncate">
                       {f.file.name}
                     </p>
-                    <p className="text-[11px] text-gray-500">{f.sizeLabel}</p>
+                    <p className="text-[11px] text-gray-500">
+                      {f.sizeLabel}
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -351,7 +385,9 @@ export default function AddProduct({
             type="submit"
             className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
             disabled={submitting || meLoading || storeLocationId == null}
-            title={storeLocationId == null ? "Store user tidak ditemukan" : undefined}
+            title={
+              storeLocationId == null ? "Store user tidak ditemukan" : undefined
+            }
           >
             {submitting ? "Saving..." : "Save Product"}
           </button>
