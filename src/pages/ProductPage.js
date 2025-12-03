@@ -8,7 +8,6 @@ import React, {
   useTransition,
 } from "react";
 import {
-  Calendar,
   Download,
   Filter,
   X,
@@ -32,6 +31,7 @@ import {
 import { getCategories, getSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
+import { listUnits } from "../api/units";
 
 import AddProduct from "../components/products/AddProduct";
 import UpdateProduct from "../components/products/UpdateProduct";
@@ -76,7 +76,6 @@ const listCacheGet = (key) => {
     listCache.delete(key);
     return null;
   }
-  // refresh order
   listCache.delete(key);
   listCache.set(key, hit);
   return hit.payload;
@@ -201,6 +200,54 @@ export default function ProductPage() {
     };
   }, []);
 
+  // mapping store_id → store_name
+  const storeMap = useMemo(() => {
+    const m = {};
+    stores.forEach((s) => {
+      if (s && s.id != null) {
+        m[String(s.id)] = s.name;
+      }
+    });
+    return m;
+  }, [stores]);
+
+  /* ====== master units untuk nama satuan ====== */
+  const [units, setUnits] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listUnits({ per_page: 100 });
+        const arr = Array.isArray(res?.items)
+          ? res.items
+          : Array.isArray(res)
+          ? res
+          : [];
+        if (!cancelled) {
+          setUnits(arr);
+        }
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) {
+          toast.error("Gagal memuat satuan");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const unitMap = useMemo(() => {
+    const m = {};
+    units.forEach((u) => {
+      if (u && u.id != null) {
+        m[String(u.id)] = u.name;
+      }
+    });
+    return m;
+  }, [units]);
+
   // store terpilih
   const [selectedStore, setSelectedStore] = useState("ALL");
 
@@ -245,6 +292,28 @@ export default function ProductPage() {
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
+
+  // category_id → nama
+  const categoryMap = useMemo(() => {
+    const m = {};
+    categories.forEach((c) => {
+      if (c && c.id != null) {
+        m[String(c.id)] = c.name;
+      }
+    });
+    return m;
+  }, [categories]);
+
+  // sub_category_id → nama
+  const subCategoryMap = useMemo(() => {
+    const m = {};
+    subCategories.forEach((s) => {
+      if (s && s.id != null) {
+        m[String(s.id)] = s.name;
+      }
+    });
+    return m;
+  }, [subCategories]);
 
   /* ====== modal & aksi ====== */
   const [showAdd, setShowAdd] = useState(false);
@@ -558,7 +627,6 @@ export default function ProductPage() {
 
         const body = { ...payload, store_location_id: myStoreId };
 
-        // Antisipasi kalau AddProduct kirim images[] atau image tunggal:
         if (!body.image && Array.isArray(body.images) && body.images[0]) {
           body.image = body.images[0];
         }
@@ -641,16 +709,29 @@ export default function ProductPage() {
       {
         key: "name",
         header: "Product Name",
-        width: "260px",
+        width: "180px",
         cell: (row) => (
-          <div className="flex flex-col">
-            <span className="font-medium text-gray-900">{row.name}</span>
-            <span className="text-xs text-gray-500">
-              {row?.category_name || "-"}
-              {row?.sub_category_name ? ` • ${row.sub_category_name}` : ""}
-            </span>
-          </div>
+          <span className="font-medium text-gray-900 truncate block">
+            {row.name}
+          </span>
         ),
+      },
+      {
+        // Category/Subcategory column (pengganti Created)
+        key: "category",
+        header: "Category",
+        width: "120px",
+        cell: (row) => {
+          const catName = categoryMap[String(row.category_id)] || "-";
+          const subName =
+            subCategoryMap[String(row.sub_category_id)] || "";
+          return (
+            <div className="flex flex-col">
+              <span className="text-xs text-gray-800">{catName}</span>
+              <span className="text-xs text-gray-500">{subName}</span>
+            </div>
+          );
+        },
       },
       {
         key: "price",
@@ -664,7 +745,7 @@ export default function ProductPage() {
       {
         key: "stock",
         header: "Stock",
-        width: "110px",
+        width: "100px",
         align: "center",
         cell: (row) => (
           <span
@@ -683,7 +764,11 @@ export default function ProductPage() {
         align: "center",
         cell: (row) => {
           const unitName =
-            row.unit?.name || row.unit_name || row.unit || "-";
+            row.unit?.name ||
+            row.unit_name ||
+            unitMap[String(row.unit_id)] ||
+            row.unit ||
+            "-";
           return (
             <span className="text-xs text-gray-700 whitespace-nowrap">
               {unitName}
@@ -694,29 +779,23 @@ export default function ProductPage() {
       {
         key: "store",
         header: "Store",
-        width: "180px",
-        cell: (row) => (
-          <span className="text-sm text-gray-600">
-            {row.store_location?.name ||
-              (row.store_location_id ? row.store_location_id : "Global")}
-          </span>
-        ),
-      },
-      {
-        key: "created_at",
-        header: "Created",
-        width: "170px",
-        cell: (row) => (
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-gray-400" />
-            {formatDateTime(row.created_at)}
-          </div>
-        ),
+        width: "140px",
+        cell: (row) => {
+          const storeLabel =
+            row.store_location?.name ||
+            storeMap[String(row.store_location_id)] ||
+            (row.store_location_id ? `ID ${row.store_location_id}` : "Global");
+          return (
+            <span className="text-sm text-gray-600 truncate">
+              {storeLabel}
+            </span>
+          );
+        },
       },
       {
         key: "__actions",
         header: "Action",
-        width: "200px",
+        width: "180px",
         sticky: "right",
         align: "center",
         cell: (row) => (
@@ -742,7 +821,7 @@ export default function ProductPage() {
         ),
       },
     ],
-    [handleEdit]
+    [handleEdit, categoryMap, subCategoryMap, unitMap, storeMap]
   );
 
   if (myStoreId === undefined) {
@@ -849,7 +928,7 @@ export default function ProductPage() {
                   "Stock",
                   "Unit",
                   "Store",
-                  "Created",
+                  "Created At",
                 ];
                 const escape = (v) => {
                   if (v == null) return "";
@@ -860,17 +939,31 @@ export default function ProductPage() {
                 };
                 const rowsCsv = list.map((r) => {
                   const unitName =
-                    r.unit?.name || r.unit_name || r.unit || "";
+                    r.unit?.name ||
+                    r.unit_name ||
+                    unitMap[String(r.unit_id)] ||
+                    r.unit ||
+                    "";
+                  const catName =
+                    categoryMap[String(r.category_id)] || "";
+                  const subName =
+                    subCategoryMap[String(r.sub_category_id)] || "";
+                  const storeLabel =
+                    r.store_location?.name ||
+                    storeMap[String(r.store_location_id)] ||
+                    (r.store_location_id
+                      ? `ID ${r.store_location_id}`
+                      : "Global");
+
                   return [
                     r.sku,
                     r.name,
-                    r.category_name || "",
-                    r.sub_category_name || "",
+                    catName,
+                    subName,
                     formatIDR(r.price),
                     Number(r.stock ?? 0),
                     unitName,
-                    r.store_location?.name ||
-                      (r.store_location_id ? r.store_location_id : "Global"),
+                    storeLabel,
                     formatDateTime(r.created_at),
                   ]
                     .map(escape)

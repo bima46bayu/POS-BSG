@@ -1,6 +1,8 @@
+// src/components/products/UpdateProduct.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
-import { getMe } from "../../api/users";
+import { toAbsoluteUrl } from "../../api/client";
+import UnitDropdown from "./UnitDropdown";
 
 /**
  * Props:
@@ -9,7 +11,7 @@ import { getMe } from "../../api/users";
  *  - onSubmit: (payload) => Promise<void> | void
  *  - categories: [{id, name}]
  *  - subCategories: [{id, name, category_id}]
- *  - product: {id, name, price, category_id, sub_category_id, stock, sku, description, image_url?}
+ *  - product: {id, name, price, category_id, sub_category_id, stock, sku, description, image_url?, unit_id?}
  */
 export default function UpdateProduct({
   open,
@@ -27,37 +29,12 @@ export default function UpdateProduct({
     stock: "",
     sku: "",
     description: "",
+    unit_id: "",
   });
 
   const [files, setFiles] = useState([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  // === store user dari /api/me (auto) ===
-  const [storeLocationId, setStoreLocationId] = useState(null);
-  const [meLoading, setMeLoading] = useState(true);
-  const [meError, setMeError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setMeLoading(true);
-      setMeError("");
-      try {
-        const me = await getMe();
-        const sid = me?.store_location?.id ?? me?.store_location_id ?? null;
-        if (!cancelled) setStoreLocationId(sid);
-      } catch (e) {
-        if (!cancelled) {
-          setStoreLocationId(null);
-          setMeError("Gagal mengambil lokasi store user.");
-        }
-      } finally {
-        if (!cancelled) setMeLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   // Prefill dari product saat modal dibuka
   useEffect(() => {
@@ -70,6 +47,7 @@ export default function UpdateProduct({
         stock: product.stock ?? "",
         sku: product.sku ?? "",
         description: product.description ?? "",
+        unit_id: product.unit_id ?? "",
       });
       setFiles([]); // biar tidak overwrite jika user tidak ganti gambar
       setSubmitting(false);
@@ -84,6 +62,7 @@ export default function UpdateProduct({
         stock: "",
         sku: "",
         description: "",
+        unit_id: "",
       });
       setFiles([]);
       setSubmitting(false);
@@ -111,6 +90,13 @@ export default function UpdateProduct({
       ...f,
       category_id: value,
       sub_category_id: "", // reset jika category berubah
+    }));
+  };
+
+  const onChangeUnit = (unitId) => {
+    setForm((f) => ({
+      ...f,
+      unit_id: unitId,
     }));
   };
 
@@ -163,11 +149,6 @@ export default function UpdateProduct({
     e.preventDefault();
     if (submitting || !product?.id) return;
 
-    if (storeLocationId == null) {
-      alert("Lokasi store user tidak ditemukan. Silakan relogin atau hubungi admin.");
-      return;
-    }
-
     setSubmitting(true);
     try {
       const payload = {
@@ -176,8 +157,6 @@ export default function UpdateProduct({
         price: form.price ? Number(form.price) : 0,
         stock: form.stock ? Number(form.stock) : 0,
         images: files.map((f) => f.file),
-        // auto inject store dari /api/me:
-        store_location_id: storeLocationId,
       };
       await onSubmit?.(payload);
     } finally {
@@ -198,20 +177,22 @@ export default function UpdateProduct({
         className="relative z-[101] w-full max-w-2xl bg-white rounded-2xl shadow-xl max-h-[85vh] flex flex-col"
       >
         {/* header */}
-        <div className="px-6 py-4 border-b">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
           <h2 className="text-xl leading-6 font-semibold text-gray-900">
             Ubah Produk
           </h2>
-          {meLoading && <p className="text-xs text-gray-500 mt-1">Memuat store user…</p>}
-          {!meLoading && storeLocationId == null && (
-            <p className="text-xs text-red-600 mt-1">
-              {meError || "Store user tidak ditemukan. Produk tidak bisa disimpan."}
-            </p>
-          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-full hover:bg-gray-100 text-gray-500"
+          >
+            <XIcon className="w-5 h-5" />
+          </button>
         </div>
 
         {/* content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+          {/* Product name */}
           <Field label="Product Name">
             <Input
               placeholder="Kaos Logo"
@@ -221,6 +202,7 @@ export default function UpdateProduct({
             />
           </Field>
 
+          {/* Price, Stock, Unit */}
           <Field label="Price">
             <Input
               type="number"
@@ -233,7 +215,8 @@ export default function UpdateProduct({
             />
           </Field>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Category & Subcategory */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="Category">
               <Select
                 value={form.category_id}
@@ -252,17 +235,28 @@ export default function UpdateProduct({
             </Field>
           </div>
 
-          <Field label="Stock">
-            <Input
-              type="number"
-              inputMode="numeric"
-              placeholder="10"
-              value={form.stock}
-              onChange={onChange("stock")}
-              min="0"
-            />
-          </Field>
+          {/* Category & Subcategory */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Stock">
+              <Input
+                type="number"
+                inputMode="numeric"
+                placeholder="10"
+                value={form.stock}
+                onChange={onChange("stock")}
+                min="0"
+              />
+            </Field>
+            <Field label="Unit">
+              <UnitDropdown
+                value={form.unit_id}
+                onChange={onChangeUnit}
+                placeholder="Pilih satuan"
+              />
+            </Field>
+          </div>
 
+          {/* SKU */}
           <Field label="SKU">
             <Input
               placeholder="SKU-041"
@@ -272,8 +266,10 @@ export default function UpdateProduct({
             />
           </Field>
 
+          {/* Description */}
           <Field label="Description">
             <Textarea
+              rows={3}
               placeholder="Kaos logo NU"
               value={form.description}
               onChange={onChange("description")}
@@ -281,16 +277,16 @@ export default function UpdateProduct({
           </Field>
 
           {/* uploader */}
-          <div className="mb-3">
+          <div>
             <label className="block text-xs font-medium text-gray-600 mb-2">
               Product Photo
             </label>
 
             {/* preview foto lama */}
             {product?.image_url && files.length === 0 && (
-              <div className="mb-3">
+              <div className="mb-2">
                 <img
-                  src={product.image_url}
+                  src={toAbsoluteUrl(product.image_url)}
                   alt="current"
                   className="w-20 h-20 rounded-lg object-cover border"
                 />
@@ -308,7 +304,7 @@ export default function UpdateProduct({
               onDragLeave={() => setIsDragOver(false)}
               onDrop={onDrop}
               className={[
-                "rounded-xl border-2 border-dashed transition-colors p-6 text-center select-none",
+                "rounded-xl border-2 border-dashed transition-colors p-5 text-center select-none",
                 isDragOver ? "border-blue-400 bg-blue-50" : "border-blue-300 bg-white",
               ].join(" ")}
             >
@@ -327,7 +323,7 @@ export default function UpdateProduct({
                   />
                 </label>
               </p>
-              <p className="mt-2 text-xs text-gray-500 leading-relaxed">
+              <p className="mt-1 text-xs text-gray-500 leading-relaxed">
                 Max 10 MB files are allowed
                 <br />
                 Only support .jpg, .png and .svg
@@ -336,7 +332,7 @@ export default function UpdateProduct({
           </div>
 
           {files.length > 0 && (
-            <ul className="space-y-2">
+            <ul className="space-y-2 pt-1">
               {files.map((f, idx) => (
                 <li
                   key={idx}
@@ -380,8 +376,7 @@ export default function UpdateProduct({
           <button
             type="submit"
             className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-            disabled={submitting || meLoading || storeLocationId == null}
-            title={storeLocationId == null ? "Store user tidak ditemukan" : undefined}
+            disabled={submitting}
           >
             {submitting ? "Updating..." : "Update Product"}
           </button>
@@ -394,8 +389,8 @@ export default function UpdateProduct({
 /* ------- Reusable inputs ------- */
 function Field({ label, children }) {
   return (
-    <div className="mb-4">
-      <label className="block text-xs font-medium text-gray-600 mb-1">
+    <div className="flex flex-col gap-1">
+      <label className="block text-xs font-medium text-gray-600">
         {label}
       </label>
       {children}
@@ -408,7 +403,7 @@ function Input(props) {
     <input
       {...props}
       className={[
-        "w-full rounded-xl border border-gray-300 px-4 py-3 text-sm",
+        "w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm",
         "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
         props.className || "",
       ].join(" ")}
@@ -419,10 +414,9 @@ function Input(props) {
 function Textarea(props) {
   return (
     <textarea
-      rows={4}
       {...props}
       className={[
-        "w-full rounded-xl border border-gray-300 px-4 py-3 text-sm",
+        "w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm",
         "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
         "resize-y",
         props.className || "",
@@ -439,7 +433,7 @@ function Select({ value, onChange, placeholder, options = [], disabled }) {
         onChange={onChange}
         disabled={disabled}
         className={[
-          "w-full appearance-none rounded-xl border bg-white px-4 py-3 text-sm",
+          "w-full appearance-none rounded-xl border bg-white px-4 py-2.5 text-sm",
           "border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
           disabled ? "bg-gray-50 text-gray-400 cursor-not-allowed" : "",
         ].join(" ")}
