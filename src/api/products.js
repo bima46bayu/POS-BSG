@@ -221,7 +221,6 @@ export async function updateProduct(id, body = {}, signal) {
   const toNull = (v) => (v === "" || v === undefined ? null : v);
   const toNum = (v) => Number(v ?? 0);
 
-  // JSON saja (untuk file gunakan updateProductWithImages)
   const payload = {
     name: body.name ?? "",
     price: toNum(body.price),
@@ -231,14 +230,23 @@ export async function updateProduct(id, body = {}, signal) {
     category_id: body.category_id ? Number(body.category_id) : null,
     sub_category_id: body.sub_category_id ? Number(body.sub_category_id) : null,
 
+    // 🔥 ini yang tadinya HILANG
+    unit_id:
+      body.unit_id === "" || body.unit_id === undefined || body.unit_id === null
+        ? null
+        : Number(body.unit_id),
+
     // opsional (admin-only)
     ...(body.scope ? { scope: body.scope } : {}),
-    ...(body.store_location_id != null ? { store_location_id: Number(body.store_location_id) } : {}),
+    ...(body.store_location_id != null
+      ? { store_location_id: Number(body.store_location_id) }
+      : {}),
   };
 
   const { data } = await api.put(`/api/products/${id}`, payload, { signal });
   return data?.data || data;
 }
+
 
 export async function updateProductWithImages(id, body = {}, signal) {
   const product = await updateProduct(id, body, signal);

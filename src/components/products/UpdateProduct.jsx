@@ -29,14 +29,15 @@ export default function UpdateProduct({
     stock: "",
     sku: "",
     description: "",
-    unit_id: "",
+    // simpan sebagai number | null, bukan string
+    unit_id: null,
   });
 
   const [files, setFiles] = useState([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Prefill dari product saat modal dibuka
+  // Prefill dari product saat modal dibuka / reset saat tutup
   useEffect(() => {
     if (open && product) {
       setForm({
@@ -47,13 +48,18 @@ export default function UpdateProduct({
         stock: product.stock ?? "",
         sku: product.sku ?? "",
         description: product.description ?? "",
-        unit_id: product.unit_id ?? "",
+        // langsung simpan numeric / null
+        unit_id:
+          product.unit_id === null || product.unit_id === undefined
+            ? null
+            : Number(product.unit_id),
       });
-      setFiles([]); // biar tidak overwrite jika user tidak ganti gambar
+      setFiles([]);
       setSubmitting(false);
+      return;
     }
+
     if (!open) {
-      // reset saat ditutup
       setForm({
         name: "",
         price: "",
@@ -62,7 +68,7 @@ export default function UpdateProduct({
         stock: "",
         sku: "",
         description: "",
-        unit_id: "",
+        unit_id: null,
       });
       setFiles([]);
       setSubmitting(false);
@@ -89,14 +95,18 @@ export default function UpdateProduct({
     setForm((f) => ({
       ...f,
       category_id: value,
-      sub_category_id: "", // reset jika category berubah
+      sub_category_id: "",
     }));
   };
 
+  // 🔑 Unit: terima langsung unitId (number | null) dari UnitDropdown
   const onChangeUnit = (unitId) => {
     setForm((f) => ({
       ...f,
-      unit_id: unitId,
+      unit_id:
+        unitId === undefined || unitId === null || unitId === ""
+          ? null
+          : Number(unitId),
     }));
   };
 
@@ -121,9 +131,12 @@ export default function UpdateProduct({
     setFiles((prev) => [...prev, ...mapped]);
   };
 
+  // bersihkan object URL hanya saat unmount
   useEffect(() => {
-    return () => files.forEach((f) => URL.revokeObjectURL(f.url));
-  }, [files]);
+    return () => {
+      files.forEach((f) => f?.url && URL.revokeObjectURL(f.url));
+    };
+  }, []);
 
   const onDrop = (e) => {
     e.preventDefault();
@@ -151,13 +164,28 @@ export default function UpdateProduct({
 
     setSubmitting(true);
     try {
+      const unitIdNum =
+        form.unit_id === null || form.unit_id === "" || form.unit_id === undefined
+          ? null
+          : Number(form.unit_id);
+
       const payload = {
         id: product.id,
-        ...form,
-        price: form.price ? Number(form.price) : 0,
+        name: form.name,
+        price: form.price ? Number(String(form.price).replace(",", ".")) : 0,
         stock: form.stock ? Number(form.stock) : 0,
+        sku: form.sku,
+        description: form.description || null,
+        category_id: form.category_id || null,
+        sub_category_id: form.sub_category_id || null,
+        // 💥 ini yang penting: sama dengan Postman → unit_id: 2
+        unit_id: unitIdNum,
         images: files.map((f) => f.file),
       };
+
+      // Debug kalau mau cek apakah sudah sama dengan Postman
+      // console.log("UpdateProduct payload:", payload);
+
       await onSubmit?.(payload);
     } finally {
       setSubmitting(false);
@@ -202,7 +230,7 @@ export default function UpdateProduct({
             />
           </Field>
 
-          {/* Price, Stock, Unit */}
+          {/* Price */}
           <Field label="Price">
             <Input
               type="number"
@@ -235,7 +263,7 @@ export default function UpdateProduct({
             </Field>
           </div>
 
-          {/* Category & Subcategory */}
+          {/* Stock & Unit */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="Stock">
               <Input
@@ -277,14 +305,13 @@ export default function UpdateProduct({
           </Field>
 
           {/* uploader */}
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-2">
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-gray-600">
               Product Photo
             </label>
 
-            {/* preview foto lama */}
             {product?.image_url && files.length === 0 && (
-              <div className="mb-2">
+              <div>
                 <img
                   src={toAbsoluteUrl(product.image_url)}
                   alt="current"
@@ -305,7 +332,9 @@ export default function UpdateProduct({
               onDrop={onDrop}
               className={[
                 "rounded-xl border-2 border-dashed transition-colors p-5 text-center select-none",
-                isDragOver ? "border-blue-400 bg-blue-50" : "border-blue-300 bg-white",
+                isDragOver
+                  ? "border-blue-400 bg-blue-50"
+                  : "border-blue-300 bg-white",
               ].join(" ")}
             >
               <div className="mx-auto w-10 h-10 mb-2 rounded-full border border-blue-200 flex items-center justify-center">
@@ -347,7 +376,9 @@ export default function UpdateProduct({
                     <p className="text-sm text-gray-800 truncate">
                       {f.file.name}
                     </p>
-                    <p className="text-[11px] text-gray-500">{f.sizeLabel}</p>
+                    <p className="text-[11px] text-gray-500">
+                      {f.sizeLabel}
+                    </p>
                   </div>
                   <button
                     type="button"
