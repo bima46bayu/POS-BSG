@@ -1,7 +1,16 @@
 // src/pages/master/MasterStoreLocationPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, X, Calendar, Edit, Trash2, Phone } from "lucide-react";
+import {
+  Plus,
+  Search,
+  X,
+  Calendar,
+  Edit,
+  Trash2,
+  Phone,
+  Image as ImageIcon,
+} from "lucide-react";
 import toast from "react-hot-toast";
 
 import DataTable from "../../components/data-table/DataTable";
@@ -11,7 +20,9 @@ import {
   createStoreLocation,
   updateStoreLocation,
   deleteStoreLocation,
+  uploadStoreLocationLogo, // 🔥 helper baru: POST /store-locations/{id}/logo (form-data: logo)
 } from "../../api/storeLocations";
+import { toAbsoluteUrl } from "../../api/client";
 
 const PER_PAGE = 10;
 localStorage.setItem("POS_STORES_DIRTY", "1");
@@ -21,10 +32,15 @@ const fmtDateTime = (s) => {
   if (!s) return "-";
   try {
     return new Date(s).toLocaleString("id-ID", {
-      day: "2-digit", month: "short", year: "numeric",
-      hour: "2-digit", minute: "2-digit",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
-  } catch { return s; }
+  } catch {
+    return s;
+  }
 };
 
 // potong berdasarkan jumlah kata
@@ -43,7 +59,9 @@ function BaseModal({ open, title, onClose, children, footer, maxW = "max-w-xl" }
       <div className={`bg-white rounded-xl w-full ${maxW} mx-4 shadow-xl border`}>
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <h3 className="font-semibold">{title}</h3>
-          <button onClick={onClose}><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-100">
+            <X className="w-5 h-5" />
+          </button>
         </div>
         <div className="p-5">{children}</div>
         <div className="px-5 py-3 border-t flex justify-end gap-3">{footer}</div>
@@ -54,9 +72,36 @@ function BaseModal({ open, title, onClose, children, footer, maxW = "max-w-xl" }
 
 /* ===== Add/Edit Modals ===== */
 function AddStoreModal({ open, loading, onClose, onSubmit }) {
-  const [form, setForm] = useState({ code: "", name: "", address: "", phone: "" });
-  useEffect(() => { if (open) setForm({ code: "", name: "", address: "", phone: "" }); }, [open]);
-  const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
+  const [form, setForm] = useState({
+    code: "",
+    name: "",
+    address: "",
+    phone: "",
+    logoFile: null,
+  });
+
+  useEffect(() => {
+    if (open) {
+      setForm({
+        code: "",
+        name: "",
+        address: "",
+        phone: "",
+        logoFile: null,
+      });
+    }
+  }, [open]);
+
+  const set = (k) => (e) =>
+    setForm((p) => ({
+      ...p,
+      [k]: e.target.value,
+    }));
+
+  const onLogoChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setForm((p) => ({ ...p, logoFile: file }));
+  };
 
   return (
     <BaseModal
@@ -65,11 +110,17 @@ function AddStoreModal({ open, loading, onClose, onSubmit }) {
       onClose={loading ? undefined : onClose}
       footer={
         <>
-          <button onClick={onClose} disabled={loading} className="px-3 py-2 border rounded-lg">Cancel</button>
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="px-3 py-2 border rounded-lg text-sm"
+          >
+            Cancel
+          </button>
           <button
             onClick={() => onSubmit(form)}
             disabled={loading || !form.name.trim()}
-            className="px-3 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 text-sm"
           >
             {loading ? "Saving..." : "Save"}
           </button>
@@ -79,19 +130,65 @@ function AddStoreModal({ open, loading, onClose, onSubmit }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="block text-sm font-medium mb-1">Code</label>
-          <input value={form.code} onChange={set("code")} className="w-full px-3 py-2 border rounded-lg" placeholder="ITF / SWG" />
+          <input
+            value={form.code}
+            onChange={set("code")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            placeholder="ITF / SWG"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Name</label>
-          <input value={form.name} onChange={set("name")} className="w-full px-3 py-2 border rounded-lg" placeholder="Instafactory / Suwung" />
+          <input
+            value={form.name}
+            onChange={set("name")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            placeholder="Instafactory / Suwung"
+          />
         </div>
         <div className="md:col-span-2">
           <label className="block text-sm font-medium mb-1">Address</label>
-          <textarea rows={2} value={form.address} onChange={set("address")} className="w-full px-3 py-2 border rounded-lg" placeholder="Alamat lengkap…" />
+          <textarea
+            rows={2}
+            value={form.address}
+            onChange={set("address")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            placeholder="Alamat lengkap…"
+          />
         </div>
         <div className="md:col-span-2">
           <label className="block text-sm font-medium mb-1">Phone</label>
-          <input value={form.phone} onChange={set("phone")} className="w-full px-3 py-2 border rounded-lg" placeholder="081234567890" />
+          <input
+            value={form.phone}
+            onChange={set("phone")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            placeholder="081234567890"
+          />
+        </div>
+
+        {/* 🔥 Logo upload */}
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium mb-1">Logo (optional)</label>
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-2 px-3 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+              <ImageIcon className="w-4 h-4 text-gray-500" />
+              <span>Pilih file logo</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={onLogoChange}
+              />
+            </label>
+            {form.logoFile && (
+              <span className="text-xs text-gray-600 truncate max-w-[220px]">
+                {form.logoFile.name}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] text-gray-500">
+            Disarankan PNG/JPG, maksimal 2MB.
+          </p>
         </div>
       </div>
     </BaseModal>
@@ -99,7 +196,14 @@ function AddStoreModal({ open, loading, onClose, onSubmit }) {
 }
 
 function EditStoreModal({ open, loading, onClose, onSubmit, initial }) {
-  const [form, setForm] = useState({ code: "", name: "", address: "", phone: "" });
+  const [form, setForm] = useState({
+    code: "",
+    name: "",
+    address: "",
+    phone: "",
+    logoFile: null,
+  });
+
   useEffect(() => {
     if (open && initial) {
       setForm({
@@ -107,10 +211,23 @@ function EditStoreModal({ open, loading, onClose, onSubmit, initial }) {
         name: initial.name || "",
         address: initial.address || "",
         phone: initial.phone || "",
+        logoFile: null,
       });
     }
   }, [open, initial]);
-  const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
+
+  const set = (k) => (e) =>
+    setForm((p) => ({
+      ...p,
+      [k]: e.target.value,
+    }));
+
+  const onLogoChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setForm((p) => ({ ...p, logoFile: file }));
+  };
+
+  const existingLogoUrl = initial?.logo_url ? toAbsoluteUrl(initial.logo_url) : null;
 
   return (
     <BaseModal
@@ -119,11 +236,17 @@ function EditStoreModal({ open, loading, onClose, onSubmit, initial }) {
       onClose={loading ? undefined : onClose}
       footer={
         <>
-          <button onClick={onClose} disabled={loading} className="px-3 py-2 border rounded-lg">Cancel</button>
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="px-3 py-2 border rounded-lg text-sm"
+          >
+            Cancel
+          </button>
           <button
             onClick={() => onSubmit({ id: initial?.id, ...form })}
             disabled={loading || !form.name.trim()}
-            className="px-3 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50"
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 text-sm"
           >
             {loading ? "Saving..." : "Save Changes"}
           </button>
@@ -133,19 +256,74 @@ function EditStoreModal({ open, loading, onClose, onSubmit, initial }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="block text-sm font-medium mb-1">Code</label>
-          <input value={form.code} onChange={set("code")} className="w-full px-3 py-2 border rounded-lg" />
+          <input
+            value={form.code}
+            onChange={set("code")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Name</label>
-          <input value={form.name} onChange={set("name")} className="w-full px-3 py-2 border rounded-lg" />
+          <input
+            value={form.name}
+            onChange={set("name")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+          />
         </div>
         <div className="md:col-span-2">
           <label className="block text-sm font-medium mb-1">Address</label>
-          <textarea rows={2} value={form.address} onChange={set("address")} className="w-full px-3 py-2 border rounded-lg" />
+          <textarea
+            rows={2}
+            value={form.address}
+            onChange={set("address")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+          />
         </div>
         <div className="md:col-span-2">
           <label className="block text-sm font-medium mb-1">Phone</label>
-          <input value={form.phone} onChange={set("phone")} className="w-full px-3 py-2 border rounded-lg" />
+          <input
+            value={form.phone}
+            onChange={set("phone")}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+          />
+        </div>
+
+        {/* 🔥 Logo upload & preview */}
+        <div className="md:col-span-2 space-y-2">
+          <label className="block text-sm font-medium mb-1">Logo</label>
+          {existingLogoUrl && !form.logoFile && (
+            <div className="flex items-center gap-3">
+              <div className="w-14 h-14 rounded-lg border bg-gray-50 flex items-center justify-center overflow-hidden">
+                <img
+                  src={existingLogoUrl}
+                  alt="Store Logo"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <span className="text-xs text-gray-600">Logo saat ini</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-2 px-3 py-2 border rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+              <ImageIcon className="w-4 h-4 text-gray-500" />
+              <span>{existingLogoUrl ? "Ganti logo" : "Pilih logo"}</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={onLogoChange}
+              />
+            </label>
+            {form.logoFile && (
+              <span className="text-xs text-gray-600 truncate max-w-[220px]">
+                {form.logoFile.name}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-gray-500">
+            Upload logo baru akan menggantikan logo lama.
+          </p>
         </div>
       </div>
     </BaseModal>
@@ -164,99 +342,210 @@ export default function MasterStoreLocationPage() {
   const [confirmDel, setConfirmDel] = useState(null);
 
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  useEffect(() => { const id = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 250); return () => clearTimeout(id); }, [searchTerm]);
+  useEffect(() => {
+    const id = setTimeout(
+      () => setDebouncedSearch(searchTerm.trim()),
+      250
+    );
+    return () => clearTimeout(id);
+  }, [searchTerm]);
 
   const { data: res, isLoading } = useQuery({
-    queryKey: ["store-locations", { page: currentPage, per_page: PER_PAGE, search: debouncedSearch }],
-    queryFn: ({ signal }) => listStoreLocations({ page: currentPage, per_page: PER_PAGE, search: debouncedSearch }, signal),
+    queryKey: [
+      "store-locations",
+      { page: currentPage, per_page: PER_PAGE, search: debouncedSearch },
+    ],
+    queryFn: ({ signal }) =>
+      listStoreLocations(
+        { page: currentPage, per_page: PER_PAGE, search: debouncedSearch },
+        signal
+      ),
     keepPreviousData: true,
     placeholderData: (prev) => prev,
     refetchOnWindowFocus: false,
   });
 
   const itemsRaw = res?.items ?? res?.data ?? res ?? [];
-  const items = useMemo(() => (Array.isArray(itemsRaw) ? itemsRaw : []), [itemsRaw]);
+  const items = useMemo(
+    () => (Array.isArray(itemsRaw) ? itemsRaw : []),
+    [itemsRaw]
+  );
   const meta = useMemo(() => {
     const m = res?.meta;
-    if (m) return {
-      current_page: Number(m.current_page ?? 1),
-      last_page: Number(m.last_page ?? 1),
-      per_page: Number(m.per_page ?? PER_PAGE),
-      total: Number(m.total ?? items.length),
-    };
+    if (m)
+      return {
+        current_page: Number(m.current_page ?? 1),
+        last_page: Number(m.last_page ?? 1),
+        per_page: Number(m.per_page ?? PER_PAGE),
+        total: Number(m.total ?? items.length),
+      };
     const total = items.length;
     const last = Math.max(1, Math.ceil(total / PER_PAGE));
-    return { current_page: currentPage, last_page: last, per_page: PER_PAGE, total };
+    return {
+      current_page: currentPage,
+      last_page: last,
+      per_page: PER_PAGE,
+      total,
+    };
   }, [res, items.length, currentPage]);
 
+  /* ===== Mutations (with logo) ===== */
   const mCreate = useMutation({
-    mutationFn: ({ payload, signal }) => createStoreLocation(payload, signal),
-    onSuccess: () => { toast.success("Store created"); setShowAdd(false); qc.invalidateQueries({ queryKey: ["store-locations"] }); },
-    onError: (e) => toast.error(e?.response?.data?.message || "Failed to create"),
-  });
-  const mUpdate = useMutation({
-    mutationFn: ({ id, payload, signal }) => updateStoreLocation(id, payload, signal),
-    onSuccess: () => { toast.success("Store updated"); setEditTarget(null); qc.invalidateQueries({ queryKey: ["store-locations"] }); },
-    onError: (e) => toast.error(e?.response?.data?.message || "Failed to update"),
-  });
-  const mDelete = useMutation({
-    mutationFn: ({ id, signal }) => deleteStoreLocation(id, signal),
-    onSuccess: () => { toast.success("Store deleted"); setConfirmDel(null); qc.invalidateQueries({ queryKey: ["store-locations"] }); },
-    onError: (e) => toast.error(e?.response?.data?.message || "Failed to delete"),
+    mutationFn: async ({ payload, signal }) => {
+      const { logoFile, ...data } = payload;
+      // 1) create store
+      const store = await createStoreLocation(data, signal);
+      const storeId = store?.id ?? store?.data?.id;
+      // 2) upload logo kalau ada
+      if (storeId && logoFile) {
+        try {
+          await uploadStoreLocationLogo(storeId, logoFile, signal);
+        } catch (e) {
+          console.error(e);
+          toast.error("Store dibuat, tapi gagal upload logo");
+        }
+      }
+      return store;
+    },
+    onSuccess: () => {
+      toast.success("Store created");
+      setShowAdd(false);
+      qc.invalidateQueries({ queryKey: ["store-locations"] });
+    },
+    onError: (e) =>
+      toast.error(e?.response?.data?.message || "Failed to create"),
   });
 
-  /* Columns (compact & address truncated) */
-  const columns = useMemo(() => [
-    {
-      key: "code",
-      header: "Code",
-      width: "120px",
-      sticky: "left",
-      className: "font-medium",
-      cell: (r) => <span className="font-medium text-gray-900">{r.code || "-"}</span>,
+  const mUpdate = useMutation({
+    mutationFn: async ({ id, payload, signal }) => {
+      const { logoFile, ...data } = payload;
+      // 1) update data store
+      const store = await updateStoreLocation(id, data, signal);
+      const storeId = store?.id ?? store?.data?.id ?? id;
+      // 2) kalau ada file baru → upload (BE akan hapus logo lama)
+      if (storeId && logoFile) {
+        try {
+          await uploadStoreLocationLogo(storeId, logoFile, signal);
+        } catch (e) {
+          console.error(e);
+          toast.error("Store terupdate, tapi gagal upload logo");
+        }
+      }
+      return store;
     },
-    {
-      key: "name",
-      header: "Name",
-      width: "220px",
-      cell: (r) => <span className="font-medium text-gray-900">{r.name}</span>,
+    onSuccess: () => {
+      toast.success("Store updated");
+      setEditTarget(null);
+      qc.invalidateQueries({ queryKey: ["store-locations"] });
     },
-    {
-      key: "address",
-      header: "Address",
-      width: "380px",
-      cell: (r) => <span className="text-gray-700 text-xs">{truncateWords(r.address, 12)}</span>,
+    onError: (e) =>
+      toast.error(e?.response?.data?.message || "Failed to update"),
+  });
+
+  const mDelete = useMutation({
+    mutationFn: ({ id, signal }) => deleteStoreLocation(id, signal),
+    onSuccess: () => {
+      toast.success("Store deleted");
+      setConfirmDel(null);
+      qc.invalidateQueries({ queryKey: ["store-locations"] });
     },
-    {
-      key: "phone",
-      header: "Phone",
-      width: "160px",
-      cell: (r) => (
-        <span className="inline-flex items-center gap-1.5 text-xs text-gray-700">
-          <Phone className="w-3.5 h-3.5 text-gray-400" />
-          {r.phone || "-"}
-        </span>
-      ),
-    },
-    {
-      key: "created_at",
-      header: "Created",
-      width: "160px",
-      cell: (r) => (
-        <div className="flex items-center gap-1.5 text-gray-700 text-xs">
-          <Calendar className="w-3.5 h-3.5 text-gray-400" />
-          {fmtDateTime(r.created_at)}
-        </div>
-      ),
-    },
-  ], []);
+    onError: (e) =>
+      toast.error(e?.response?.data?.message || "Failed to delete"),
+  });
+
+  /* ===== Columns ===== */
+  const columns = useMemo(
+    () => [
+      {
+        key: "logo",
+        header: "Logo",
+        width: "72px",
+        align: "center",
+        cell: (r) => {
+          const url = r.logo_url ? toAbsoluteUrl(r.logo_url) : null;
+          return (
+            <div className="flex items-center justify-center">
+              <div className="w-9 h-9 rounded-lg border bg-gray-50 flex items-center justify-center overflow-hidden">
+                {url ? (
+                  <img
+                    src={url}
+                    alt={r.name}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <ImageIcon className="w-4 h-4 text-gray-300" />
+                )}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        key: "code",
+        header: "Code",
+        width: "120px",
+        sticky: "left",
+        className: "font-medium",
+        cell: (r) => (
+          <span className="font-medium text-gray-900">
+            {r.code || "-"}
+          </span>
+        ),
+      },
+      {
+        key: "name",
+        header: "Name",
+        width: "220px",
+        cell: (r) => (
+          <span className="font-medium text-gray-900">{r.name}</span>
+        ),
+      },
+      {
+        key: "address",
+        header: "Address",
+        width: "380px",
+        cell: (r) => (
+          <span className="text-gray-700 text-xs">
+            {truncateWords(r.address, 12)}
+          </span>
+        ),
+      },
+      {
+        key: "phone",
+        header: "Phone",
+        width: "160px",
+        cell: (r) => (
+          <span className="inline-flex items-center gap-1.5 text-xs text-gray-700">
+            <Phone className="w-3.5 h-3.5 text-gray-400" />
+            {r.phone || "-"}
+          </span>
+        ),
+      },
+      {
+        key: "created_at",
+        header: "Created",
+        width: "160px",
+        cell: (r) => (
+          <div className="flex items-center gap-1.5 text-gray-700 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-gray-400" />
+            {fmtDateTime(r.created_at)}
+          </div>
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-4">
       {/* Title */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-800">Store Locations</h2>
-        <p className="text-sm text-gray-500">Kelola lokasi toko.</p>
+        <h2 className="text-lg font-semibold text-gray-800">
+          Store Locations
+        </h2>
+        <p className="text-sm text-gray-500">
+          Kelola lokasi toko dan logo untuk struk.
+        </p>
       </div>
 
       {/* Controls */}
@@ -268,7 +557,10 @@ export default function MasterStoreLocationPage() {
               type="text"
               placeholder="Search code, name, phone, address…"
               value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               className="w-full pl-10 pr-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
@@ -292,10 +584,14 @@ export default function MasterStoreLocationPage() {
             {isLoading ? (
               <div className="p-3">
                 {[...Array(8)].map((_, i) => (
-                  <div key={i} className="grid grid-cols-12 items-center gap-2 py-2 border-b last:border-0">
+                  <div
+                    key={i}
+                    className="grid grid-cols-12 items-center gap-2 py-2 border-b last:border-0"
+                  >
+                    <div className="col-span-1 h-3.5 bg-slate-200/80 rounded animate-pulse" />
                     <div className="col-span-2 h-3.5 bg-slate-200/80 rounded animate-pulse" />
                     <div className="col-span-3 h-3.5 bg-slate-200/80 rounded animate-pulse" />
-                    <div className="col-span-4 h-3.5 bg-slate-200/80 rounded animate-pulse" />
+                    <div className="col-span-3 h-3.5 bg-slate-200/80 rounded animate-pulse" />
                     <div className="col-span-2 h-3.5 bg-slate-200/80 rounded animate-pulse" />
                     <div className="col-span-1 h-3.5 bg-slate-200/80 rounded animate-pulse" />
                   </div>
@@ -308,7 +604,7 @@ export default function MasterStoreLocationPage() {
                   {
                     key: "__actions",
                     header: "Action",
-                    width: "180px",
+                    width: "190px",
                     sticky: "right",
                     align: "center",
                     cell: (r) => (
@@ -339,16 +635,12 @@ export default function MasterStoreLocationPage() {
                 onPageChange={setCurrentPage}
                 stickyHeader
                 getRowKey={(row, i) => row.id ?? row.code ?? i}
-                // compact
                 className="border-0 shadow-none text-[13px] [&_th]:py-2 [&_td]:py-2 [&_th]:px-3 [&_td]:px-3"
               />
             )}
           </div>
         </div>
       </div>
-
-      {/* ⛔ Pagination custom DIHAPUS sesuai request */}
-      {/* (DataTable sudah meng-handle pagination lewat props meta/currentPage/onPageChange) */}
 
       {/* Modals */}
       <AddStoreModal
@@ -363,13 +655,21 @@ export default function MasterStoreLocationPage() {
         onClose={() => setEditTarget(null)}
         loading={mUpdate.isLoading}
         initial={editTarget}
-        onSubmit={(payload) => mUpdate.mutate({ id: payload.id, payload })}
+        onSubmit={(payload) =>
+          mUpdate.mutate({ id: payload.id, payload })
+        }
       />
 
       <ConfirmDialog
         open={!!confirmDel}
         title="Hapus Store"
-        message={confirmDel ? <>Yakin hapus store <b>{confirmDel.name}</b>?</> : null}
+        message={
+          confirmDel ? (
+            <>
+              Yakin hapus store <b>{confirmDel.name}</b>?
+            </>
+          ) : null
+        }
         onClose={() => setConfirmDel(null)}
         onConfirm={() => mDelete.mutate({ id: confirmDel.id })}
       />

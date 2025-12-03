@@ -1,3 +1,4 @@
+// src/api/storeLocations.js
 import { api } from "./client";
 
 /** 
@@ -97,5 +98,29 @@ export async function deleteStoreLocation(id, signal) {
 export async function getStoreLocation(id, signal) {
   if (!id) return null;
   const { data } = await api.get(`/api/store-locations/${id}`, { signal });
+  return data?.data ?? data ?? null;
+}
+
+/**
+ * Upload / ganti logo store.
+ * Endpoint: POST /api/store-locations/{id}/logo
+ * Body: form-data { logo: File }
+ */
+export async function uploadStoreLocationLogo(id, file, signal) {
+  if (!id || !file) throw new Error("id dan file logo wajib diisi");
+
+  const form = new FormData();
+  form.append("logo", file);
+
+  const { data } = await api.post(
+    `/api/store-locations/${id}/logo`,
+    form,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      signal,
+    }
+  );
+
+  // backend bisa return { data: store } atau langsung store
   return data?.data ?? data ?? null;
 }
