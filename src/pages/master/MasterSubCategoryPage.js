@@ -83,7 +83,7 @@ function AddSubModal({ open, loading, onClose, onSubmit, categories }) {
             onChange={(e) => setCategoryId(e.target.value)}
             className="w-full px-3 py-2 border rounded-lg"
           >
-            <option value="">— Select Category —</option>
+            <option value="">Select Category</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
@@ -157,7 +157,7 @@ function EditSubModal({ open, loading, onClose, onSubmit, categories, initial })
             onChange={(e) => setCategoryId(e.target.value)}
             className="w-full px-3 py-2 border rounded-lg"
           >
-            <option value="">— Select Category —</option>
+            <option value="">Select Category</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}

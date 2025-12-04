@@ -100,7 +100,7 @@ function AddSupplierModal({ open, loading, onClose, onSubmit }) {
         <div>
           <label className="block text-sm font-medium mb-1">Type</label>
           <select className="w-full px-3 py-2 border rounded-lg" value={form.type} onChange={set("type")}>
-            <option value="">— Select —</option>
+            <option value="">Select Type</option>
             {TYPE_OPTIONS.map((t) => <option key={t} value={t}>{startCase(t)}</option>)}
           </select>
         </div>

@@ -1,11 +1,15 @@
 import React from "react";
+import { Eye, EyeOff } from "lucide-react";
 
-const roleLabel = (r) => (String(r ?? "").toLowerCase() === "admin" ? "Admin" : "Kasir");
+const roleLabel = (r) =>
+  (String(r ?? "").toLowerCase() === "admin" ? "Admin" : "Kasir");
 
 function Field({ label, children }) {
   return (
     <label className="block">
-      <span className="block text-sm font-medium text-gray-700 mb-1">{label}</span>
+      <span className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+      </span>
       {children}
     </label>
   );
@@ -22,6 +26,9 @@ export default function AddUserModal({
   storeOptions = [], // [{value:1,label:'Toko A'}, ...]
   title = "Add User",
 }) {
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [showConfirm, setShowConfirm] = React.useState(false);
+
   if (!open) return null;
 
   const set = (patch) => setForm({ ...form, ...patch });
@@ -56,23 +63,55 @@ export default function AddUserModal({
             </Field>
 
             <Field label="Password">
-              <input
-                type="password"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-                value={form.password || ""}
-                onChange={(e) => set({ password: e.target.value })}
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 outline-none focus:ring-2 focus:ring-blue-500"
+                  value={form.password || ""}
+                  onChange={(e) => set({ password: e.target.value })}
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </Field>
 
             <Field label="Confirm Password">
-              <input
-                type="password"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-                value={form.password_confirmation || ""}
-                onChange={(e) => set({ password_confirmation: e.target.value })}
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showConfirm ? "text" : "password"}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 outline-none focus:ring-2 focus:ring-blue-500"
+                  value={form.password_confirmation || ""}
+                  onChange={(e) =>
+                    set({ password_confirmation: e.target.value })
+                  }
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirm((v) => !v)}
+                  className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700"
+                  tabIndex={-1}
+                  aria-label={showConfirm ? "Hide password confirmation" : "Show password confirmation"}
+                >
+                  {showConfirm ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </Field>
 
             <Field label="Role">
@@ -81,8 +120,17 @@ export default function AddUserModal({
                 value={form.role || "kasir"}
                 onChange={(e) => set({ role: e.target.value })}
               >
-                {(roleOptions.length ? roleOptions : [{value:"admin",label:"Admin"},{value:"kasir",label:"Kasir"}])
-                  .map((o) => <option key={o.value} value={o.value}>{roleLabel(o.value)}</option>)}
+                {(roleOptions.length
+                  ? roleOptions
+                  : [
+                      { value: "admin", label: "Admin" },
+                      { value: "kasir", label: "Kasir" },
+                    ]
+                ).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {roleLabel(o.value)}
+                  </option>
+                ))}
               </select>
             </Field>
 
@@ -95,9 +143,11 @@ export default function AddUserModal({
                   set({ store_location_id: v === "" ? "" : Number(v) });
                 }}
               >
-                <option value="">-</option>
+                <option value="">Pilih Store</option>
                 {storeOptions.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
                 ))}
               </select>
             </Field>
@@ -105,7 +155,13 @@ export default function AddUserModal({
         </div>
 
         <div className="px-5 py-4 border-t bg-gray-50 rounded-b-xl flex justify-end gap-2">
-          <button className="px-4 py-2 rounded-lg border" onClick={onClose} disabled={loading}>Cancel</button>
+          <button
+            className="px-4 py-2 rounded-lg border"
+            onClick={onClose}
+            disabled={loading}
+          >
+            Cancel
+          </button>
           <button
             className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
             onClick={onSubmit}
