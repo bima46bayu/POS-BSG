@@ -12,31 +12,43 @@ const fmtIDR = (v) =>
   });
 
 export default function SaleDetailModal({ open, onClose, sale }) {
-  const areaId = useMemo(() => `receipt-print-area-${sale?.id ?? "unknown"}`, [sale?.id]);
+  // kalau modal ditutup atau sale belum ada, jangan render apa-apa
+  if (!open || !sale) return null;
+
+  const areaId = useMemo(
+    () => `receipt-print-area-${sale?.id ?? "unknown"}`,
+    [sale?.id]
+  );
 
   // print helper dengan canvas + iframe
   const printTicket = useCallback(async () => {
     const el = document.getElementById(areaId);
     if (!el) return;
 
-    const canvas = await html2canvas(el, { 
-      scale: 2, 
-      backgroundColor: "#ffffff" 
+    const canvas = await html2canvas(el, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true, // penting supaya logo cross-origin bisa ikut
+      ignoreElements: (node) =>
+        node.classList?.contains("no-print"),
     });
-    
+
     const imgData = canvas.toDataURL("image/png");
-    
+
     // Buat iframe tersembunyi
     const iframe = document.createElement("iframe");
     iframe.style.position = "absolute";
     iframe.style.width = "0";
     iframe.style.height = "0";
     iframe.style.border = "none";
-    
+
     document.body.appendChild(iframe);
-    
-    const iframeDoc = iframe.contentWindow.document;
-    
+
+    const iframeWin = iframe.contentWindow;
+    if (!iframeWin) return;
+
+    const iframeDoc = iframeWin.document;
+
     iframeDoc.open();
     iframeDoc.write(`
       <html>
@@ -54,13 +66,13 @@ export default function SaleDetailModal({ open, onClose, sale }) {
       </html>
     `);
     iframeDoc.close();
-    
+
     iframe.onload = () => {
       setTimeout(() => {
         try {
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
-          
+          iframeWin.focus();
+          iframeWin.print();
+
           setTimeout(() => {
             document.body.removeChild(iframe);
           }, 1000);
@@ -76,7 +88,7 @@ export default function SaleDetailModal({ open, onClose, sale }) {
   const subtotal = sale.subtotal ?? 0;
   const discount = sale.discount ?? 0;
   const tax = sale.tax ?? 0;
-  const total = sale.total ?? (subtotal - discount + tax);
+  const total = sale.total ?? subtotal - discount + tax;
   const paid = sale.paid ?? 0;
   const change = sale.change ?? 0;
 
@@ -89,8 +101,13 @@ export default function SaleDetailModal({ open, onClose, sale }) {
       <div className="relative z-[101] w-full max-w-6xl bg-white rounded-2xl shadow-xl max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Detail Transaksi</h2>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600">
+          <h2 className="text-lg font-semibold text-gray-900">
+            Detail Transaksi
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -106,11 +123,15 @@ export default function SaleDetailModal({ open, onClose, sale }) {
               </div>
               <div>
                 <div className="text-gray-500">Tanggal</div>
-                <div className="font-medium">{new Date(sale.created_at).toLocaleString("id-ID")}</div>
+                <div className="font-medium">
+                  {new Date(sale.created_at).toLocaleString("id-ID")}
+                </div>
               </div>
               <div>
                 <div className="text-gray-500">Customer</div>
-                <div className="font-medium">{sale.customer_name || "General"}</div>
+                <div className="font-medium">
+                  {sale.customer_name || "General"}
+                </div>
               </div>
               <div>
                 <div className="text-gray-500">Metode</div>
@@ -139,27 +160,49 @@ export default function SaleDetailModal({ open, onClose, sale }) {
                   {items.length ? (
                     items.map((it, idx) => {
                       const name =
-                        it.name || it.product_name || it?.product?.name || it.sku || `Item ${idx + 1}`;
+                        it.name ||
+                        it.product_name ||
+                        it?.product?.name ||
+                        it.sku ||
+                        `Item ${idx + 1}`;
                       const qty = Number(it.qty ?? it.quantity ?? 1);
                       const unit = Number(it.unit_price ?? it.price ?? 0);
                       const discU = Number(it.discount_nominal ?? 0);
-                      const netU = Number(it.net_unit_price ?? (unit - discU < 0 ? 0 : unit - discU));
-                      const lineTotal = Number(it.line_total ?? it.subtotal ?? Math.max(0, netU) * qty);
+                      const netU = Number(
+                        it.net_unit_price ??
+                          (unit - discU < 0 ? 0 : unit - discU)
+                      );
+                      const lineTotal = Number(
+                        it.line_total ??
+                          it.subtotal ??
+                          Math.max(0, netU) * qty
+                      );
 
                       return (
                         <tr key={idx} className="border-t">
                           <td className="px-4 py-2">{name}</td>
                           <td className="px-4 py-2 text-right">{qty}</td>
-                          <td className="px-4 py-2 text-right">{fmtIDR(unit)}</td>
-                          <td className="px-4 py-2 text-right text-red-600">- {fmtIDR(discU)}</td>
-                          <td className="px-4 py-2 text-right">{fmtIDR(netU)}</td>
-                          <td className="px-4 py-2 text-right">{fmtIDR(lineTotal)}</td>
+                          <td className="px-4 py-2 text-right">
+                            {fmtIDR(unit)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-red-600">
+                            - {fmtIDR(discU)}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            {fmtIDR(netU)}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            {fmtIDR(lineTotal)}
+                          </td>
                         </tr>
                       );
                     })
                   ) : (
                     <tr>
-                      <td className="px-4 py-3 text-gray-500 text-center" colSpan={6}>
+                      <td
+                        className="px-4 py-3 text-gray-500 text-center"
+                        colSpan={6}
+                      >
                         Tidak ada item
                       </td>
                     </tr>
@@ -174,27 +217,41 @@ export default function SaleDetailModal({ open, onClose, sale }) {
                 <tbody>
                   <tr>
                     <td className="px-4 py-2 text-right">Subtotal</td>
-                    <td className="px-4 py-2 text-right">{fmtIDR(subtotal)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {fmtIDR(subtotal)}
+                    </td>
                   </tr>
                   <tr>
-                    <td className="px-4 py-2 text-right">Diskon Transaksi</td>
-                    <td className="px-4 py-2 text-right text-red-600">- {fmtIDR(discount)}</td>
+                    <td className="px-4 py-2 text-right">
+                      Diskon Transaksi
+                    </td>
+                    <td className="px-4 py-2 text-right text-red-600">
+                      - {fmtIDR(discount)}
+                    </td>
                   </tr>
                   <tr>
                     <td className="px-4 py-2 text-right">Pajak</td>
-                    <td className="px-4 py-2 text-right">{fmtIDR(tax)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {fmtIDR(tax)}
+                    </td>
                   </tr>
                   <tr className="bg-gray-50 font-medium">
                     <td className="px-4 py-2 text-right">Total</td>
-                    <td className="px-4 py-2 text-right">{fmtIDR(total)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {fmtIDR(total)}
+                    </td>
                   </tr>
                   <tr>
                     <td className="px-4 py-2 text-right">Bayar</td>
-                    <td className="px-4 py-2 text-right">{fmtIDR(paid)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {fmtIDR(paid)}
+                    </td>
                   </tr>
                   <tr>
                     <td className="px-4 py-2 text-right">Kembalian</td>
-                    <td className="px-4 py-2 text-right">{fmtIDR(change)}</td>
+                    <td className="px-4 py-2 text-right">
+                      {fmtIDR(change)}
+                    </td>
                   </tr>
                 </tbody>
               </table>

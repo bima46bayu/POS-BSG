@@ -19,8 +19,10 @@ async function printNodeById(id = "receipt-print-area") {
   if (!el) return;
 
   const canvas = await html2canvas(el, { 
-    scale: 2, 
-    backgroundColor: "#ffffff" 
+    scale: 2,
+    backgroundColor: "#ffffff",
+    useCORS: true,            // <- penting
+    ignoreElements: (node) => node.classList?.contains("no-print"),
   });
   
   const imgData = canvas.toDataURL("image/png");
@@ -80,7 +82,11 @@ async function exportReceiptToPdf(id = "receipt-print-area", mode = "download") 
   const el = document.getElementById(id);
   if (!el) return;
 
-  const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
+  const canvas = await html2canvas(el, { 
+    scale: 2,
+    backgroundColor: "#ffffff",
+    useCORS: true,
+  });
   const imgData = canvas.toDataURL("image/png");
 
   const pageWidthMm = 80;

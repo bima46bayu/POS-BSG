@@ -18,6 +18,34 @@ const fmtIDR = (n) =>
 const pickStore = (obj) =>
   obj?.storeLocation || obj?.store_location || obj?.store || null;
 
+/**
+ * Build URL logo yang aman untuk CORS & html2canvas
+ * - Jika logo_url masih model lama `/uploads/storeLogo/...`
+ *   → kita mapping ke endpoint API: /api/store-locations/{id}/logo
+ * - Jika sudah path/URL lain → langsung pakai toAbsoluteUrl(raw)
+ */
+const buildStoreLogoUrl = (loc) => {
+  if (!loc) return null;
+
+  const raw = (loc.logo_url || "").toString().trim();
+  if (!raw) return null;
+
+  // kalau sudah bukan path lama uploads, pakai apa adanya
+  if (!raw.includes("/uploads/storeLogo")) {
+    return toAbsoluteUrl(raw);
+  }
+
+  // mapping path lama → endpoint logo API
+  const storeId = loc.id ?? loc.store_location_id ?? loc.store_id ?? null;
+  if (!storeId) {
+    // kalau id nggak ketemu, fallback: tetap pakai raw
+    return toAbsoluteUrl(raw);
+  }
+
+  // TANPA slash depan → supaya toAbsoluteUrl jadi: {API_BASE}/api/store-locations/{id}/logo
+  return toAbsoluteUrl(`api/store-locations/${storeId}/logo`);
+};
+
 export default function ReceiptTicket({
   saleId,
   store: storeProp,
@@ -60,8 +88,8 @@ export default function ReceiptTicket({
   const meStore = pickStore(me);
   const loc = saleStore || propStore || meStore || null;
 
-  // logo: DB simpan /uploads/storeLogo/xxx.png di field logo_url
-  const logoUrl = loc?.logo_url ? toAbsoluteUrl(loc.logo_url) : null;
+  // URL logo yang sudah di-normalisasi untuk endpoint API
+  const logoUrl = buildStoreLogoUrl(loc);
 
   const code = sale?.code || sale?.id;
   const cashier = sale?.cashier?.name || "—";
@@ -158,10 +186,17 @@ export default function ReceiptTicket({
               <img
                 src={logoUrl}
                 alt={loc?.name || "Store Logo"}
+                crossOrigin="anonymous"
                 style={{
                   maxHeight: 140,
                   maxWidth: 140,
                   objectFit: "contain",
+                }}
+                onError={() => {
+                  console.warn(
+                    "Logo gagal dimuat untuk print:",
+                    logoUrl
+                  );
                 }}
               />
             </div>
