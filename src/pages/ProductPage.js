@@ -1,5 +1,6 @@
 // src/pages/ProductPage.jsx
-import React, {
+import React,
+{
   useEffect,
   useMemo,
   useRef,
@@ -31,7 +32,6 @@ import {
 import { getCategories, getSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
-import { listUnits } from "../api/units";
 
 import AddProduct from "../components/products/AddProduct";
 import UpdateProduct from "../components/products/UpdateProduct";
@@ -76,6 +76,7 @@ const listCacheGet = (key) => {
     listCache.delete(key);
     return null;
   }
+  // LRU: refresh posisi
   listCache.delete(key);
   listCache.set(key, hit);
   return hit.payload;
@@ -210,43 +211,6 @@ export default function ProductPage() {
     });
     return m;
   }, [stores]);
-
-  /* ====== master units untuk nama satuan ====== */
-  const [units, setUnits] = useState([]);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await listUnits({ per_page: 100 });
-        const arr = Array.isArray(res?.items)
-          ? res.items
-          : Array.isArray(res)
-          ? res
-          : [];
-        if (!cancelled) {
-          setUnits(arr);
-        }
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) {
-          toast.error("Gagal memuat satuan");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const unitMap = useMemo(() => {
-    const m = {};
-    units.forEach((u) => {
-      if (u && u.id != null) {
-        m[String(u.id)] = u.name;
-      }
-    });
-    return m;
-  }, [units]);
 
   // store terpilih
   const [selectedStore, setSelectedStore] = useState("ALL");
@@ -409,7 +373,8 @@ export default function ProductPage() {
       selectedStore != null &&
       selectedStore !== ""
     ) {
-      p.store_id = selectedStore;
+      // konsisten dengan BE yang baca store_location_id (dan fallback ke store_id)
+      p.store_location_id = selectedStore;
       p.only_store = 1;
     }
     return p;
@@ -627,6 +592,7 @@ export default function ProductPage() {
 
         const body = { ...payload, store_location_id: myStoreId };
 
+        // normalisasi image utama
         if (!body.image && Array.isArray(body.images) && body.images[0]) {
           body.image = body.images[0];
         }
@@ -717,7 +683,7 @@ export default function ProductPage() {
         ),
       },
       {
-        // Category/Subcategory column (pengganti Created)
+        // Category/Subcategory column
         key: "category",
         header: "Category",
         width: "120px",
@@ -765,8 +731,7 @@ export default function ProductPage() {
         cell: (row) => {
           const unitName =
             row.unit?.name ||
-            row.unit_name ||
-            unitMap[String(row.unit_id)] ||
+            row.unit_name || // dari BE (subquery)
             row.unit ||
             "-";
           return (
@@ -821,7 +786,7 @@ export default function ProductPage() {
         ),
       },
     ],
-    [handleEdit, categoryMap, subCategoryMap, unitMap, storeMap]
+    [handleEdit, categoryMap, subCategoryMap, storeMap]
   );
 
   if (myStoreId === undefined) {
@@ -941,7 +906,6 @@ export default function ProductPage() {
                   const unitName =
                     r.unit?.name ||
                     r.unit_name ||
-                    unitMap[String(r.unit_id)] ||
                     r.unit ||
                     "";
                   const catName =
@@ -996,7 +960,7 @@ export default function ProductPage() {
             Export CSV
           </button>
 
-          {/* Download Template ⬇️ */}
+          {/* Download Template */}
           <button
             onClick={async () => {
               try {
@@ -1018,7 +982,7 @@ export default function ProductPage() {
             Download Template
           </button>
 
-          {/* Import Excel ⬆️ */}
+          {/* Import Excel */}
           <button
             onClick={() => setShowImport(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm text-blue-600 border border-blue-600 rounded-lg hover:bg-blue-50"
@@ -1241,7 +1205,7 @@ export default function ProductPage() {
         }}
       />
 
-      {/* Import Excel Modal ⬇️ */}
+      {/* Import Excel Modal */}
       {showImport && (
         <ImportExcelModal
           onClose={() => setShowImport(false)}

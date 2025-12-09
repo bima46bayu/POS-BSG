@@ -1,31 +1,27 @@
 // =============================
 // src/components/purchase/AddPurchaseModal.jsx
 // =============================
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { X, Plus, Trash2, Search } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 
 import { createPurchase } from "../../api/purchases";
 import { listSuppliers } from "../../api/master";
-import { getProducts } from "../../api/products"; // <= pakai file kamu
+import { getProducts } from "../../api/products";
+import { getMyProfile } from "../../api/users";
 
-// util kecil
 const toNum = (v) => Number(v || 0);
-const debounce = (fn, ms) => {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
-};
 
 export default function AddPurchaseModal({ open, onClose }) {
   const qc = useQueryClient();
 
   // --- header form state
   const [supplierId, setSupplierId] = useState("");
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
+  const [orderDate, setOrderDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
   const [expectedDate, setExpectedDate] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -34,14 +30,16 @@ export default function AddPurchaseModal({ open, onClose }) {
     { product_id: "", qty_order: "", unit_price: "", discount: "0", tax: "0" },
   ]);
 
-  // --- product search (debounced) untuk dropdown
-  const [prodQuery, setProdQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  // --- dropdown state
+  const [activeProductRow, setActiveProductRow] = useState(null);
+  const [productSearch, setProductSearch] = useState("");
+  const [productMenuPos, setProductMenuPos] = useState(null);
 
-  useEffect(() => {
-    const run = debounce((v) => setDebouncedQuery(v), 300);
-    run(prodQuery);
-  }, [prodQuery]);
+  const [supplierOpen, setSupplierOpen] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState("");
+
+  // refs buat anchor tombol product
+  const productBtnRefs = useRef([]);
 
   // reset saat open
   useEffect(() => {
@@ -50,39 +48,94 @@ export default function AddPurchaseModal({ open, onClose }) {
     setOrderDate(new Date().toISOString().slice(0, 10));
     setExpectedDate("");
     setNotes("");
-    setItems([{ product_id: "", qty_order: "", unit_price: "", discount: "0", tax: "0" }]);
-    setProdQuery("");
-    setDebouncedQuery("");
+    setItems([
+      { product_id: "", qty_order: "", unit_price: "", discount: "0", tax: "0" },
+    ]);
+    setActiveProductRow(null);
+    setProductSearch("");
+    setProductMenuPos(null);
+    setSupplierOpen(false);
+    setSupplierSearch("");
   }, [open]);
 
-  // --- queries
-  const { data: supResp } = useQuery({
-    enabled: open,
-    queryKey: ["suppliers", { page: 1 }],
-    queryFn: ({ signal }) => listSuppliers({ page: 1, per_page: 100 }, signal),
+  // --- profile user (ambil store_location_id untuk filter produk)
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => getMyProfile(),
+    staleTime: 5 * 60 * 1000,
   });
 
-  const { data: prodResp } = useQuery({
+  const storeId =
+    me?.store_location_id ??
+    me?.storeLocation?.id ??
+    me?.store_location?.id ??
+    me?.store?.id ??
+    null;
+
+  // --- queries
+  const { data: supResp, isLoading: supLoading } = useQuery({
     enabled: open,
-    queryKey: ["products", { q: debouncedQuery }],
-    queryFn: ({ signal }) => getProducts({ search: debouncedQuery, page: 1, per_page: 100 }, signal),
+    queryKey: ["suppliers"],
+    queryFn: ({ signal }) =>
+      listSuppliers({ page: 1, per_page: 200, search: "" }, signal),
     keepPreviousData: true,
   });
 
-  // unwrapping sesuai helper kamu (getProducts sudah kembalikan { items, meta })
-  const products = prodResp?.items || [];
-  const suppliers = Array.isArray(supResp) ? supResp : supResp?.data || [];
+  const { data: prodResp, isLoading: prodLoading } = useQuery({
+    enabled: open,
+    queryKey: ["products", { storeId }],
+    queryFn: ({ signal, queryKey }) => {
+      const { storeId } = queryKey[1] || {};
+      return getProducts(
+        {
+          page: 1,
+          per_page: 500,
+          store_location_id: storeId || undefined, // ⬅️ filter berdasarkan store
+        },
+        signal
+      );
+    },
+    keepPreviousData: true,
+  });
+
+  // unwrap
+  const suppliers = supResp?.items || supResp?.data || supResp || [];
+  const products = prodResp?.items || prodResp?.data || prodResp || [];
+
+  // filter FE
+  const filteredSuppliers = useMemo(() => {
+    const k = supplierSearch.trim().toLowerCase();
+    if (!k) return suppliers || [];
+    return (suppliers || []).filter((s) => {
+      const name = (s.name || "").toLowerCase();
+      const code = (s.code || "").toLowerCase();
+      return name.includes(k) || code.includes(k);
+    });
+  }, [suppliers, supplierSearch]);
+
+  const filteredProducts = useMemo(() => {
+    const k = productSearch.trim().toLowerCase();
+    if (!k) return products || [];
+    return (products || []).filter((p) => {
+      const name = (p.name || "").toLowerCase();
+      const sku = (p.sku || "").toLowerCase();
+      return name.includes(k) || sku.includes(k);
+    });
+  }, [products, productSearch]);
 
   // --- items ops
   const addRow = () =>
-    setItems((rows) => [...rows, { product_id: "", qty_order: "", unit_price: "", discount: "0", tax: "0" }]);
+    setItems((rows) => [
+      ...rows,
+      { product_id: "", qty_order: "", unit_price: "", discount: "0", tax: "0" },
+    ]);
 
-  const removeRow = (idx) => setItems((rows) => rows.filter((_, i) => i !== idx));
+  const removeRow = (idx) =>
+    setItems((rows) => rows.filter((_, i) => i !== idx));
 
   const changeRow = (idx, patch) =>
     setItems((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
 
-  // auto-set unit_price dari product terpilih jika kosong
   const onSelectProduct = (idx, productId) => {
     const p = products.find((x) => String(x.id) === String(productId));
     setItems((rows) =>
@@ -91,12 +144,56 @@ export default function AddPurchaseModal({ open, onClose }) {
           ? {
               ...r,
               product_id: productId,
-              unit_price: r.unit_price ? r.unit_price : toNum(p?.price || 0),
+              unit_price: r.unit_price
+                ? r.unit_price
+                : toNum(p?.purchase_price ?? p?.price ?? 0),
             }
           : r
       )
     );
+    setActiveProductRow(null);
+    setProductMenuPos(null);
+    setProductSearch("");
   };
+
+  const onSelectSupplier = (s) => {
+    setSupplierId(s?.id ?? "");
+    setSupplierOpen(false);
+    setSupplierSearch("");
+  };
+
+  // buka dropdown product → hitung posisi dari viewport
+  const openProductMenu = (idx) => {
+    const btn = productBtnRefs.current[idx];
+    if (!btn) {
+      setActiveProductRow(idx);
+      return;
+    }
+    const rect = btn.getBoundingClientRect();
+    setProductMenuPos({
+      left: rect.left,
+      top: rect.bottom + 4, // 4px di bawah tombol
+      width: rect.width,
+    });
+    setActiveProductRow(idx);
+    setProductSearch("");
+  };
+
+  // tutup dropdown product saat resize/scroll besar
+  useEffect(() => {
+    if (activeProductRow == null) return;
+    const handler = () => {
+      setActiveProductRow(null);
+      setProductMenuPos(null);
+      setProductSearch("");
+    };
+    window.addEventListener("resize", handler);
+    window.addEventListener("scroll", handler);
+    return () => {
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("scroll", handler);
+    };
+  }, [activeProductRow]);
 
   // subtotal per item & grand total
   const subTotals = useMemo(
@@ -107,18 +204,25 @@ export default function AddPurchaseModal({ open, onClose }) {
       }),
     [items]
   );
-  const grandTotal = subTotals.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  const grandTotal = subTotals.reduce(
+    (a, b) => a + (Number.isFinite(b) ? b : 0),
+    0
+  );
 
   // --- submit
   const mutation = useMutation({
-    mutationFn: (payload) => createPurchase(payload), // POST /api/purchases (draft multi-item)
+    mutationFn: (payload) => createPurchase(payload),
     onSuccess: () => {
       toast.success("Draft PO berhasil dibuat");
       qc.invalidateQueries({ queryKey: ["purchases"] });
       onClose?.();
     },
     onError: (e) => {
-      const msg = e?.response?.data?.message || e?.message || "Gagal membuat draft purchase";
+      const msg =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        e?.message ||
+        "Gagal membuat draft purchase";
       toast.error(msg);
     },
   });
@@ -129,8 +233,10 @@ export default function AddPurchaseModal({ open, onClose }) {
     if (!items.length) return "Tambahkan minimal 1 item";
     for (const [i, it] of items.entries()) {
       if (!it.product_id) return `Item #${i + 1}: product wajib dipilih`;
-      if (!it.qty_order || Number(it.qty_order) <= 0) return `Item #${i + 1}: qty_order harus > 0`;
-      if (!it.unit_price || Number(it.unit_price) <= 0) return `Item #${i + 1}: unit_price harus > 0`;
+      if (!it.qty_order || Number(it.qty_order) <= 0)
+        return `Item #${i + 1}: qty_order harus > 0`;
+      if (!it.unit_price || Number(it.unit_price) <= 0)
+        return `Item #${i + 1}: unit_price harus > 0`;
     }
     return null;
   };
@@ -159,142 +265,304 @@ export default function AddPurchaseModal({ open, onClose }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-2xl w-full max-w-5xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-2">
+      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
         {/* Header */}
-        <div className="p-5 border-b flex items-center justify-between">
+        <div className="p-5 border-b flex items-center justify-between bg-gradient-to-r from-slate-50 to-slate-100">
           <div>
-            <div className="text-lg font-semibold">Add Purchase (Draft)</div>
-            <div className="text-xs text-gray-500">Buat PO draft, kemudian approve di tabel untuk membuka GR.</div>
+            <div className="text-lg font-semibold text-slate-900">
+              Add Purchase (Draft)
+            </div>
+            <div className="text-xs text-slate-500">
+              Buat PO draft, kemudian approve di tabel untuk membuka GR.
+            </div>
+            {/* {storeId && (
+              <div className="mt-1 inline-flex items-center px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-medium">
+                Product terfilter store: #{storeId}
+              </div>
+            )} */}
           </div>
-          <button onClick={onClose} className="p-2 rounded hover:bg-gray-100">
+          <button
+            onClick={onClose}
+            className="p-2 rounded-full hover:bg-slate-200 text-slate-600"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-5">
+        <div className="p-5 space-y-5 overflow-y-auto">
           {/* Header form */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-600 mb-1">Supplier</label>
-              <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="px-3 py-2 border rounded-lg">
-                <option value="">-- Pilih Supplier --</option>
-                {(suppliers || []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Supplier searchable dropdown */}
+            <div className="flex flex-col md:col-span-2 relative">
+              <label className="text-xs font-medium text-slate-600 mb-1">
+                Supplier
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setSupplierOpen((v) => !v);
+                  setSupplierSearch("");
+                }}
+                className="w-full px-3 py-2 border rounded-lg text-sm bg-white flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500/70"
+              >
+                <span
+                  className={
+                    supplierId ? "text-slate-900" : "text-slate-400"
+                  }
+                >
+                  {supplierId
+                    ? suppliers.find(
+                        (s) => String(s.id) === String(supplierId)
+                      )?.name || "Supplier tidak ditemukan"
+                    : "-- Pilih Supplier --"}
+                </span>
+                <Search className="w-4 h-4 text-slate-400" />
+              </button>
+
+              {supplierOpen && (
+                <div className="absolute z-40 mt-1 w-full max-h-72 bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col">
+                  <div className="p-2 border-b">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        autoFocus
+                        value={supplierSearch}
+                        onChange={(e) => setSupplierSearch(e.target.value)}
+                        placeholder="Cari nama / kode supplier..."
+                        className="w-full pl-7 pr-2 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/70"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto text-sm">
+                    {supLoading ? (
+                      <div className="px-3 py-2 text-xs text-gray-500">
+                        Memuat supplier...
+                      </div>
+                    ) : filteredSuppliers.length ? (
+                      filteredSuppliers.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => onSelectSupplier(s)}
+                          className={`w-full text-left px-3 py-1.5 hover:bg-blue-50 ${
+                            String(s.id) === String(supplierId)
+                              ? "bg-blue-50"
+                              : ""
+                          }`}
+                        >
+                          <div className="text-[13px] font-medium text-slate-800">
+                            {s.name}
+                          </div>
+                          {s.code && (
+                            <div className="text-[11px] text-slate-500">
+                              {s.code}
+                            </div>
+                          )}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-gray-500">
+                        Tidak ada supplier yang cocok.
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 border-t flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSupplierOpen(false);
+                        setSupplierSearch("");
+                      }}
+                      className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
+                    >
+                      Tutup
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col">
-              <label className="text-xs text-gray-600 mb-1">Order Date</label>
-              <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="px-3 py-2 border rounded-lg" />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-xs text-gray-600 mb-1">Expected Date</label>
-              <input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} className="px-3 py-2 border rounded-lg" />
-            </div>
-
-            <div className="flex flex-col md:col-span-1">
-              <label className="text-xs text-gray-600 mb-1">Notes</label>
-              <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Catatan (opsional)" className="px-3 py-2 border rounded-lg" />
-            </div>
-          </div>
-
-          {/* Product search (opsional) */}
-          <div className="flex items-center gap-2">
-            <div className="relative w-80">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <label className="text-xs font-medium text-slate-600 mb-1">
+                Order Date
+              </label>
               <input
-                value={prodQuery}
-                onChange={(e) => setProdQuery(e.target.value)}
-                placeholder="Cari produk (nama/SKU)..."
-                className="w-full pl-9 pr-3 py-2 border rounded-lg"
+                type="date"
+                value={orderDate}
+                onChange={(e) => setOrderDate(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/70"
+              />
+            </div>
+
+            <div className="flex flex-col">
+              <label className="text-xs font-medium text-slate-600 mb-1">
+                Expected Date
+              </label>
+              <input
+                type="date"
+                value={expectedDate}
+                onChange={(e) => setExpectedDate(e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/70"
+              />
+            </div>
+
+            <div className="flex flex-col md:col-span-4">
+              <label className="text-xs font-medium text-slate-600 mb-1">
+                Notes
+              </label>
+              <input
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Catatan (opsional)"
+                className="px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/70"
               />
             </div>
           </div>
 
           {/* Items table */}
-          <div className="border rounded-xl overflow-hidden">
-            <div className="p-3 bg-gray-50 text-sm font-medium">Items</div>
-            <div className="overflow-x-auto">
+          <div className="border rounded-2xl overflow-hidden shadow-sm">
+            <div className="px-4 py-3 bg-slate-50/80 flex items-center justify-between">
+              <div className="text-sm font-semibold text-slate-800">
+                Items
+              </div>
+              <div className="text-xs text-slate-500">
+                Produk sudah difilter berdasarkan store user.
+              </div>
+            </div>
+
+            {/* TIDAK pakai overflow-x-auto di sini supaya portaled dropdown tetap kelihatan */}
+            <div className="w-full">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
+                <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    <th className="p-2 text-left min-w-[220px]">Product</th>
+                    <th className="p-2 text-left min-w-[260px]">Product</th>
                     <th className="p-2 text-right min-w-[100px]">Qty Order</th>
-                    <th className="p-2 text-right min-w-[120px]">Unit Price</th>
+                    <th className="p-2 text-right min-w-[120px]">
+                      Unit Price
+                    </th>
                     <th className="p-2 text-right min-w-[100px]">Discount</th>
                     <th className="p-2 text-right min-w-[100px]">Tax</th>
-                    <th className="p-2 text-right min-w-[140px]">Line Total</th>
+                    <th className="p-2 text-right min-w-[140px]">
+                      Line Total
+                    </th>
                     <th className="p-2 text-center w-[60px]">#</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y">
                   {items.map((it, idx) => {
                     const lt = subTotals[idx] || 0;
+                    const selectedProduct =
+                      products.find(
+                        (p) => String(p.id) === String(it.product_id)
+                      ) || null;
+
                     return (
-                      <tr key={idx} className="border-t">
-                        <td className="p-2">
-                          <select
-                            value={it.product_id}
-                            onChange={(e) => onSelectProduct(idx, e.target.value)}
-                            className="w-full px-2 py-1 border rounded"
+                      <tr key={idx} className="hover:bg-slate-50/60">
+                        {/* Product cell with searchable dropdown (portal) */}
+                        <td className="p-2 align-top">
+                          <button
+                            type="button"
+                            ref={(el) => (productBtnRefs.current[idx] = el)}
+                            onClick={() =>
+                              activeProductRow === idx
+                                ? (setActiveProductRow(null),
+                                  setProductMenuPos(null),
+                                  setProductSearch(""))
+                                : openProductMenu(idx)
+                            }
+                            className="w-full px-3 py-1.5 border rounded-lg bg-white text-left text-sm flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500/70"
                           >
-                            <option value="">-- Pilih Produk --</option>
-                            {(products || []).map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} {p.sku ? `(${p.sku})` : ""}
-                              </option>
-                            ))}
-                          </select>
+                            <span
+                              className={
+                                it.product_id
+                                  ? "text-slate-900"
+                                  : "text-slate-400"
+                              }
+                            >
+                              {selectedProduct
+                                ? `${selectedProduct.name}${
+                                    selectedProduct.sku
+                                      ? ` (${selectedProduct.sku})`
+                                      : ""
+                                  }`
+                                : "-- Pilih Produk --"}
+                            </span>
+                            <Search className="w-4 h-4 text-slate-400" />
+                          </button>
                         </td>
-                        <td className="p-2 text-right">
+
+                        {/* Qty */}
+                        <td className="p-2 text-right align-top">
                           <input
                             type="number"
                             min={1}
                             value={it.qty_order}
-                            onChange={(e) => changeRow(idx, { qty_order: e.target.value })}
-                            className="w-24 px-2 py-1 border rounded text-right"
+                            onChange={(e) =>
+                              changeRow(idx, { qty_order: e.target.value })
+                            }
+                            className="w-24 px-2 py-1.5 border rounded-lg text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/70"
                           />
                         </td>
-                        <td className="p-2 text-right">
+
+                        {/* Unit Price */}
+                        <td className="p-2 text-right align-top">
                           <input
                             type="number"
                             min={0}
                             value={it.unit_price}
-                            onChange={(e) => changeRow(idx, { unit_price: e.target.value })}
-                            className="w-28 px-2 py-1 border rounded text-right"
+                            onChange={(e) =>
+                              changeRow(idx, { unit_price: e.target.value })
+                            }
+                            className="w-28 px-2 py-1.5 border rounded-lg text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/70"
                           />
                         </td>
-                        <td className="p-2 text-right">
+
+                        {/* Discount */}
+                        <td className="p-2 text-right align-top">
                           <input
                             type="number"
                             min={0}
                             value={it.discount}
-                            onChange={(e) => changeRow(idx, { discount: e.target.value })}
-                            className="w-24 px-2 py-1 border rounded text-right"
+                            onChange={(e) =>
+                              changeRow(idx, { discount: e.target.value })
+                            }
+                            className="w-24 px-2 py-1.5 border rounded-lg text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/70"
                           />
                         </td>
-                        <td className="p-2 text-right">
+
+                        {/* Tax */}
+                        <td className="p-2 text-right align-top">
                           <input
                             type="number"
                             min={0}
                             value={it.tax}
-                            onChange={(e) => changeRow(idx, { tax: e.target.value })}
-                            className="w-24 px-2 py-1 border rounded text-right"
+                            onChange={(e) =>
+                              changeRow(idx, { tax: e.target.value })
+                            }
+                            className="w-24 px-2 py-1.5 border rounded-lg text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/70"
                           />
                         </td>
-                        <td className="p-2 text-right font-medium">{Number(lt).toLocaleString("id-ID")}</td>
-                        <td className="p-2 text-center">
+
+                        {/* Line total */}
+                        <td className="p-2 text-right align-top font-semibold text-slate-800">
+                          {Number(lt).toLocaleString("id-ID", {
+                            style: "currency",
+                            currency: "IDR",
+                            maximumFractionDigits: 0,
+                          })}
+                        </td>
+
+                        {/* Remove row */}
+                        <td className="p-2 text-center align-top">
                           <button
                             onClick={() => removeRow(idx)}
                             disabled={items.length === 1}
-                            className={`inline-flex items-center justify-center w-8 h-8 rounded ${
-                              items.length === 1 ? "bg-gray-200 text-gray-400 cursor-not-allowed" : "bg-red-50 text-red-600 hover:bg-red-100"
+                            className={`inline-flex items-center justify-center w-8 h-8 rounded-full border text-xs ${
+                              items.length === 1
+                                ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                                : "border-red-200 text-red-600 hover:bg-red-50"
                             }`}
                             title="Remove"
                           >
@@ -308,15 +576,22 @@ export default function AddPurchaseModal({ open, onClose }) {
               </table>
             </div>
 
-            <div className="p-3 flex items-center justify-between">
-              <button onClick={addRow} className="inline-flex items-center gap-2 px-3 py-2 rounded bg-white border hover:bg-gray-50">
+            <div className="px-4 py-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-slate-50/80">
+              <button
+                onClick={addRow}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white border border-slate-300 text-sm hover:bg-slate-100"
+              >
                 <Plus className="w-4 h-4" /> Tambah Item
               </button>
 
-              <div className="text-sm">
-                <span className="text-gray-500 mr-2">Grand Total:</span>
-                <span className="font-semibold">
-                  {grandTotal.toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 })}
+              <div className="text-sm md:text-base">
+                <span className="text-slate-500 mr-2">Grand Total:</span>
+                <span className="font-semibold text-slate-900">
+                  {grandTotal.toLocaleString("id-ID", {
+                    style: "currency",
+                    currency: "IDR",
+                    maximumFractionDigits: 0,
+                  })}
                 </span>
               </div>
             </div>
@@ -324,13 +599,105 @@ export default function AddPurchaseModal({ open, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="p-5 border-t flex items-center justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 border rounded">Batal</button>
-          <button onClick={submit} disabled={mutation.isLoading} className="px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-60">
+        <div className="p-5 border-t bg-slate-50 flex items-center justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border rounded-full text-sm text-slate-700 bg-white hover:bg-slate-100"
+          >
+            Batal
+          </button>
+          <button
+            onClick={submit}
+            disabled={mutation.isLoading}
+            className="px-4 py-2 rounded-full text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+          >
             {mutation.isLoading ? "Menyimpan..." : "Simpan Draft"}
           </button>
         </div>
       </div>
+
+      {/* === PORTAL DROPDOWN PRODUCT (di luar modal, jadi nggak pernah ke-clip) === */}
+      {activeProductRow != null && productMenuPos &&
+        createPortal(
+          <div
+            style={{
+              position: "fixed",
+              left: productMenuPos.left,
+              top: productMenuPos.top,
+              width: productMenuPos.width,
+              zIndex: 99999,
+            }}
+            className="max-h-72 bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col"
+          >
+            <div className="p-2 border-b">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  autoFocus
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Cari nama / SKU..."
+                  className="w-full pl-7 pr-2 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/70"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto text-sm">
+              {prodLoading ? (
+                <div className="px-3 py-2 text-xs text-gray-500">
+                  Memuat produk...
+                </div>
+              ) : filteredProducts.length ? (
+                filteredProducts.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => onSelectProduct(activeProductRow, p.id)}
+                    className={`w-full text-left px-3 py-1.5 hover:bg-blue-50 flex flex-col ${
+                      String(p.id) ===
+                      String(items[activeProductRow]?.product_id)
+                        ? "bg-blue-50"
+                        : ""
+                    }`}
+                  >
+                    <span className="text-[13px] font-medium text-slate-800">
+                      {p.name}
+                    </span>
+                    <span className="text-[11px] text-slate-500 flex justify-between gap-2">
+                      <span>{p.sku ? `SKU: ${p.sku}` : "Tanpa SKU"}</span>
+                      <span>
+                        {Number(
+                          p.purchase_price ?? p.price ?? 0
+                        ).toLocaleString("id-ID", {
+                          style: "currency",
+                          currency: "IDR",
+                          maximumFractionDigits: 0,
+                        })}
+                      </span>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-2 text-xs text-gray-500">
+                  Tidak ada produk yang cocok.
+                </div>
+              )}
+            </div>
+            <div className="p-2 border-t flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveProductRow(null);
+                  setProductMenuPos(null);
+                  setProductSearch("");
+                }}
+                className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
