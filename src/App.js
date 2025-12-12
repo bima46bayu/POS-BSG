@@ -25,7 +25,11 @@ import MasterSupplierPage from "./pages/master/MasterSupplierPage";
 import MasterStoreLocationPage from "./pages/master/MasterStoreLocationPage";
 
 import { isLoggedIn, logoutRequest } from "./api/auth";
-import { STORAGE_KEY, installUnauthorizedRedirect, onUnauthorized } from "./api/client";
+import {
+  STORAGE_KEY,
+  installUnauthorizedRedirect,
+  onUnauthorized,
+} from "./api/client";
 
 import {
   Routes,
@@ -51,6 +55,8 @@ const queryClient = new QueryClient({
   },
 });
 
+// Purchase & GR tetap ada di allowedPages (buat kontrol akses),
+// tapi di Sidebar tampil sebagai submenu, bukan icon utama.
 const DEFAULT_ALLOWED = {
   admin: ["home", "pos", "products", "inventory", "purchase", "gr", "history", "master"],
   kasir: ["home", "pos", "history"],
@@ -64,7 +70,7 @@ const PAGE_PATH = {
   purchase: "/purchase",
   history: "/history",
   gr: "/gr",
-  // FIX: samakan dengan route yang ada (singular)
+  // samakan dengan route yang ada (singular)
   master: "/master/user",
 };
 
@@ -81,7 +87,7 @@ function getRoleFromStorage() {
 
 function ProtectedRoute({ children, pageKey, allowedPages }) {
   if (!allowedPages.includes(pageKey)) {
-    const first = PAGE_PATH[(allowedPages[0] || "pos")] || "/pos";
+    const first = PAGE_PATH[allowedPages[0] || "pos"] || "/pos";
     return <Navigate to={first} replace />;
   }
   return children;
@@ -120,10 +126,13 @@ function AppShell() {
       setLoggedIn(false);
       setRole("kasir");
     });
-    return () => { off1(); off2(); };
+    return () => {
+      off1();
+      off2();
+    };
   }, [loggedIn, navigate]);
 
-  // FIX: redirect /master → /master/user (singular, sesuai routes di bawah)
+  // redirect /master → /master/user (sesuai routes di bawah)
   useEffect(() => {
     if (!loggedIn) return;
     if (location.pathname === "/master") {
@@ -155,12 +164,22 @@ function AppShell() {
     navigate(PAGE_PATH[pageKey] || "/pos");
   };
 
-  // FIX: kenali /reconciliation sebagai bagian inventory (untuk highlight sidebar)
+  // active icon di sidebar:
+  // - inventory & reconciliation → inventory
+  // - master → master
+  // - purchase & gr sekarang di submenu (tidak ada icon utama) → balikin null
   const getActivePageKey = () => {
     const p = location.pathname;
+
     if (p.startsWith("/inventory")) return "inventory";
     if (p.startsWith("/reconciliation")) return "inventory";
     if (p.startsWith("/master")) return "master";
+
+    // Purchase & GR pakai highlight di dalam submenu (Sidebar hitung sendiri dari pathname)
+    if (p === PAGE_PATH.purchase || p === PAGE_PATH.gr) {
+      return null;
+    }
+
     for (const [key, path] of Object.entries(PAGE_PATH)) {
       if (p === path) return key;
     }
@@ -234,6 +253,7 @@ function AppShell() {
             }
           />
 
+          {/* PURCHASE & GR (submenu di sidebar, tapi route tetap sama) */}
           <Route
             path={PAGE_PATH.purchase}
             element={

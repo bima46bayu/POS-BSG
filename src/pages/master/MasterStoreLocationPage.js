@@ -506,7 +506,7 @@ export default function MasterStoreLocationPage() {
         width: "380px",
         cell: (r) => (
           <span className="text-gray-700 text-xs">
-            {truncateWords(r.address, 12)}
+            {truncateWords(r.address, 8)}
           </span>
         ),
       },
