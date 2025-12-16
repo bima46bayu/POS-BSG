@@ -20,8 +20,8 @@ const PAYMENT_METHOD_OPTIONS = [
   { value: "cash", label: "Cash" },
   { value: "qris", label: "QRIS" },
   { value: "transfer", label: "Transfer" },
-  { value: "debit", label: "Debit" },
-  { value: "credit", label: "Credit Card" },
+  { value: "ewallet", label: "E-Wallet" },
+  { value: "card", label: "Card" },
 ];
 
 const toNumber = (v) => (v == null ? 0 : Number(v));

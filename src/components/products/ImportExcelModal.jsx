@@ -1,3 +1,4 @@
+// src/components/products/ImportExcelModal.jsx
 import React, { useEffect, useRef, useState } from "react";
 import {
   X,
@@ -10,7 +11,10 @@ import {
   Download,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { importProductsExcel } from "../../api/products";
+import {
+  importProductsExcel,
+  downloadProductImportTemplate,
+} from "../../api/products";
 
 /* ========================= ModeSelect (dropdown kustom) ========================= */
 function ModeSelect({ value, onChange, disabled }) {
@@ -18,9 +22,12 @@ function ModeSelect({ value, onChange, disabled }) {
   const btnRef = useRef(null);
   const menuRef = useRef(null);
 
+  // Sekarang hanya satu mode: create-only
   const options = [
-    { value: "upsert", label: "Upsert (update jika SKU ada)" },
-    { value: "create-only", label: "Create only (abaikan SKU existing)" },
+    {
+      value: "create-only",
+      label: "Create only (SKU existing di-skip & dicatat error)",
+    },
   ];
 
   useEffect(() => {
@@ -50,18 +57,18 @@ function ModeSelect({ value, onChange, disabled }) {
       <button
         ref={btnRef}
         type="button"
-        disabled={disabled}
-        onClick={() => setOpen((s) => !s)}
+        disabled={disabled || options.length === 1}
+        onClick={() => options.length > 1 && setOpen((s) => !s)}
         className="w-full inline-flex items-center justify-between gap-2 rounded-xl border px-3 py-2 hover:bg-gray-50 disabled:opacity-60"
       >
         <div className="flex items-center gap-2">
           <FileSpreadsheet size={18} />
           <span className="text-sm">{current.label}</span>
         </div>
-        <ChevronDown size={18} />
+        {options.length > 1 && <ChevronDown size={18} />}
       </button>
 
-      {open && (
+      {open && options.length > 1 && (
         <div
           ref={menuRef}
           className="absolute z-10 mt-2 w-full rounded-xl border bg-white shadow-lg overflow-hidden"
@@ -99,17 +106,21 @@ function FileDropzone({ onFile, accept = ".xlsx", disabled, file }) {
   function onClick() {
     if (!disabled) inputRef.current?.click();
   }
+
   function onChange(e) {
     const f = e.target.files?.[0];
     if (f) onFile?.(f);
   }
+
   function onDrop(e) {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
     if (disabled) return;
+
     const f = e.dataTransfer.files?.[0];
     if (!f) return;
+
     if (accept && !f.name.toLowerCase().endsWith(".xlsx")) {
       toast.error("Hanya menerima file .xlsx");
       return;
@@ -144,7 +155,9 @@ function FileDropzone({ onFile, accept = ".xlsx", disabled, file }) {
         </div>
         <div className="flex-1">
           <div className="text-sm font-medium">
-            {file ? file.name : "Tarik & letakkan file .xlsx di sini, atau klik untuk memilih"}
+            {file
+              ? file.name
+              : "Tarik & letakkan file .xlsx di sini, atau klik untuk memilih"}
           </div>
           <div className="text-xs text-gray-500 mt-0.5">
             Maks 10 MB. Format yang didukung: .xlsx
@@ -161,14 +174,11 @@ function FileDropzone({ onFile, accept = ".xlsx", disabled, file }) {
 }
 
 /* ========================= Modal Utama ========================= */
-export default function ImportExcelModal({
-  onClose,
-  onImported,
-  onDownloadTemplate, // optional: () => void
-}) {
+export default function ImportExcelModal({ onClose, onImported }) {
   const [file, setFile] = useState(null);
-  const [mode, setMode] = useState("upsert");
+  const [mode, setMode] = useState("create-only");
   const [loading, setLoading] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [result, setResult] = useState(null);
 
   const onSubmit = async (e) => {
@@ -177,22 +187,56 @@ export default function ImportExcelModal({
       toast.error("Pilih file .xlsx terlebih dahulu");
       return;
     }
+
     setLoading(true);
+    setResult(null);
+
     try {
       const res = await importProductsExcel({ file, mode });
+
       if (res.status !== "ok") {
         toast.error(res.message || "Import gagal");
-        setResult(res);
-      } else {
         setResult(res.summary || null);
-        onImported?.(res.summary);
-        toast.success("Import berhasil diproses");
+        return;
       }
+
+      const summary = res.summary || {};
+      setResult(summary);
+      onImported?.(summary);
+
+      const created = summary.created ?? 0;
+      const updated = summary.updated ?? 0;
+      const errorsCount = summary.errors?.length ?? 0;
+
+      toast.dismiss();
+      toast.success(
+        `Import selesai. Created: ${created}, Updated: ${updated}, Errors: ${errorsCount}`
+      );
     } catch (err) {
       console.error(err);
-      toast.error("Terjadi kesalahan saat import");
+      const apiMessage =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        null;
+      toast.error(apiMessage || "Terjadi kesalahan saat import");
+
+      if (err?.response?.data?.summary) {
+        setResult(err.response.data.summary);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      setDownloadingTemplate(true);
+      await downloadProductImportTemplate();
+    } catch (err) {
+      console.error(err);
+      toast.error("Gagal mengunduh template");
+    } finally {
+      setDownloadingTemplate(false);
     }
   };
 
@@ -218,7 +262,7 @@ export default function ImportExcelModal({
 
         {/* Body */}
         <form onSubmit={onSubmit} className="px-6 py-5 space-y-5">
-          {/* Row: file & template */}
+          {/* File & template */}
           <div className="space-y-2">
             <label className="block text-sm font-medium">File (.xlsx)</label>
             <FileDropzone file={file} onFile={setFile} disabled={loading} />
@@ -228,21 +272,26 @@ export default function ImportExcelModal({
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  if (onDownloadTemplate) onDownloadTemplate();
-                  else toast("Hubungkan handler onDownloadTemplate untuk mengunduh template.");
-                }}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border hover:bg-gray-50 text-sm"
+                onClick={handleDownloadTemplate}
+                disabled={downloadingTemplate}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border hover:bg-gray-50 text-sm disabled:opacity-60"
               >
+                {downloadingTemplate && (
+                  <Loader2 className="animate-spin" size={14} />
+                )}
                 <Download size={16} />
                 Download Template
               </button>
             </div>
           </div>
 
-          {/* Row: Mode (dropdown kustom) */}
-          <div className="space-y-2">
-            <label className="block text-sm font-medium">Mode</label>
+          {/* Mode Import */}
+          <div className="space-y-1">
+            <label className="block text-sm font-medium">Mode Import</label>
+            <p className="text-xs text-gray-500 mb-1">
+              Saat ini hanya mendukung <b>Create only</b> — SKU yang sudah ada akan
+              di-skip dan muncul sebagai error di hasil import.
+            </p>
             <ModeSelect value={mode} onChange={setMode} disabled={loading} />
           </div>
 
@@ -267,7 +316,7 @@ export default function ImportExcelModal({
           </div>
         </form>
 
-        {/* Footer (Result) */}
+        {/* Footer: Hasil Import */}
         {result && (
           <div className="px-6 pb-6">
             <div className="mt-3 rounded-2xl border bg-gray-50">
@@ -282,11 +331,15 @@ export default function ImportExcelModal({
                 <div className="grid grid-cols-3 gap-3 text-sm">
                   <div className="rounded-xl bg-white border p-3">
                     <div className="text-gray-600">Created</div>
-                    <div className="text-lg font-semibold">{result.created ?? 0}</div>
+                    <div className="text-lg font-semibold">
+                      {result.created ?? 0}
+                    </div>
                   </div>
                   <div className="rounded-xl bg-white border p-3">
                     <div className="text-gray-600">Updated</div>
-                    <div className="text-lg font-semibold">{result.updated ?? 0}</div>
+                    <div className="text-lg font-semibold">
+                      {result.updated ?? 0}
+                    </div>
                   </div>
                   <div className="rounded-xl bg-white border p-3">
                     <div className="text-gray-600">Processed</div>
@@ -311,7 +364,10 @@ export default function ImportExcelModal({
                         </thead>
                         <tbody>
                           {result.errors.map((e, i) => (
-                            <tr key={i} className="odd:bg-white even:bg-gray-50">
+                            <tr
+                              key={i}
+                              className="odd:bg-white even:bg-gray-50"
+                            >
                               <td className="p-2 border-b">{e.row}</td>
                               <td className="p-2 border-b whitespace-pre-wrap">
                                 {e.message}
@@ -322,7 +378,8 @@ export default function ImportExcelModal({
                       </table>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
-                      Perbaiki baris yang error di Excel, lalu jalankan import ulang.
+                      Perbaiki baris yang error di Excel, lalu jalankan import
+                      ulang.
                     </p>
                   </div>
                 )}
