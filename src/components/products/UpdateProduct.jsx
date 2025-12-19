@@ -32,7 +32,7 @@ export default function UpdateProduct({
     unit_id: "",
   });
 
-  // ✅ sama seperti AddProduct: stock / non-stock
+  // ✅ stock / non-stock
   const [trackInventory, setTrackInventory] = useState(true);
 
   const [files, setFiles] = useState([]);
@@ -45,9 +45,11 @@ export default function UpdateProduct({
       // tentukan default trackInventory dari inventory_type / is_stock_tracked
       let tracked = true;
       if (product.inventory_type) {
-        // misal 'stock' / 'non_stock'
         tracked = String(product.inventory_type).toLowerCase() !== "non_stock";
-      } else if (product.is_stock_tracked !== undefined && product.is_stock_tracked !== null) {
+      } else if (
+        product.is_stock_tracked !== undefined &&
+        product.is_stock_tracked !== null
+      ) {
         tracked = !!Number(product.is_stock_tracked);
       }
 
@@ -64,6 +66,7 @@ export default function UpdateProduct({
             ? ""
             : String(product.unit_id),
       });
+
       setTrackInventory(tracked);
       setFiles([]);
       setSubmitting(false);
@@ -97,14 +100,12 @@ export default function UpdateProduct({
     const cid = String(form.category_id || "");
     if (!cid) return list;
     return list.filter((s) => {
-      const rel =
-        s.category_id ?? s.categoryId ?? s.parent_id ?? s.parentId ?? "";
+      const rel = s.category_id ?? s.categoryId ?? s.parent_id ?? s.parentId ?? "";
       return String(rel) === cid;
     });
   }, [form.category_id, subCategories]);
 
-  const onChange = (key) => (e) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
+  const onChange = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const onChangeCategory = (e) => {
     const value = e.target.value;
@@ -115,7 +116,6 @@ export default function UpdateProduct({
     }));
   };
 
-  // 🔑 UnitDropdown: sama seperti AddProduct → simpan string / ""
   const onChangeUnit = (unitId) => {
     setForm((f) => ({
       ...f,
@@ -146,7 +146,6 @@ export default function UpdateProduct({
 
   useEffect(() => {
     return () => {
-      // cleanup global kalau komponen unmount
       setFiles((prev) => {
         prev.forEach((f) => f?.url && URL.revokeObjectURL(f.url));
         return [];
@@ -181,18 +180,27 @@ export default function UpdateProduct({
 
     setSubmitting(true);
     try {
+      const inventory_type = trackInventory ? "stock" : "non_stock";
+
       const payload = {
         id: product.id,
         name: form.name,
         price: form.price ? Number(form.price) : 0,
-        stock: form.stock ? Number(form.stock) : 0,
+
+        // non_stock -> stock harus 0
+        stock: trackInventory ? (form.stock ? Number(form.stock) : 0) : 0,
+
         sku: form.sku,
         description: form.description || null,
         category_id: form.category_id || null,
         sub_category_id: form.sub_category_id || null,
         unit_id: form.unit_id || null,
         images: files.map((f) => f.file),
-        // ✅ sama persis dengan AddProduct
+
+        // ✅ yang diminta BE (wajib)
+        inventory_type,
+
+        // kalau BE masih terima flag ini, aman dikirim juga
         is_stock_tracked: trackInventory ? 1 : 0,
       };
 
@@ -317,7 +325,7 @@ export default function UpdateProduct({
                 value={form.stock}
                 onChange={onChange("stock")}
                 min="0"
-                disabled={!trackInventory} // ✅ non-stock → stok opsional
+                disabled={!trackInventory}
               />
             </Field>
             <Field label="Unit">
@@ -375,9 +383,7 @@ export default function UpdateProduct({
               onDrop={onDrop}
               className={[
                 "rounded-xl border-2 border-dashed transition-colors p-5 text-center select-none",
-                isDragOver
-                  ? "border-blue-400 bg-blue-50"
-                  : "border-blue-300 bg-white",
+                isDragOver ? "border-blue-400 bg-blue-50" : "border-blue-300 bg-white",
               ].join(" ")}
             >
               <div className="mx-auto w-10 h-10 mb-2 rounded-full border border-blue-200 flex items-center justify-center">
@@ -410,18 +416,10 @@ export default function UpdateProduct({
                   key={idx}
                   className="flex items-center gap-3 border border-gray-200 rounded-xl px-3 py-2"
                 >
-                  <img
-                    src={f.url}
-                    alt=""
-                    className="w-8 h-8 rounded-md object-cover"
-                  />
+                  <img src={f.url} alt="" className="w-8 h-8 rounded-md object-cover" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-800 truncate">
-                      {f.file.name}
-                    </p>
-                    <p className="text-[11px] text-gray-500">
-                      {f.sizeLabel}
-                    </p>
+                    <p className="text-sm text-gray-800 truncate">{f.file.name}</p>
+                    <p className="text-[11px] text-gray-500">{f.sizeLabel}</p>
                   </div>
                   <button
                     type="button"
