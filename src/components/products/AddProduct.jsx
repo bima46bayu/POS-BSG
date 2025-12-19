@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
 import { getMe } from "../../api/users";
-import UnitDropdown from "./UnitDropdown"; // ⬅️ PENTING
+import UnitDropdown from "./UnitDropdown";
 
 /**
  * Props:
@@ -27,8 +27,10 @@ export default function AddProduct({
     stock: "",
     sku: "",
     description: "",
-    unit_id: "", // ⬅️ baru
+    unit_id: "",
   });
+
+  const [trackInventory, setTrackInventory] = useState(true); // ✅ stock / non-stock
 
   const [files, setFiles] = useState([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -40,14 +42,23 @@ export default function AddProduct({
   const [meError, setMeError] = useState("");
 
   useEffect(() => {
+    if (!open) return; // cuma load saat modal dibuka
+
     let cancelled = false;
+
     (async () => {
       setMeLoading(true);
       setMeError("");
       try {
         const me = await getMe();
-        const sid = me?.store_location?.id ?? me?.store_location_id ?? null;
-        if (!cancelled) setStoreLocationId(sid);
+        // sesuaikan dengan bentuk response getMe-mu
+        const user = me?.data ?? me; // kalau axios wrapper biasa: res.data
+        const sid =
+          user?.store_location?.id ?? user?.store_location_id ?? null;
+
+        if (!cancelled) {
+          setStoreLocationId(sid);
+        }
       } catch (e) {
         if (!cancelled) {
           setStoreLocationId(null);
@@ -57,10 +68,11 @@ export default function AddProduct({
         if (!cancelled) setMeLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [open]);
 
   // Filter subcategory berdasarkan category
   const filteredSubs = useMemo(() => {
@@ -87,8 +99,14 @@ export default function AddProduct({
         description: "",
         unit_id: "",
       });
-      setFiles([]);
+      setTrackInventory(true);
+      setFiles((prev) => {
+        // revoke semua url preview
+        prev.forEach((f) => f?.url && URL.revokeObjectURL(f.url));
+        return [];
+      });
       setSubmitting(false);
+      setMeError("");
     }
   }, [open]);
 
@@ -124,10 +142,6 @@ export default function AddProduct({
     }));
     setFiles((prev) => [...prev, ...mapped]);
   };
-
-  useEffect(() => {
-    return () => files.forEach((f) => URL.revokeObjectURL(f.url));
-  }, [files]);
 
   const onDrop = (e) => {
     e.preventDefault();
@@ -168,6 +182,8 @@ export default function AddProduct({
         stock: form.stock ? Number(form.stock) : 0,
         images: files.map((f) => f.file),
         store_location_id: storeLocationId,
+        // ✅ flag untuk backend: 1 = produk stock, 0 = non-stock (jasa, photobooth, dll)
+        is_stock_tracked: trackInventory ? 1 : 0,
       };
 
       // normalisasi unit_id: kalau string kosong → null
@@ -199,13 +215,12 @@ export default function AddProduct({
             Tambah Produk
           </h2>
           {meLoading && (
-            <p className="text-xs text-gray-500 mt-1">
-              Memuat store user…
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Memuat store user…</p>
           )}
           {!meLoading && storeLocationId == null && (
             <p className="text-xs text-red-600 mt-1">
-              {meError || "Store user tidak ditemukan. Produk tidak bisa disimpan."}
+              {meError ||
+                "Store user tidak ditemukan. Produk tidak bisa disimpan."}
             </p>
           )}
         </div>
@@ -231,6 +246,42 @@ export default function AddProduct({
               min="0"
               required
             />
+          </Field>
+
+          {/* Jenis Produk: Stock / Non-Stock */}
+          <Field label="Tipe Produk">
+            <div className="flex flex-col gap-2 text-sm">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="trackInventory"
+                  className="accent-blue-600"
+                  checked={trackInventory === true}
+                  onChange={() => setTrackInventory(true)}
+                />
+                <span>
+                  Produk stok{" "}
+                  <span className="text-xs text-gray-500">
+                    (misal: kaos, barang fisik, bisa habis stoknya)
+                  </span>
+                </span>
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="trackInventory"
+                  className="accent-blue-600"
+                  checked={trackInventory === false}
+                  onChange={() => setTrackInventory(false)}
+                />
+                <span>
+                  Non-stock / Jasa{" "}
+                  <span className="text-xs text-gray-500">
+                    (misal: Photobooth, sewa baju, make up, edit foto, cetak foto)
+                  </span>
+                </span>
+              </label>
+            </div>
           </Field>
 
           {/* Category + Subcategory */}
@@ -263,6 +314,7 @@ export default function AddProduct({
                 value={form.stock}
                 onChange={onChange("stock")}
                 min="0"
+                disabled={!trackInventory} // ✅ non-stock → stok opsional
               />
             </Field>
 

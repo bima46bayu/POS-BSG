@@ -28,16 +28,35 @@ function useDebouncedValue(value, delay = 300) {
   return v;
 }
 
-const normalize = (p) => ({
-  id: p.id ?? p.product_id ?? p.sku,
-  name: p.name ?? p.product_name ?? p.nama ?? "Tanpa Nama",
-  price: Number(p.price ?? p.unit_price ?? p.sale_price ?? 0),
-  image: toAbsoluteUrl(p.image_url || p.image || p.thumbnail_url || p.photo_url || null),
-  stock: p.stock ?? p.qty ?? p.quantity ?? 0,
-  sku: p.sku ?? p.barcode ?? null,
-  category_id: p.category_id,
-  sub_category_id: p.sub_category_id,
-});
+/* ===== Normalizer produk (pakai inventory_type) ===== */
+const normalize = (p) => {
+  // backend: products.inventory_type (stock | non_stock | service | bundle | dll)
+  const inventoryTypeRaw =
+    p.inventory_type ??
+    p.inventoryType ??
+    p.type ??
+    "stock"; // default: stock
+
+  const inventoryType = String(inventoryTypeRaw || "stock").toLowerCase();
+
+  // Hanya inventory_type = "stock" yang benar-benar pakai stok fisik
+  const isStockTracked = inventoryType === "stock";
+
+  return {
+    id: p.id ?? p.product_id ?? p.sku,
+    name: p.name ?? p.product_name ?? p.nama ?? "Tanpa Nama",
+    price: Number(p.price ?? p.unit_price ?? p.sale_price ?? 0),
+    image: toAbsoluteUrl(
+      p.image_url || p.image || p.thumbnail_url || p.photo_url || null
+    ),
+    stock: p.stock ?? p.qty ?? p.quantity ?? 0,
+    sku: p.sku ?? p.barcode ?? null,
+    category_id: p.category_id,
+    sub_category_id: p.sub_category_id,
+    inventoryType,     // ⬅️ simpan tipe
+    isStockTracked,    // ⬅️ dipakai di FE
+  };
+};
 
 export default function POSPage() {
   /* ===== UI states ===== */
@@ -65,7 +84,7 @@ export default function POSPage() {
   const role = (meQ.data?.role || "").toLowerCase();
   const isAdmin = role === "admin";
   const myStoreIdFromMe = meQ.isSuccess
-    ? (meQ.data?.store_location?.id ?? meQ.data?.store_location_id ?? null)
+    ? meQ.data?.store_location?.id ?? meQ.data?.store_location_id ?? null
     : null;
 
   /* ===== stores (untuk admin) ===== */
@@ -74,28 +93,29 @@ export default function POSPage() {
     queryFn: ({ signal }) => listStoreLocations({ per_page: 200 }, signal),
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
-    enabled: isAdmin || meQ.isError, // load kalau admin; jika me error, kita pakai buat fallback
+    enabled: isAdmin || meQ.isError,
   });
   const stores = storesQ.data?.items ?? [];
 
-  /* ===== selected store =====
-     Kasir  : terkunci ke store milik user (tanpa selector).
-     Admin  : selector dengan opsi "Semua".
-  */
+  /* ===== selected store ===== */
   const [selectedStoreId, setSelectedStoreId] = React.useState(undefined);
 
   // default dari /api/me
   useEffect(() => {
     if (meQ.isSuccess && selectedStoreId === undefined) {
       if (isAdmin) {
-        setSelectedStoreId(myStoreIdFromMe != null ? String(myStoreIdFromMe) : "ALL");
+        setSelectedStoreId(
+          myStoreIdFromMe != null ? String(myStoreIdFromMe) : "ALL"
+        );
       } else {
-        setSelectedStoreId(myStoreIdFromMe != null ? String(myStoreIdFromMe) : "");
+        setSelectedStoreId(
+          myStoreIdFromMe != null ? String(myStoreIdFromMe) : ""
+        );
       }
     }
   }, [meQ.isSuccess, isAdmin, myStoreIdFromMe, selectedStoreId]);
 
-  // fallback jika /api/me error → admin-like dengan ALL supaya jalan
+  // fallback jika /api/me error → admin-like dengan ALL
   useEffect(() => {
     if (meQ.isError && selectedStoreId === undefined) {
       setSelectedStoreId("ALL");
@@ -118,7 +138,10 @@ export default function POSPage() {
 
   /* ===== Products (infinite) ===== */
   const productsQuery = useInfiniteQuery({
-    queryKey: ["products", { q: debouncedQ, ...filters, scope: selectedStoreId ?? "NONE" }],
+    queryKey: [
+      "products",
+      { q: debouncedQ, ...filters, scope: selectedStoreId ?? "NONE" },
+    ],
     queryFn: async ({ pageParam = 1, signal }) => {
       const isAll = selectedStoreId === "ALL";
       const params = {
@@ -153,14 +176,22 @@ export default function POSPage() {
     return Array.from(map.values());
   }, [productsQuery.data]);
 
-  // ===== Filter stok di FE =====
+  /* ===== Filter stok di FE (aware non-stock) =====
+     available: semua non-stock + stock qty>0
+     out      : hanya produk stock qty<=0
+  */
   const filteredProducts = useMemo(() => {
     let arr = flatProducts;
 
     if (filters.stock_status === "available") {
-      arr = arr.filter((p) => Number(p.stock ?? 0) > 0);
+      arr = arr.filter((p) => {
+        if (!p.isStockTracked) return true; // non-stock/service selalu available
+        return Number(p.stock ?? 0) > 0;
+      });
     } else if (filters.stock_status === "out") {
-      arr = arr.filter((p) => Number(p.stock ?? 0) <= 0);
+      arr = arr.filter(
+        (p) => p.isStockTracked && Number(p.stock ?? 0) <= 0
+      );
     }
 
     return arr;
@@ -187,11 +218,18 @@ export default function POSPage() {
       const exist = prev.find((i) => i.id === product.id);
       return exist
         ? prev.map((i) =>
-            i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
+            i.id === product.id
+              ? { ...i, quantity: i.quantity + 1 }
+              : i
           )
         : [
             ...prev,
-            { ...product, quantity: 1, discount_type: "%", discount_value: 0 },
+            {
+              ...product,
+              quantity: 1,
+              discount_type: "%",
+              discount_value: 0,
+            },
           ];
     });
   }, []);
@@ -210,13 +248,16 @@ export default function POSPage() {
     );
   }, []);
 
-  const handleUpdateDiscount = useCallback((id, { discount_type, discount_value }) => {
-    setCartItems((prev) =>
-      prev.map((it) =>
-        it.id === id ? { ...it, discount_type, discount_value } : it
-      )
-    );
-  }, []);
+  const handleUpdateDiscount = useCallback(
+    (id, { discount_type, discount_value }) => {
+      setCartItems((prev) =>
+        prev.map((it) =>
+          it.id === id ? { ...it, discount_type, discount_value } : it
+        )
+      );
+    },
+    []
+  );
 
   const handleRemoveItem = useCallback((id) => {
     setCartItems((prev) => prev.filter((i) => i.id !== id));
@@ -225,7 +266,10 @@ export default function POSPage() {
   /* ===== Search / Filter / Category pick / Scan ===== */
   const handleSearch = useCallback((text) => setQ(text), []);
   const handleFilterChange = useCallback((f) => setFilters(f), []);
-  const handlePickCategory = useCallback((catId) => setPickedCategory(catId || undefined), []);
+  const handlePickCategory = useCallback(
+    (catId) => setPickedCategory(catId || undefined),
+    []
+  );
 
   const handleScan = useCallback(
     async (code) => {
@@ -243,6 +287,7 @@ export default function POSPage() {
           console.warn(`SKU mismatch: expected ${cleanCode}, got ${p.sku}`);
           return toast.error(`Produk tidak ditemukan`);
         }
+        // pakai normalize supaya inventoryType & isStockTracked ikut
         handleAddToCart(normalize(p));
         toast.success(`${p.name} ditambahkan ke cart`);
       } catch (e) {
@@ -257,22 +302,31 @@ export default function POSPage() {
   const subtotalItems = useMemo(() => {
     return cartItems.reduce((s, i) => {
       const price = Number(i.price || 0);
-      const qty   = Number(i.quantity || 0);
-      const type  = i.discount_type || "rp";
-      const val   = Number(i.discount_value || 0);
-      const discNominal = Math.min(price, type === "%" ? (price * val) / 100 : val);
+      const qty = Number(i.quantity || 0);
+      const type = i.discount_type || "rp";
+      const val = Number(i.discount_value || 0);
+      const discNominal = Math.min(
+        price,
+        type === "%" ? (price * val) / 100 : val
+      );
       const netUnit = Math.max(0, price - discNominal);
       return s + netUnit * qty;
     }, 0);
   }, [cartItems]);
-  const tax = useMemo(() => Math.round(subtotalItems * TAX_RATE), [subtotalItems]);
+  const tax = useMemo(
+    () => Math.round(subtotalItems * TAX_RATE),
+    [subtotalItems]
+  );
   const total = subtotalItems + tax;
 
   /* ===== Infinite scroll trigger ===== */
   useEffect(() => {
     function onScroll() {
       if (!hasMore || productsQuery.isFetchingNextPage) return;
-      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 200) {
+      if (
+        window.innerHeight + window.scrollY >=
+        document.body.offsetHeight - 200
+      ) {
         productsQuery.fetchNextPage();
       }
     }
@@ -299,7 +353,10 @@ export default function POSPage() {
                 showStoreSelector={isAdmin}
                 storeOptions={[
                   { value: "ALL", label: "Semua" },
-                  ...stores.map((s) => ({ value: String(s.id), label: s.name })),
+                  ...stores.map((s) => ({
+                    value: String(s.id),
+                    label: s.name,
+                  })),
                 ]}
                 selectedStoreId={selectedStoreId || "ALL"}
                 onChangeStore={(val) => setSelectedStoreId(val || "ALL")}
@@ -308,7 +365,9 @@ export default function POSPage() {
             </div>
           </div>
 
-          {loading && <div className="text-gray-500 mt-3">Loading products…</div>}
+          {loading && (
+            <div className="text-gray-500 mt-3">Loading products…</div>
+          )}
           {err && <div className="text-red-600 mt-3">{err}</div>}
           {!loading && !err && filteredProducts.length === 0 && (
             <div className="text-gray-500 mt-3">
@@ -318,10 +377,15 @@ export default function POSPage() {
             </div>
           )}
 
-          <ProductGrid products={filteredProducts} onAddToCart={handleAddToCart} />
+          <ProductGrid
+            products={filteredProducts}
+            onAddToCart={handleAddToCart}
+          />
 
           {loadingMore && (
-            <div className="text-center py-3 text-gray-500">Loading more…</div>
+            <div className="text-center py-3 text-gray-500">
+              Loading more…
+            </div>
           )}
           {!hasMore && filteredProducts.length > 0 && (
             <div className="text-center py-3 text-gray-400 text-sm">
@@ -333,34 +397,17 @@ export default function POSPage() {
 
       {/* Desktop order panel */}
       <aside
-        className="hidden md:block order-2 w-full md:w-[340px] lg:w-[400px] xl:w-[480px]
+        className="hidden md:block order-2 w-full md:w-[340px] lg
+        md:w-[400px] xl:w-[480px]
                    bg-white border-t md:border-t-0 md:border-l border-gray-200
                    p-4 sm:p-5 md:p-6 overflow-y-auto md:sticky md:top-0 md:h-screen
                    relative z-10"
       >
         <OrderDetails
           items={cartItems}
-          onUpdateQuantity={(id, c) => {
-            setCartItems((prev) =>
-              prev
-                .map((item) =>
-                  item.id !== id
-                    ? item
-                    : item.quantity + c > 0
-                    ? { ...item, quantity: item.quantity + c }
-                    : null
-                )
-                .filter(Boolean)
-            );
-          }}
-          onUpdateDiscount={(id, d) => {
-            setCartItems((prev) =>
-              prev.map((it) => (it.id === id ? { ...it, ...d } : it))
-            );
-          }}
-          onRemoveItem={(id) =>
-            setCartItems((prev) => prev.filter((i) => i.id !== id))
-          }
+          onUpdateQuantity={handleUpdateQuantity}
+          onUpdateDiscount={handleUpdateDiscount}
+          onRemoveItem={handleRemoveItem}
         />
 
         <SaleSubmitter
@@ -412,27 +459,9 @@ export default function POSPage() {
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         items={cartItems}
-        onUpdateQuantity={(id, c) => {
-          setCartItems((prev) =>
-            prev
-              .map((item) =>
-                item.id !== id
-                  ? item
-                  : item.quantity + c > 0
-                  ? { ...item, quantity: item.quantity + c }
-                  : null
-              )
-              .filter(Boolean)
-          );
-        }}
-        onUpdateDiscount={(id, d) => {
-          setCartItems((prev) =>
-            prev.map((it) => (it.id === id ? { ...it, ...d } : it))
-          );
-        }}
-        onRemoveItem={(id) =>
-          setCartItems((prev) => prev.filter((i) => i.id !== id))
-        }
+        onUpdateQuantity={handleUpdateQuantity}
+        onUpdateDiscount={handleUpdateDiscount}
+        onRemoveItem={handleRemoveItem}
         subtotal={subtotalItems}
         tax={tax}
         total={total}

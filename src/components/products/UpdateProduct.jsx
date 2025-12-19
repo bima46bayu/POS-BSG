@@ -11,7 +11,7 @@ import UnitDropdown from "./UnitDropdown";
  *  - onSubmit: (payload) => Promise<void> | void
  *  - categories: [{id, name}]
  *  - subCategories: [{id, name, category_id}]
- *  - product: {id, name, price, category_id, sub_category_id, stock, sku, description, image_url?, unit_id?}
+ *  - product: {id, name, price, category_id, sub_category_id, stock, sku, description, image_url?, unit_id?, inventory_type?, is_stock_tracked?}
  */
 export default function UpdateProduct({
   open,
@@ -29,17 +29,28 @@ export default function UpdateProduct({
     stock: "",
     sku: "",
     description: "",
-    // simpan sebagai number | null, bukan string
-    unit_id: null,
+    unit_id: "",
   });
+
+  // ✅ sama seperti AddProduct: stock / non-stock
+  const [trackInventory, setTrackInventory] = useState(true);
 
   const [files, setFiles] = useState([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Prefill dari product saat modal dibuka / reset saat tutup
+  // ===== Prefill dari product saat modal dibuka / reset saat tutup =====
   useEffect(() => {
     if (open && product) {
+      // tentukan default trackInventory dari inventory_type / is_stock_tracked
+      let tracked = true;
+      if (product.inventory_type) {
+        // misal 'stock' / 'non_stock'
+        tracked = String(product.inventory_type).toLowerCase() !== "non_stock";
+      } else if (product.is_stock_tracked !== undefined && product.is_stock_tracked !== null) {
+        tracked = !!Number(product.is_stock_tracked);
+      }
+
       setForm({
         name: product.name ?? "",
         price: product.price ?? "",
@@ -48,18 +59,19 @@ export default function UpdateProduct({
         stock: product.stock ?? "",
         sku: product.sku ?? "",
         description: product.description ?? "",
-        // langsung simpan numeric / null
         unit_id:
           product.unit_id === null || product.unit_id === undefined
-            ? null
-            : Number(product.unit_id),
+            ? ""
+            : String(product.unit_id),
       });
+      setTrackInventory(tracked);
       setFiles([]);
       setSubmitting(false);
       return;
     }
 
     if (!open) {
+      // reset saat modal ditutup
       setForm({
         name: "",
         price: "",
@@ -68,14 +80,18 @@ export default function UpdateProduct({
         stock: "",
         sku: "",
         description: "",
-        unit_id: null,
+        unit_id: "",
       });
-      setFiles([]);
+      setTrackInventory(true);
+      setFiles((prev) => {
+        prev.forEach((f) => f?.url && URL.revokeObjectURL(f.url));
+        return [];
+      });
       setSubmitting(false);
     }
   }, [open, product]);
 
-  // Filter subcategory berdasarkan category
+  // ===== Filter subcategory berdasarkan category =====
   const filteredSubs = useMemo(() => {
     const list = subCategories || [];
     const cid = String(form.category_id || "");
@@ -99,14 +115,11 @@ export default function UpdateProduct({
     }));
   };
 
-  // 🔑 Unit: terima langsung unitId (number | null) dari UnitDropdown
+  // 🔑 UnitDropdown: sama seperti AddProduct → simpan string / ""
   const onChangeUnit = (unitId) => {
     setForm((f) => ({
       ...f,
-      unit_id:
-        unitId === undefined || unitId === null || unitId === ""
-          ? null
-          : Number(unitId),
+      unit_id: unitId ?? "",
     }));
   };
 
@@ -131,10 +144,13 @@ export default function UpdateProduct({
     setFiles((prev) => [...prev, ...mapped]);
   };
 
-  // bersihkan object URL hanya saat unmount
   useEffect(() => {
     return () => {
-      files.forEach((f) => f?.url && URL.revokeObjectURL(f.url));
+      // cleanup global kalau komponen unmount
+      setFiles((prev) => {
+        prev.forEach((f) => f?.url && URL.revokeObjectURL(f.url));
+        return [];
+      });
     };
   }, []);
 
@@ -158,33 +174,27 @@ export default function UpdateProduct({
       return c;
     });
 
+  // ========= Submit =========
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting || !product?.id) return;
 
     setSubmitting(true);
     try {
-      const unitIdNum =
-        form.unit_id === null || form.unit_id === "" || form.unit_id === undefined
-          ? null
-          : Number(form.unit_id);
-
       const payload = {
         id: product.id,
         name: form.name,
-        price: form.price ? Number(String(form.price).replace(",", ".")) : 0,
+        price: form.price ? Number(form.price) : 0,
         stock: form.stock ? Number(form.stock) : 0,
         sku: form.sku,
         description: form.description || null,
         category_id: form.category_id || null,
         sub_category_id: form.sub_category_id || null,
-        // 💥 ini yang penting: sama dengan Postman → unit_id: 2
-        unit_id: unitIdNum,
+        unit_id: form.unit_id || null,
         images: files.map((f) => f.file),
+        // ✅ sama persis dengan AddProduct
+        is_stock_tracked: trackInventory ? 1 : 0,
       };
-
-      // Debug kalau mau cek apakah sudah sama dengan Postman
-      // console.log("UpdateProduct payload:", payload);
 
       await onSubmit?.(payload);
     } finally {
@@ -219,8 +229,7 @@ export default function UpdateProduct({
         </div>
 
         {/* content */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-          {/* Product name */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
           <Field label="Product Name">
             <Input
               placeholder="Kaos Logo"
@@ -230,7 +239,6 @@ export default function UpdateProduct({
             />
           </Field>
 
-          {/* Price */}
           <Field label="Price">
             <Input
               type="number"
@@ -241,6 +249,42 @@ export default function UpdateProduct({
               min="0"
               required
             />
+          </Field>
+
+          {/* Jenis Produk: Stock / Non-Stock */}
+          <Field label="Tipe Produk">
+            <div className="flex flex-col gap-2 text-sm">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="trackInventoryUpdate"
+                  className="accent-blue-600"
+                  checked={trackInventory === true}
+                  onChange={() => setTrackInventory(true)}
+                />
+                <span>
+                  Produk stok{" "}
+                  <span className="text-xs text-gray-500">
+                    (barang fisik, stok bisa habis)
+                  </span>
+                </span>
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="trackInventoryUpdate"
+                  className="accent-blue-600"
+                  checked={trackInventory === false}
+                  onChange={() => setTrackInventory(false)}
+                />
+                <span>
+                  Non-stock / Jasa{" "}
+                  <span className="text-xs text-gray-500">
+                    (photobooth, jasa editing, dll)
+                  </span>
+                </span>
+              </label>
+            </div>
           </Field>
 
           {/* Category & Subcategory */}
@@ -273,18 +317,18 @@ export default function UpdateProduct({
                 value={form.stock}
                 onChange={onChange("stock")}
                 min="0"
+                disabled={!trackInventory} // ✅ non-stock → stok opsional
               />
             </Field>
             <Field label="Unit">
               <UnitDropdown
                 value={form.unit_id}
                 onChange={onChangeUnit}
-                placeholder="Pilih satuan"
+                placeholder="Pilih / kelola satuan"
               />
             </Field>
           </div>
 
-          {/* SKU */}
           <Field label="SKU">
             <Input
               placeholder="SKU-041"
@@ -294,7 +338,6 @@ export default function UpdateProduct({
             />
           </Field>
 
-          {/* Description */}
           <Field label="Description">
             <Textarea
               rows={3}
@@ -420,8 +463,8 @@ export default function UpdateProduct({
 /* ------- Reusable inputs ------- */
 function Field({ label, children }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label className="block text-xs font-medium text-gray-600">
+    <div className="mb-4">
+      <label className="block text-xs font-medium text-gray-600 mb-1">
         {label}
       </label>
       {children}
@@ -434,7 +477,7 @@ function Input(props) {
     <input
       {...props}
       className={[
-        "w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm",
+        "w-full rounded-xl border border-gray-300 px-4 py-3 text-sm",
         "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
         props.className || "",
       ].join(" ")}
@@ -445,9 +488,10 @@ function Input(props) {
 function Textarea(props) {
   return (
     <textarea
+      rows={4}
       {...props}
       className={[
-        "w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm",
+        "w-full rounded-xl border border-gray-300 px-4 py-3 text-sm",
         "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
         "resize-y",
         props.className || "",
@@ -464,7 +508,7 @@ function Select({ value, onChange, placeholder, options = [], disabled }) {
         onChange={onChange}
         disabled={disabled}
         className={[
-          "w-full appearance-none rounded-xl border bg-white px-4 py-2.5 text-sm",
+          "w-full appearance-none rounded-xl border bg-white px-4 py-3 text-sm",
           "border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
           disabled ? "bg-gray-50 text-gray-400 cursor-not-allowed" : "",
         ].join(" ")}
