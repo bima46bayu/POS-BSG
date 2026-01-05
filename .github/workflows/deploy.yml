@@ -1,4 +1,4 @@
-name: Deploy React to Plesk (FTP - Stable)
+name: Deploy React to Plesk (FTP - Fixed)
 
 on:
   push:
@@ -9,48 +9,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ========================
-      # 1️⃣ Checkout
-      # ========================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ========================
-      # 2️⃣ Setup Node
-      # ========================
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
-      # ========================
-      # 3️⃣ Install deps
-      # ========================
       - name: Install deps
         run: npm ci
 
-      # ========================
-      # 4️⃣ Build React
-      # ========================
       - name: Build
         env:
           REACT_APP_API_BASE_URL: ${{ secrets.REACT_APP_API_BASE_URL }}
           REACT_APP_STORAGE_KEY: ${{ secrets.REACT_APP_STORAGE_KEY }}
         run: npm run build
 
-      # ========================
-      # 5️⃣ Copy .htaccess
-      # ========================
       - name: Ensure .htaccess copied
         run: |
           if [ -d build ] && [ -f public/.htaccess ] && [ ! -f build/.htaccess ]; then
             cp public/.htaccess build/.htaccess
           fi
 
-      # ========================
-      # 6️⃣ Upload via FTP (STABLE)
-      # ========================
       - name: Upload via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -58,17 +40,12 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
 
-          # ⚠️ FTPS Plesk sering timeout → FTP biasa lebih stabil
           protocol: ftp
-          secure: false
+          security: loose          # 🔥 ini yang BENAR, bukan secure:false
 
           local-dir: build/
           server-dir: ${{ secrets.FTP_SERVER_DIR }}
 
-          # 🔥 PENTING: matikan clean slate
           dangerous-clean-slate: false
-
-          # ⏱️ Anti-timeout
-          timeout: 600000
-          retries: 5
-          retries-delay: 20000
+          timeout: 600000           # 10 menit
+          log-level: verbose        # bantu debug kalau gagal
