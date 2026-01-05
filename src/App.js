@@ -23,6 +23,7 @@ import MasterCategoryPage from "./pages/master/MasterCategoryPage";
 import MasterSubCategoryPage from "./pages/master/MasterSubCategoryPage";
 import MasterSupplierPage from "./pages/master/MasterSupplierPage";
 import MasterStoreLocationPage from "./pages/master/MasterStoreLocationPage";
+import MasterDiscountPage from "./pages/master/MasterDiscountPage";
 
 import { isLoggedIn, logoutRequest } from "./api/auth";
 import {
@@ -303,6 +304,14 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterSubCategoryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/discount"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterDiscountPage />
               </ProtectedRoute>
             }
           />

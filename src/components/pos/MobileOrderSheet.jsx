@@ -9,7 +9,10 @@ import toast from "react-hot-toast";
 /**
  * Props:
  *  - open, onClose
- *  - items, onUpdateQuantity, onUpdateDiscount, onRemoveItem
+ *  - items
+ *  - itemDiscounts        // NEW
+ *  - globalDiscounts      // NEW
+ *  - onUpdateQuantity, onUpdateDiscount, onRemoveItem
  *  - subtotal, tax, total
  *  - onClearCart
  */
@@ -17,6 +20,8 @@ export default function MobileOrderSheet({
   open,
   onClose,
   items = [],
+  itemDiscounts,        // ✅ TAMBAH
+  globalDiscounts,      // ✅ TAMBAH
   onUpdateQuantity,
   onUpdateDiscount = () => {},
   onRemoveItem,
@@ -29,7 +34,9 @@ export default function MobileOrderSheet({
   useEffect(() => {
     const prev = document.body.style.overflow;
     if (open) document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [open]);
 
   // Tetap mounted demi animasi close; pakai pointer-events untuk blok/izinkan klik
@@ -62,7 +69,10 @@ export default function MobileOrderSheet({
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="inline-flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart className="h-4 w-4" />
-            Cart <span className="text-gray-500 font-normal">({items?.length || 0})</span>
+            Cart{" "}
+            <span className="text-gray-500 font-normal">
+              ({items?.length || 0})
+            </span>
           </div>
           <button
             onClick={onClose}
@@ -77,6 +87,7 @@ export default function MobileOrderSheet({
         <div className="px-4 py-4 space-y-4 overflow-y-auto max-h-[70vh]">
           <OrderDetails
             items={items}
+            itemDiscounts={itemDiscounts}   // ✅ TERUSKAN
             onUpdateQuantity={onUpdateQuantity}
             onUpdateDiscount={onUpdateDiscount}
             onRemoveItem={onRemoveItem}
@@ -87,10 +98,13 @@ export default function MobileOrderSheet({
             subtotal={subtotal}
             tax={tax}
             total={total}
+            globalDiscounts={globalDiscounts} // ✅ TERUSKAN
             onSuccess={(res) => {
               onClearCart?.();
               onClose?.();
-              toast.success(`Transaction success! Code: ${res?.code || res?.id || "-"}`);
+              toast.success(
+                `Transaction success! Code: ${res?.code || res?.id || "-"}`
+              );
             }}
             onCancel={onClearCart}
             showSummary={true}

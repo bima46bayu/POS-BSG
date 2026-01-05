@@ -14,6 +14,7 @@ import { getCategories, getSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
+import { listDiscounts } from "../api/discounts";
 
 const PER_PAGE = 60;
 const TAX_RATE = 0;
@@ -72,6 +73,9 @@ export default function POSPage() {
 
   const [cartItems, setCartItems] = React.useState([]);
   const [sheetOpen, setSheetOpen] = React.useState(false);
+  // ===== Discount master (NEW) =====
+  const [itemDiscounts, setItemDiscounts] = React.useState([]);
+  const [globalDiscounts, setGlobalDiscounts] = React.useState([]);
 
   /* ===== /api/me (role & store) ===== */
   const meQ = useQuery({
@@ -121,6 +125,26 @@ export default function POSPage() {
       setSelectedStoreId("ALL");
     }
   }, [meQ.isError, selectedStoreId]);
+
+  /* ===== FETCH DISCOUNT MASTER (NEW) ===== */
+  useEffect(() => {
+    if (!selectedStoreId) return;
+
+    const storeId =
+      selectedStoreId !== "ALL" ? Number(selectedStoreId) : undefined;
+
+    listDiscounts({
+      scope: "ITEM",
+      active: 1,
+      store_location_id: storeId,
+    }).then((res) => setItemDiscounts(res.items || []));
+
+    listDiscounts({
+      scope: "GLOBAL",
+      active: 1,
+      store_location_id: storeId,
+    }).then((res) => setGlobalDiscounts(res.items || []));
+  }, [selectedStoreId]);
 
   /* ===== Categories ===== */
   const { data: categories = [] } = useQuery({
@@ -249,10 +273,10 @@ export default function POSPage() {
   }, []);
 
   const handleUpdateDiscount = useCallback(
-    (id, { discount_type, discount_value }) => {
+    (id, payload) => {
       setCartItems((prev) =>
         prev.map((it) =>
-          it.id === id ? { ...it, discount_type, discount_value } : it
+          it.id === id ? { ...it, ...payload } : it
         )
       );
     },
@@ -303,12 +327,14 @@ export default function POSPage() {
     return cartItems.reduce((s, i) => {
       const price = Number(i.price || 0);
       const qty = Number(i.quantity || 0);
-      const type = i.discount_type || "rp";
+      const type = i.discount_type || "%";
       const val = Number(i.discount_value || 0);
+
       const discNominal = Math.min(
         price,
         type === "%" ? (price * val) / 100 : val
       );
+
       const netUnit = Math.max(0, price - discNominal);
       return s + netUnit * qty;
     }, 0);
@@ -405,6 +431,7 @@ export default function POSPage() {
       >
         <OrderDetails
           items={cartItems}
+          itemDiscounts={itemDiscounts}
           onUpdateQuantity={handleUpdateQuantity}
           onUpdateDiscount={handleUpdateDiscount}
           onRemoveItem={handleRemoveItem}
@@ -415,6 +442,7 @@ export default function POSPage() {
           subtotal={subtotalItems}
           tax={tax}
           total={total}
+          globalDiscounts={globalDiscounts}
           onSuccess={(res) => {
             setCartItems([]);
             toast.success(
@@ -459,6 +487,8 @@ export default function POSPage() {
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
         items={cartItems}
+        itemDiscounts={itemDiscounts}     // ✅ NEW
+        globalDiscounts={globalDiscounts}
         onUpdateQuantity={handleUpdateQuantity}
         onUpdateDiscount={handleUpdateDiscount}
         onRemoveItem={handleRemoveItem}
