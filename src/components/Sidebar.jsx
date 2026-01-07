@@ -20,6 +20,7 @@ import {
   MapPin,
   Scale,
   BadgePercent,
+  BadgeDollarSign,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -165,6 +166,7 @@ export default function Sidebar({
     { label: "User", path: "/master/user", icon: User },
     { label: "Category", path: "/master/category", icon: Folder },
     { label: "Sub-Category", path: "/master/sub-category", icon: GitBranch },
+    { label: "Additional Charge", path: "/master/additional-charge", icon: BadgeDollarSign },
     { label: "Discount", path: "/master/discount", icon: BadgePercent },
     { label: "Supplier", path: "/master/supplier", icon: Truck },
     { label: "Store Location", path: "/master/store-location", icon: MapPin },

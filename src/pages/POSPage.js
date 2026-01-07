@@ -15,6 +15,7 @@ import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
 import { listDiscounts } from "../api/discounts";
+import { listAdditionalCharges } from "../api/additionalCharges";
 
 const PER_PAGE = 60;
 const TAX_RATE = 0;
@@ -345,6 +346,35 @@ export default function POSPage() {
   );
   const total = subtotalItems + tax;
 
+  // ===== Additional Charges (PB1 / Service) =====
+  const [additionalCharges, setAdditionalCharges] = React.useState([]);
+
+  useEffect(() => {
+    if (!selectedStoreId) return;
+
+    const storeId =
+      selectedStoreId !== "ALL" ? Number(selectedStoreId) : undefined;
+
+    // ITEM DISCOUNT
+    listDiscounts({
+      scope: "ITEM",
+      active: 1,
+      store_location_id: storeId,
+    }).then((res) => setItemDiscounts(res.items || []));
+
+    // GLOBAL DISCOUNT
+    listDiscounts({
+      scope: "GLOBAL",
+      active: 1,
+      store_location_id: storeId,
+    }).then((res) => setGlobalDiscounts(res.items || []));
+
+    // 🔥 ADDITIONAL CHARGE (PB1 & SERVICE)
+    listAdditionalCharges().then((res) =>
+      setAdditionalCharges(res.data || [])
+    );
+  }, [selectedStoreId]);
+
   /* ===== Infinite scroll trigger ===== */
   useEffect(() => {
     function onScroll() {
@@ -441,6 +471,7 @@ export default function POSPage() {
           items={cartItems}
           subtotal={subtotalItems}
           tax={tax}
+          additionalCharges={additionalCharges}
           total={total}
           globalDiscounts={globalDiscounts}
           onSuccess={(res) => {
@@ -495,6 +526,7 @@ export default function POSPage() {
         subtotal={subtotalItems}
         tax={tax}
         total={total}
+        additionalCharges={additionalCharges}
         onClearCart={() => setCartItems([])}
       />
     </div>

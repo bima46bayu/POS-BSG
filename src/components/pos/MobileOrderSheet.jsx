@@ -10,27 +10,29 @@ import toast from "react-hot-toast";
  * Props:
  *  - open, onClose
  *  - items
- *  - itemDiscounts        // NEW
- *  - globalDiscounts      // NEW
+ *  - itemDiscounts
+ *  - globalDiscounts
+ *  - additionalCharges        // 🔥 BARU
  *  - onUpdateQuantity, onUpdateDiscount, onRemoveItem
- *  - subtotal, tax, total
+ *  - subtotal, tax, total     // ⛔ tetap diterima (compat)
  *  - onClearCart
  */
 export default function MobileOrderSheet({
   open,
   onClose,
   items = [],
-  itemDiscounts,        // ✅ TAMBAH
-  globalDiscounts,      // ✅ TAMBAH
+  itemDiscounts,
+  globalDiscounts,
+  additionalCharges = [],     // 🔥 TAMBAHAN
   onUpdateQuantity,
   onUpdateDiscount = () => {},
   onRemoveItem,
   subtotal,
-  tax,
-  total,
+  tax,        // ⛔ diterima tapi tidak dipakai
+  total,      // ⛔ diterima tapi tidak dipakai
   onClearCart,
 }) {
-  // Lock body scroll saat sheet terbuka saja
+  /* Lock body scroll saat sheet terbuka */
   useEffect(() => {
     const prev = document.body.style.overflow;
     if (open) document.body.style.overflow = "hidden";
@@ -39,7 +41,6 @@ export default function MobileOrderSheet({
     };
   }, [open]);
 
-  // Tetap mounted demi animasi close; pakai pointer-events untuk blok/izinkan klik
   return createPortal(
     <div
       className={`fixed inset-0 z-[100] md:hidden ${
@@ -58,36 +59,35 @@ export default function MobileOrderSheet({
       {/* SHEET */}
       <div
         className={`absolute inset-x-0 bottom-0
-                    max-h-[88vh] rounded-t-2xl bg-white shadow-2xl border-t border-gray-200
-                    transition-transform duration-300 ease-out
-                    ${open ? "translate-y-0" : "translate-y-full"}`}
+          max-h-[88vh] rounded-t-2xl bg-white shadow-2xl border-t border-gray-200
+          transition-transform duration-300 ease-out
+          ${open ? "translate-y-0" : "translate-y-full"}`}
         role="dialog"
         aria-modal="true"
         aria-label="Cart"
       >
-        {/* Header */}
+        {/* HEADER */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="inline-flex items-center gap-2 text-sm font-semibold">
             <ShoppingCart className="h-4 w-4" />
-            Cart{" "}
+            Cart
             <span className="text-gray-500 font-normal">
               ({items?.length || 0})
             </span>
           </div>
           <button
             onClick={onClose}
-            className="h-8 w-8 inline-flex items-center justify-center rounded-full hover:bg-gray-100 active:bg-gray-200"
-            aria-label="Close cart"
+            className="h-8 w-8 inline-flex items-center justify-center rounded-full hover:bg-gray-100"
           >
             <X className="h-5 w-5 text-gray-600" />
           </button>
         </div>
 
-        {/* Content */}
+        {/* CONTENT */}
         <div className="px-4 py-4 space-y-4 overflow-y-auto max-h-[70vh]">
           <OrderDetails
             items={items}
-            itemDiscounts={itemDiscounts}   // ✅ TERUSKAN
+            itemDiscounts={itemDiscounts}
             onUpdateQuantity={onUpdateQuantity}
             onUpdateDiscount={onUpdateDiscount}
             onRemoveItem={onRemoveItem}
@@ -96,9 +96,8 @@ export default function MobileOrderSheet({
           <SaleSubmitter
             items={items}
             subtotal={subtotal}
-            tax={tax}
-            total={total}
-            globalDiscounts={globalDiscounts} // ✅ TERUSKAN
+            globalDiscounts={globalDiscounts}
+            additionalCharges={additionalCharges} // 🔥 INI KUNCI
             onSuccess={(res) => {
               onClearCart?.();
               onClose?.();

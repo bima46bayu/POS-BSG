@@ -17,9 +17,9 @@ const METHODS = [
 ];
 
 export default function Payment({
-  subtotal,
-  tax,
-  globalDiscounts = [],   // ✅ DARI PARENT
+  subtotal,                // hanya untuk preview diskon
+  total,                   // 🔥 TOTAL FINAL dari SaleSubmitter
+  globalDiscounts = [],
   onPayment,
   onCancel,
   loading,
@@ -39,7 +39,7 @@ export default function Payment({
     [globalDiscounts, globalDiscountId]
   );
 
-  /* ===== PREVIEW DISCOUNT (FE ONLY) ===== */
+  /* ===== DISCOUNT PREVIEW (FE ONLY) ===== */
   const discountPreview = useMemo(() => {
     if (!selectedDiscount) return 0;
 
@@ -55,37 +55,35 @@ export default function Payment({
     return Math.max(0, Math.round(amount));
   }, [selectedDiscount, subtotal]);
 
-  const grandTotal = useMemo(() => {
-    return Math.max(
-      0,
-      Number(subtotal || 0) + Number(tax || 0) - discountPreview
-    );
-  }, [subtotal, tax, discountPreview]);
+  /* ===== FINAL TOTAL (SOURCE OF TRUTH) ===== */
+  const finalTotal = useMemo(
+    () => (typeof total === "number" ? total : 0),
+    [total]
+  );
 
-  /* ===== BROADCAST KE ORDER SUMMARY ===== */
+  /* ===== KIRIM DISCOUNT KE SaleSubmitter ===== */
   useEffect(() => {
     onSummaryChange?.({
       discountAmount: discountPreview,
-      total: grandTotal,
     });
-  }, [discountPreview, grandTotal, onSummaryChange]);
+  }, [discountPreview, onSummaryChange]);
 
-  /* ===== AUTO FILL PAID UNTUK NON-CASH ===== */
+  /* ===== AUTO FILL NON-CASH ===== */
   useEffect(() => {
-    if (method !== "cash") setPaid(String(grandTotal || 0));
-  }, [method, grandTotal]);
+    if (method !== "cash") setPaid(String(finalTotal || 0));
+  }, [method, finalTotal]);
 
   const change = useMemo(() => {
     if (method !== "cash") return 0;
-    return Math.max(0, Number(paid || 0) - grandTotal);
-  }, [paid, grandTotal, method]);
+    return Math.max(0, Number(paid || 0) - finalTotal);
+  }, [paid, finalTotal, method]);
 
   const canSubmit = useMemo(() => {
     if (loading) return false;
-    if (grandTotal <= 0) return false;
-    if (method === "cash") return Number(paid) >= grandTotal;
+    if (finalTotal <= 0) return false;
+    if (method === "cash") return Number(paid) >= finalTotal;
     return true;
-  }, [loading, method, paid, grandTotal]);
+  }, [loading, method, paid, finalTotal]);
 
   const submit = () => {
     onPayment?.({
@@ -94,8 +92,8 @@ export default function Payment({
       reference: reference?.trim() || null,
       customer_name: customer || null,
       note,
-      global_discount_id: globalDiscountId, // 🔑 backend source of truth
-      total_preview: grandTotal,            // FE preview only
+      global_discount_id: globalDiscountId,
+      total_preview: finalTotal, // FE preview
     });
   };
 
@@ -104,7 +102,7 @@ export default function Payment({
 
   return (
     <div className="mt-4 border-t pt-4">
-      {/* GLOBAL DISCOUNT */}
+      {/* ===== DISCOUNT ===== */}
       <label className="block text-sm font-medium text-gray-700 mb-1">
         Discount Transaction
       </label>
@@ -128,10 +126,7 @@ export default function Payment({
             </option>
           ))}
         </select>
-        <ChevronDown
-          className="pointer-events-none absolute right-3 top-1/2
-                     -translate-y-1/2 h-4 w-4 text-gray-400"
-        />
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
       </div>
 
       {selectedDiscount && (
@@ -141,16 +136,12 @@ export default function Payment({
         </div>
       )}
 
-      {/* CUSTOMER */}
+      {/* ===== CUSTOMER ===== */}
       <div className="mt-3">
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Customer Type (optional)
         </label>
         <div className="relative">
-          <ChevronDown
-            className="pointer-events-none absolute right-3 top-1/2
-                       -translate-y-1/2 h-4 w-4 text-gray-400"
-          />
           <select
             value={customer}
             onChange={(e) => setCustomer(e.target.value)}
@@ -166,19 +157,16 @@ export default function Payment({
             <option value="Marketplace">Marketplace</option>
             <option value="Other">Other</option>
           </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
         </div>
       </div>
 
-      {/* PAYMENT METHOD */}
+      {/* ===== PAYMENT METHOD ===== */}
       <div className="mt-3">
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Payment Method
         </label>
         <div className="relative">
-          <ChevronDown
-            className="pointer-events-none absolute right-3 top-1/2
-                       -translate-y-1/2 h-4 w-4 text-gray-400"
-          />
           <select
             value={method}
             onChange={(e) => setMethod(e.target.value)}
@@ -192,14 +180,16 @@ export default function Payment({
               </option>
             ))}
           </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
         </div>
+
         <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
           <CurrentIcon className="h-4 w-4" />
           <span>{METHODS.find((m) => m.value === method)?.label}</span>
         </div>
       </div>
 
-      {/* RECEIVED */}
+      {/* ===== RECEIVED ===== */}
       <div className="mt-3">
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Received (IDR)
@@ -214,6 +204,7 @@ export default function Payment({
                      focus:ring-2 focus:ring-blue-500"
           placeholder="Enter amount"
         />
+
         {method === "cash" && (
           <div className="flex items-center justify-between mt-1 text-sm">
             <span className="text-gray-500">Change</span>
@@ -222,14 +213,15 @@ export default function Payment({
             </span>
           </div>
         )}
-        {method === "cash" && paid && Number(paid) < grandTotal && (
+
+        {method === "cash" && paid && Number(paid) < finalTotal && (
           <div className="text-red-600 text-xs mt-1">
             Cash received is less than total.
           </div>
         )}
       </div>
 
-      {/* NOTE */}
+      {/* ===== NOTE ===== */}
       <div className="mt-3">
         <label className="block text-sm font-medium text-gray-700 mb-1">
           Note (optional)
@@ -245,7 +237,7 @@ export default function Payment({
         />
       </div>
 
-      {/* ACTIONS */}
+      {/* ===== ACTIONS ===== */}
       <div className="mt-4 flex gap-2">
         <button
           type="button"

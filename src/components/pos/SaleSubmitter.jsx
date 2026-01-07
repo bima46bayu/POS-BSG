@@ -1,14 +1,14 @@
+// src/components/pos/SaleSubmitter.jsx
 import React, { useMemo, useCallback, useState } from "react";
+import { createPortal } from "react-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import html2canvas from "html2canvas";
+import toast from "react-hot-toast";
+
 import { createSale } from "../../api/sales";
 import OrderSummary from "./OrderSummary";
 import Payment from "./Payment";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import ReceiptTicket from "../ReceiptTicket";
-import toast from "react-hot-toast";
-import { createPortal } from "react-dom";
-
-import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 
 /* =======================
    Print helper
@@ -65,36 +65,87 @@ async function printNodeById(id = "receipt-print-area") {
    ======================= */
 export default function SaleSubmitter({
   items = [],
-  subtotal,
-  tax,
-  globalDiscounts = [],      // ✅ TERIMA DARI PARENT (POSPage / Mobile)
+  globalDiscounts = [],
+  additionalCharges = [], // PB1 & SERVICE (preview only)
   onSuccess,
   onCancel,
   showSummary = true,
 }) {
-  const subtotalSafe = useMemo(
-    () =>
-      typeof subtotal === "number"
-        ? subtotal
-        : items.reduce(
-            (s, i) =>
-              s + Number(i.price || 0) * Number(i.quantity || 0),
-            0
-          ),
-    [items, subtotal]
-  );
+  /* =====================================================
+     NET ITEM SUBTOTAL (IKUT BACKEND)
+     - diskon item dihitung PER ITEM
+     - dibulatkan PER LINE
+     ===================================================== */
+  const netItemSubtotal = useMemo(() => {
+    return items.reduce((sum, i) => {
+      const price = Number(i.price || 0);
+      const qty = Number(i.quantity || 0);
+      if (qty <= 0) return sum;
 
-  const taxSafe = useMemo(() => (typeof tax === "number" ? tax : 0), [tax]);
+      const lineBase = price * qty;
 
+      const type = i.discount_type || "%";
+      const val = Number(i.discount_value || 0);
+
+      let disc = 0;
+      if (val > 0) {
+        if (type === "%") {
+          disc = lineBase * (val / 100);
+        } else {
+          disc = val;
+        }
+      }
+
+      disc = Math.min(disc, lineBase);
+
+      // 🔥 ROUND PER LINE (SAMA DENGAN BACKEND)
+      const netLine = Math.round((lineBase - disc) * 100) / 100;
+
+      return sum + netLine;
+    }, 0);
+  }, [items]);
+
+  /* =======================
+     GLOBAL DISCOUNT (TRANSACTION)
+     ======================= */
   const [discountAmount, setDiscountAmount] = useState(0);
-  const [grandTotal, setGrandTotal] = useState(subtotalSafe + taxSafe);
 
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [pendingPayment, setPendingPayment] = useState(null);
-  const [receiptOpen, setReceiptOpen] = useState(false);
-  const [reprintAskOpen, setReprintAskOpen] = useState(false);
-  const [saleId, setSaleId] = useState(null);
+  /* =====================================================
+     GRAND TOTAL ALA BACKEND
+     grandTotal = netItemSubtotal - globalDiscount
+     ===================================================== */
+  const grandTotalBEStyle = useMemo(() => {
+    return Math.max(0, netItemSubtotal - discountAmount);
+  }, [netItemSubtotal, discountAmount]);
 
+  /* =======================
+     ADDITIONAL CHARGES (PB1 / SERVICE)
+     BASE = grandTotalBEStyle
+     ======================= */
+  const additionalTotal = useMemo(() => {
+    return additionalCharges
+      .filter((c) => c.is_active)
+      .reduce((sum, c) => {
+        const amount =
+          c.calc_type === "PERCENT"
+            ? (grandTotalBEStyle * Number(c.value || 0)) / 100
+            : Number(c.value || 0);
+
+        // backend round 2 decimal
+        return sum + Math.round(amount * 100) / 100;
+      }, 0);
+  }, [additionalCharges, grandTotalBEStyle]);
+
+  /* =======================
+     TOTAL PREVIEW (SAMA BE)
+     ======================= */
+  const previewTotal = useMemo(() => {
+    return Math.max(0, grandTotalBEStyle + additionalTotal);
+  }, [grandTotalBEStyle, additionalTotal]);
+
+  /* =======================
+     MUTATION
+     ======================= */
   const queryClient = useQueryClient();
 
   const saleMutation = useMutation({
@@ -103,7 +154,7 @@ export default function SaleSubmitter({
       queryClient.invalidateQueries({ queryKey: ["products"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["sales"], exact: false });
 
-      const createdId = res?.id ?? res?.sale_id ?? res?.data?.id ?? null;
+      const createdId = res?.id ?? res?.data?.id ?? null;
       setSaleId(createdId);
 
       setReceiptOpen(true);
@@ -112,18 +163,22 @@ export default function SaleSubmitter({
       onSuccess?.(res);
     },
     onError: (err) => {
-      const msg =
+      toast.error(
         err?.response?.data?.message ||
-        err?.response?.data?.error ||
-        err?.message ||
-        "Gagal membuat transaksi";
-      toast.error(msg);
+          err?.message ||
+          "Gagal membuat transaksi"
+      );
     },
   });
 
   /* =======================
-     Dari Payment
+     PAYMENT FLOW
      ======================= */
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingPayment, setPendingPayment] = useState(null);
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [saleId, setSaleId] = useState(null);
+
   const handlePayment = useCallback(
     (payloadFromPayment) => {
       if (!items.length) {
@@ -140,46 +195,23 @@ export default function SaleSubmitter({
      CONFIRM & SUBMIT
      ======================= */
   const confirmAndSubmit = () => {
+    if (!pendingPayment) return;
     const p = pendingPayment;
-    if (!p) return;
 
-    if (p.payment_method === "cash" && Number(p.paid_amount) < grandTotal) {
-      return toast.error("Cash received is less than total.");
-    }
+    // FE TIDAK VALIDASI TOTAL
+    // FE TIDAK KIRIM TOTAL
+    // BACKEND = SOURCE OF TRUTH
 
     const payload = {
       customer_name: p.customer_name || null,
       note: p.note || null,
 
-      items: items.map((i) => {
-        const price = Number(i.price || 0);
-        const qty = Number(i.quantity || 0);
-
-        const type = i.discount_type || "%";
-        const val = Number(i.discount_value || 0);
-
-        const discPerUnit =
-          type === "%"
-            ? (price * val) / 100
-            : val;
-
-        const safeDisc = Math.min(price, discPerUnit);
-        const netUnit = Math.max(0, price - safeDisc);
-
-        return {
-          product_id: i.product_id ?? i.id,
-          qty: qty,          
-          unit_price: price,      // 🔥 INI YANG DIMINTA BACKEND
-
-          // opsional tapi sangat dianjurkan
-          discount_type: type,
-          discount_value: val,
-          subtotal: netUnit * qty,
-
-          // kalau backend pakai discount_id
-          discount_id: i.item_discount_id ?? null,
-        };
-      }),
+      items: items.map((i) => ({
+        product_id: i.product_id ?? i.id,
+        qty: Number(i.quantity || 0),
+        unit_price: Number(i.price || 0),
+        discount_id: i.item_discount_id ?? null,
+      })),
 
       global_discount_id: p.global_discount_id ?? null,
 
@@ -193,45 +225,42 @@ export default function SaleSubmitter({
           reference: p.reference || null,
         },
       ],
-
-      payment_method:
-        p.payment_method?.toLowerCase() === "qris"
-          ? "QRIS"
-          : p.payment_method,
-      paid: Number(p.paid_amount || 0),
-      status: "completed",
     };
 
     saleMutation.mutate(payload);
   };
 
+  /* =======================
+     PRINT
+     ======================= */
   const handlePrint = () => {
     printNodeById("receipt-print-area");
-    setReprintAskOpen(true);
   };
 
+  /* =======================
+     RENDER
+     ======================= */
   return (
     <div>
       {showSummary && (
         <OrderSummary
           items={items}
-          subtotal={subtotalSafe}
-          tax={taxSafe}
+          subtotal={netItemSubtotal}
           discount={discountAmount}
-          total={grandTotal}
+          additionalCharges={additionalCharges}
+          total={previewTotal}
         />
       )}
 
       <Payment
-        subtotal={subtotalSafe}
-        tax={taxSafe}
-        globalDiscounts={globalDiscounts}   // ✅ TERUSKAN KE PAYMENT
+        subtotal={netItemSubtotal}
+        total={previewTotal}
+        globalDiscounts={globalDiscounts}
         onPayment={handlePayment}
         onCancel={onCancel}
         loading={saleMutation.isLoading}
-        onSummaryChange={({ discountAmount, total }) => {
+        onSummaryChange={({ discountAmount }) => {
           setDiscountAmount(discountAmount);
-          setGrandTotal(total);
         }}
       />
 
@@ -243,9 +272,14 @@ export default function SaleSubmitter({
               Konfirmasi Pembayaran
             </h3>
             <p className="text-sm text-gray-600 mb-4">
-              Selesaikan transaksi sebesar{" "}
-              <b>Rp{grandTotal.toLocaleString("id-ID")}</b> dengan metode{" "}
-              <b>{pendingPayment.payment_method}</b>?
+              Metode <b>{pendingPayment.payment_method}</b> dengan nominal{" "}
+              <b>
+                Rp
+                {Number(pendingPayment.paid_amount || 0).toLocaleString(
+                  "id-ID"
+                )}
+              </b>
+              ?
             </p>
             <div className="flex gap-2">
               <button
@@ -259,7 +293,7 @@ export default function SaleSubmitter({
                 onClick={confirmAndSubmit}
                 disabled={saleMutation.isLoading}
               >
-                {saleMutation.isLoading ? "Memproses..." : "Ya, Bayar"}
+                {saleMutation.isLoading ? "Memproses..." : "Bayar"}
               </button>
             </div>
           </div>
@@ -302,31 +336,20 @@ export default function SaleSubmitter({
 /* =======================
    Modal
    ======================= */
-function Modal({ children, onClose, z = 2147483000, showOverlay = true }) {
-  React.useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
-
-  const node = (
+function Modal({ children, onClose, z = 2147483000 }) {
+  return createPortal(
     <div
       style={{ position: "fixed", inset: 0, zIndex: z }}
       className="flex items-center justify-center py-6"
     >
-      {showOverlay && (
-        <div
-          onClick={onClose}
-          className="absolute inset-0 bg-black/40"
-        />
-      )}
+      <div
+        onClick={onClose}
+        className="absolute inset-0 bg-black/40"
+      />
       <div className="relative bg-white rounded-2xl shadow-xl w-[min(560px,92vw)] max-h-[85vh] overflow-auto">
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
-
-  return createPortal(node, document.body);
 }

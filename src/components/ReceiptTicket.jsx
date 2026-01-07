@@ -106,6 +106,10 @@ export default function ReceiptTicket({
   const paid = toNumber(sale?.paid);
   const change = toNumber(sale?.change);
   const payments = Array.isArray(sale?.payments) ? sale.payments : [];
+  // Perubahan: Ambil dari additional_charges_snapshot sesuai response API
+  const additionalCharges = Array.isArray(sale?.additional_charges_snapshot)
+    ? sale.additional_charges_snapshot
+    : [];
 
   let itemsGross = 0,
     itemDiscountTotal = 0,
@@ -275,10 +279,23 @@ export default function ReceiptTicket({
           value={`-${fmtIDR(itemDiscountTotal)}`}
           red
         />
-        {svc ? (
-          <Row label="Service Charge" value={fmtIDR(svc)} />
-        ) : null}
-        <Row label="Pajak" value={fmtIDR(tax)} />
+        {additionalCharges.map((c) => {
+          if (!c || Number(c.amount) <= 0) return null;
+
+          return (
+            <Row
+              key={c.id ?? c.type}
+              label={
+                c.type === "PB1"
+                  ? "PB1"
+                  : c.type === "SERVICE"
+                  ? "Service Charge"
+                  : c.type
+              }
+              value={fmtIDR(c.amount)}
+            />
+          );
+        })}
         <Row
           label="Diskon Transaksi"
           value={`-${fmtIDR(headerDisc)}`}

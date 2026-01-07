@@ -4,12 +4,12 @@ const money = (n) => `Rp${Number(n || 0).toLocaleString("id-ID")}`;
 
 export default function OrderSummary({
   items = [],
-  discount = 0,     // preview discount dari Payment (GLOBAL)
-  tax = 0,          // Rp
-  subtotal,         // optional override
-  total,            // optional override
+  discount = 0, // transaction discount ONLY
+  additionalCharges = [], // PB1 & SERVICE
+  subtotal, // 🔥 SUDAH NET ITEM DISCOUNT
+  total,
 }) {
-  // Subtotal kotor (tanpa diskon apapun)
+  /* ================= GROSS ITEM (DISPLAY ONLY) ================= */
   const itemsGross = useMemo(() => {
     return items.reduce(
       (sum, it) =>
@@ -18,7 +18,7 @@ export default function OrderSummary({
     );
   }, [items]);
 
-  // Total diskon dari ITEM (akumulasi per baris)
+  /* ================= ITEM DISCOUNT (DISPLAY ONLY) ================= */
   const itemDiscountTotal = useMemo(() => {
     return items.reduce((sum, it) => {
       const price = Number(it.price || 0);
@@ -28,28 +28,59 @@ export default function OrderSummary({
 
       if (!val || qty <= 0) return sum;
 
-      const perUnitDiscount =
+      const perUnit =
         type === "%"
           ? (price * val) / 100
           : val;
 
-      const safeDiscount = Math.min(price, perUnitDiscount);
-
-      return sum + safeDiscount * qty;
+      return sum + Math.min(price, perUnit) * qty;
     }, 0);
   }, [items]);
 
-  const shownSubtotal =
-    typeof subtotal === "number" ? subtotal : itemsGross;
-
-  const shownTotal = useMemo(() => {
-    if (typeof total === "number") return total;
+  /* ================= BASE FOR CHARGE (🔥 FIXED) ================= */
+  const chargeBase = useMemo(() => {
+    // ❗ subtotal sudah NET item discount
     return Math.max(
       0,
-      shownSubtotal - itemDiscountTotal - Number(discount || 0) + Number(tax || 0)
+      Number(subtotal || 0) - Number(discount || 0)
     );
-  }, [shownSubtotal, discount, tax, total]);
+  }, [subtotal, discount]);
 
+  /* ================= ADDITIONAL CHARGES ================= */
+  const computedCharges = useMemo(() => {
+    return additionalCharges
+      .filter((c) => c.is_active)
+      .map((c) => {
+        const amount =
+          c.calc_type === "PERCENT"
+            ? (chargeBase * Number(c.value || 0)) / 100
+            : Number(c.value || 0);
+
+        return {
+          ...c,
+          amount: Math.max(0, amount),
+        };
+      });
+  }, [additionalCharges, chargeBase]);
+
+  const totalAdditionalCharge = useMemo(() => {
+    return computedCharges.reduce(
+      (sum, c) => sum + Number(c.amount || 0),
+      0
+    );
+  }, [computedCharges]);
+
+  /* ================= GRAND TOTAL ================= */
+  const shownTotal = useMemo(() => {
+    if (typeof total === "number") return total;
+
+    return Math.max(
+      0,
+      chargeBase + totalAdditionalCharge
+    );
+  }, [total, chargeBase, totalAdditionalCharge]);
+
+  /* ================= RENDER ================= */
   return (
     <div className="mt-4">
       <h3 className="text-lg font-semibold text-gray-900 mb-3">
@@ -70,7 +101,20 @@ export default function OrderSummary({
         red
       />
 
-      <div className="flex items-center justify-between mt-3">
+      {computedCharges.map((c) => (
+        <Row
+          key={c.type}
+          label={c.type === "PB1" ? "PB1" : "Service Charge"}
+          value={c.amount}
+          note={
+            c.calc_type === "PERCENT"
+              ? `${c.value}%`
+              : "Fixed"
+          }
+        />
+      ))}
+
+      <div className="border-t mt-3 pt-3 flex items-center justify-between">
         <span className="text-gray-600">Total</span>
         <span className="text-2xl font-bold text-blue-600">
           {money(shownTotal)}

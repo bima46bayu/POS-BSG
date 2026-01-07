@@ -1,4 +1,3 @@
-// App.js
 import React, { useMemo, useState, useEffect } from "react";
 import "./App.css";
 import { Toaster } from "react-hot-toast";
@@ -18,13 +17,16 @@ import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import StockReconciliationPage from "./pages/StockReconciliationPage";
 
+/* ===== MASTER PAGES ===== */
 import MasterUserPage from "./pages/master/MasterUserPage";
 import MasterCategoryPage from "./pages/master/MasterCategoryPage";
 import MasterSubCategoryPage from "./pages/master/MasterSubCategoryPage";
 import MasterSupplierPage from "./pages/master/MasterSupplierPage";
 import MasterStoreLocationPage from "./pages/master/MasterStoreLocationPage";
 import MasterDiscountPage from "./pages/master/MasterDiscountPage";
+import AdditionalChargePage from "./pages/master/AdditionalChargePage";
 
+/* ===== AUTH / API ===== */
 import { isLoggedIn, logoutRequest } from "./api/auth";
 import {
   STORAGE_KEY,
@@ -42,13 +44,13 @@ import {
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
+/* ===== REACT QUERY ===== */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: (failureCount, err) => {
         if (err?.name === "CanceledError") return false;
-        const status = err?.response?.status;
-        if (status === 401) return false;
+        if (err?.response?.status === 401) return false;
         return failureCount < 2;
       },
       refetchOnWindowFocus: false,
@@ -56,10 +58,18 @@ const queryClient = new QueryClient({
   },
 });
 
-// Purchase & GR tetap ada di allowedPages (buat kontrol akses),
-// tapi di Sidebar tampil sebagai submenu, bukan icon utama.
+/* ===== ROLE & PAGE CONFIG ===== */
 const DEFAULT_ALLOWED = {
-  admin: ["home", "pos", "products", "inventory", "purchase", "gr", "history", "master"],
+  admin: [
+    "home",
+    "pos",
+    "products",
+    "inventory",
+    "purchase",
+    "gr",
+    "history",
+    "master",
+  ],
   kasir: ["home", "pos", "history"],
 };
 
@@ -69,12 +79,14 @@ const PAGE_PATH = {
   products: "/products",
   inventory: "/inventory/products",
   purchase: "/purchase",
-  history: "/history",
   gr: "/gr",
-  // samakan dengan route yang ada (singular)
+  history: "/history",
+
+  // 🔥 MASTER ROOT
   master: "/master/user",
 };
 
+/* ===== HELPERS ===== */
 function getRoleFromStorage() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -94,6 +106,7 @@ function ProtectedRoute({ children, pageKey, allowedPages }) {
   return children;
 }
 
+/* ===== APP SHELL ===== */
 function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -106,6 +119,7 @@ function AppShell() {
     [role]
   );
 
+  /* sync auth antar tab */
   useEffect(() => {
     const onStorage = () => {
       setLoggedIn(isLoggedIn());
@@ -115,6 +129,7 @@ function AppShell() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  /* unauthorized handler */
   useEffect(() => {
     if (!loggedIn) return;
     const off1 = installUnauthorizedRedirect({
@@ -133,7 +148,7 @@ function AppShell() {
     };
   }, [loggedIn, navigate]);
 
-  // redirect /master → /master/user (sesuai routes di bawah)
+  /* redirect /master → default master page */
   useEffect(() => {
     if (!loggedIn) return;
     if (location.pathname === "/master") {
@@ -141,6 +156,7 @@ function AppShell() {
     }
   }, [loggedIn, location.pathname, navigate]);
 
+  /* ===== LOGIN ===== */
   if (!loggedIn) {
     return (
       <LoginPages
@@ -152,9 +168,9 @@ function AppShell() {
           const r = getRoleFromStorage();
           setRole(r);
 
-          const first = (DEFAULT_ALLOWED[r] || DEFAULT_ALLOWED.kasir)[0] || "pos";
-          const target = PAGE_PATH[first] || "/pos";
-          navigate(target, { replace: true });
+          const first =
+            (DEFAULT_ALLOWED[r] || DEFAULT_ALLOWED.kasir)[0] || "pos";
+          navigate(PAGE_PATH[first] || "/pos", { replace: true });
         }}
       />
     );
@@ -165,26 +181,15 @@ function AppShell() {
     navigate(PAGE_PATH[pageKey] || "/pos");
   };
 
-  // active icon di sidebar:
-  // - inventory & reconciliation → inventory
-  // - master → master
-  // - purchase & gr sekarang di submenu (tidak ada icon utama) → balikin null
   const getActivePageKey = () => {
     const p = location.pathname;
-
     if (p.startsWith("/inventory")) return "inventory";
-    if (p.startsWith("/reconciliation")) return "inventory";
     if (p.startsWith("/master")) return "master";
+    if (p === PAGE_PATH.purchase || p === PAGE_PATH.gr) return null;
 
-    // Purchase & GR pakai highlight di dalam submenu (Sidebar hitung sendiri dari pathname)
-    if (p === PAGE_PATH.purchase || p === PAGE_PATH.gr) {
-      return null;
+    for (const [k, v] of Object.entries(PAGE_PATH)) {
+      if (p === v) return k;
     }
-
-    for (const [key, path] of Object.entries(PAGE_PATH)) {
-      if (p === path) return key;
-    }
-    if (p === "/unauthorized") return null;
     return null;
   };
 
@@ -206,9 +211,9 @@ function AppShell() {
 
       <div className="flex-1 md:ml-24">
         <Routes>
-          {/* Root → POS */}
           <Route path="/" element={<Navigate to={PAGE_PATH.pos} replace />} />
 
+          {/* ===== CORE ===== */}
           <Route
             path={PAGE_PATH.home}
             element={
@@ -236,7 +241,7 @@ function AppShell() {
             }
           />
 
-          {/* INVENTORY */}
+          {/* ===== INVENTORY ===== */}
           <Route
             path="/inventory/products"
             element={
@@ -254,7 +259,7 @@ function AppShell() {
             }
           />
 
-          {/* PURCHASE & GR (submenu di sidebar, tapi route tetap sama) */}
+          {/* ===== PURCHASE & GR ===== */}
           <Route
             path={PAGE_PATH.purchase}
             element={
@@ -263,7 +268,6 @@ function AppShell() {
               </ProtectedRoute>
             }
           />
-
           <Route
             path={PAGE_PATH.gr}
             element={
@@ -282,7 +286,7 @@ function AppShell() {
             }
           />
 
-          {/* ===== MASTER (admin only) ===== */}
+          {/* ===== MASTER (ADMIN ONLY) ===== */}
           <Route
             path="/master/user"
             element={
@@ -316,6 +320,14 @@ function AppShell() {
             }
           />
           <Route
+            path="/master/additional-charge"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <AdditionalChargePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/master/supplier"
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
@@ -332,9 +344,9 @@ function AppShell() {
             }
           />
 
-          {/* ===== RECONCILIATION (pakai privilege inventory) ===== */}
+          {/* ===== RECONCILIATION ===== */}
           <Route
-            path="inventory/reconciliation"
+            path="/inventory/reconciliation"
             element={
               <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
                 <StockReconciliationPage />
@@ -342,7 +354,7 @@ function AppShell() {
             }
           />
           <Route
-            path="inventory/reconciliation/:id"
+            path="/inventory/reconciliation/:id"
             element={
               <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
                 <StockReconciliationPage />
@@ -350,7 +362,6 @@ function AppShell() {
             }
           />
 
-          {/* 401 & 404 */}
           <Route path="/unauthorized" element={<UnauthorizedPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
