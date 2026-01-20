@@ -9,7 +9,10 @@ import {
 import {
   DollarSign, Receipt, ShoppingCart, Percent,
   Table as TableIcon, Tag, ChevronDown as ChevronDownIcon, ArrowUpDown,
+  FileText,
 } from "lucide-react";
+
+import { useNavigate } from "react-router-dom";
 
 import KpiCard from "../components/dashboard/KpiCard";
 import SimpleTable from "../components/dashboard/SimpleTable";
@@ -122,6 +125,7 @@ export default function HomePage() {
   const [productSortOrder, setProductSortOrder] = React.useState("desc");
   const [discountProductSortOrder, setDiscountProductSortOrder] = React.useState("desc");
   const [matrixOpen, setMatrixOpen] = React.useState(false);
+  const navigate = useNavigate();
 
   // === User (pakai /api/users/me) ===
   const meQ = useQuery({
@@ -381,6 +385,7 @@ export default function HomePage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Tombol Matriks Harian */}
             <button
               onClick={() => setMatrixOpen(true)}
               className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 text-slate-800 rounded-lg hover:bg-slate-50"
@@ -389,6 +394,17 @@ export default function HomePage() {
               <TableIcon className="w-4 h-4" />
               <span className="text-sm font-medium">Matriks Harian</span>
             </button>
+
+            {/* Tombol Payment Request */}
+            <button
+              onClick={() => navigate("/payment-requests")}
+              className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              title="Payment Request"
+            >
+              <FileText className="w-4 h-4" />
+              <span className="text-sm font-medium">Payment Request</span>
+            </button>
+
             {(salesQ.isFetching || allSummariesQ.isFetching) && (
               <div className="text-sm text-slate-600 flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
@@ -427,7 +443,7 @@ export default function HomePage() {
 
         {/* KPIs */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-5">
-          <KpiCard title="Total Revenue" value={IDR(aggRange.revenue)} delta={pctDelta(aggRange.revenue, aggPrev.revenue)} icon={DollarSign} trend="vs periode sebelumnya" />
+          <KpiCard title="Total Revenue" value={IDR(aggRange.revenue)} delta={pctDelta(aggRange.revenue, aggPrev.revenue)} icon={DollarSign} trend="include service charge dan tax" />
           <KpiCard title="Total Transaksi" value={aggRange.tx.toLocaleString("id-ID")} delta={pctDelta(aggRange.tx, aggPrev.tx)} icon={Receipt} trend="vs periode sebelumnya" />
           <KpiCard title="Average Order Value" value={IDR(aggRange.aov)} delta={pctDelta(aggRange.aov, aggPrev.aov)} icon={ShoppingCart} trend="rata-rata per transaksi" />
           <KpiCard title="Total Diskon" value={IDR(aggRange.discounts)} delta={pctDelta(aggRange.discounts, aggPrev.discounts)} icon={Percent} trend={`${(aggRange.discountRate * 100).toFixed(1)}% transaksi pakai diskon`} />

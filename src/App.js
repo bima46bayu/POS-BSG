@@ -17,6 +17,13 @@ import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import StockReconciliationPage from "./pages/StockReconciliationPage";
 
+// Payment Request
+import PaymentRequestPage from "./pages/payment-request/PaymentRequestPage";
+import PaymentRequestDetailPage from "./pages/payment-request/PaymentRequestDetailPage";
+import PaymentRequestBankAccountPage from "./pages/payment-request/PaymentRequestBankAccountPage";
+import PaymentRequestCoaPage from "./pages/payment-request/PaymentRequestCoaPage";
+import PaymentRequestPayeePage from "./pages/payment-request/PaymentRequestPayeePage";
+
 /* ===== MASTER PAGES ===== */
 import MasterUserPage from "./pages/master/MasterUserPage";
 import MasterCategoryPage from "./pages/master/MasterCategoryPage";
@@ -212,6 +219,54 @@ function AppShell() {
       <div className="flex-1 md:ml-24">
         <Routes>
           <Route path="/" element={<Navigate to={PAGE_PATH.pos} replace />} />
+
+          {/* ===== PAYMENT REQUEST ===== */}
+          <Route
+            path="/payment-requests"
+            element={
+              <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
+                <PaymentRequestPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/payment-requests/detail/:id"
+            element={
+              <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
+                <PaymentRequestDetailPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ===== MASTER PAYMENT REQUEST (ADMIN ONLY) ===== */}
+
+          <Route
+            path="/payment-requests/bank-accounts"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <PaymentRequestBankAccountPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/payment-requests/coas"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <PaymentRequestCoaPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/payment-requests/payees"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <PaymentRequestPayeePage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* ===== CORE ===== */}
           <Route

@@ -451,7 +451,7 @@ export default function HistoryByTransaction() {
     { key: "created_at", header: "Tanggal", cell: (row) => <DateCell row={row} /> },
     { key: "customer_name", header: "Customer", cell: (row) => <TextCell title={row.customer_name || "General"}>{row.customer_name || "General"}</TextCell> },
     { key: "status", header: "Status", className: "hidden sm:table-cell", cell: (row) => <StatusBadge status={row.status} /> },
-    { key: "subtotal", header: "Sub Total", align: "right", className: "hidden sm:table-cell", cell: (row) => <TextCell title={String(formatIDR(row.subtotal))}>{formatIDR(row.subtotal)}</TextCell> },
+    { key: "subtotal", header: "Sub Total", align: "right", className: "hidden sm:table-cell", cell: (row) => <TextCell title={String(formatIDR(row.final_total))}>{formatIDR(row.final_total)}</TextCell> },
     {
       key: "paid",
       header: "Pay",
@@ -510,7 +510,7 @@ export default function HistoryByTransaction() {
           formatDateTime(r.created_at),
           r.customer_name || "General",
           r.status === "void" ? "Void" : "Completed",
-          formatIDR(r.subtotal),
+          formatIDR(r.final_total),
           formatIDR(pay),
           formatIDR(r.change),
           methods,
