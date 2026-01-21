@@ -1,6 +1,6 @@
 import { api } from "./client";
 
-export function openPaymentRequestPdf(prId) {
-  const url = `${api.defaults.baseURL}/api/payment-requests/${prId}/pdf`;
-  window.open(url, "_blank");
+export async function getPaymentRequestPdfLink(id) {
+  const res = await api.get(`/api/payment-requests/${id}/pdf-link`);
+  return res.data.pdf_url;
 }

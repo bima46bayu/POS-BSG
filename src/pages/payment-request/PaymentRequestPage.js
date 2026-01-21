@@ -229,14 +229,25 @@ export default function PaymentRequestPage() {
     () => [
       {
         key: "id",
-        header: "ID",
+        header: "Payment Id",
         width: "80px",
-        cell: (r) => <b>{r.id}</b>,
+        cell: (r) => <b>{String(r.id).padStart(4, "0")}</b>,
+      },
+      {
+        key: "created_at",
+        header: "Tanggal Dibuat",
+        width: "180px",
+        cell: (r) => (
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-gray-400" />
+            {fmtDateTime(r.created_at)}
+          </div>
+        ),
       },
       {
         key: "bank",
         header: "Bank & Rekening",
-        width: "220px",
+        width: "180px",
         cell: (r) =>
           r.bank_account
             ? `${r.bank_account.bank_name} - ${r.bank_account.account_number}`
@@ -244,20 +255,20 @@ export default function PaymentRequestPage() {
       },
       {
         key: "account_type",
-        header: "Account Type",
-        width: "140px",
+        header: "Tipe Akun",
+        width: "100px",
         cell: (r) => r.bank_account?.account_type || "-",
       },
       {
         key: "currency",
         header: "Curr",
-        width: "80px",
+        width: "10px",
         cell: (r) => r.currency,
       },
       {
         key: "total_bill",
         header: "Jumlah Tagihan",
-        width: "150px",
+        width: "130px",
         align: "right",
         cell: (r) => {
           const t = calcTotalsFromItems(r.items);
@@ -277,23 +288,12 @@ export default function PaymentRequestPage() {
       {
         key: "total_transfer",
         header: "Jumlah Transfer",
-        width: "150px",
+        width: "130px",
         align: "right",
         cell: (r) => {
           const t = calcTotalsFromItems(r.items);
           return fmtIDR(r.total_transfer ?? t.transfer);
         },
-      },
-      {
-        key: "created_at",
-        header: "Created",
-        width: "180px",
-        cell: (r) => (
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-gray-400" />
-            {fmtDateTime(r.created_at)}
-          </div>
-        ),
       },
     ],
     []

@@ -26,6 +26,7 @@ import {
 import { fetchPaymentRequestCoas } from "../../api/paymentRequestCoa";
 import { fetchPayees } from "../../api/payees";
 import { fetchBankAccounts } from "../../api/bankAccounts";
+import { getPaymentRequestPdfLink } from "../../api/paymentRequestPdf";
 
 const fmtIDR = (v) => Number(v || 0).toLocaleString("id-ID");
 
@@ -93,10 +94,17 @@ export default function PaymentRequestDetailPage() {
   const refresh = () => qc.invalidateQueries(["payment-request", id]);
 
   /* ===== PDF FIX ===== */
-  const handleDownloadPdf = () => {
-    toast.loading("Menyiapkan PDF...");
-    window.open(`http://localhost:8000/api/payment-requests/${id}/pdf`, "_blank");
-    setTimeout(() => toast.dismiss(), 1200);
+  const handleDownloadPdf = async () => {
+    const toastId = toast.loading("Menyiapkan PDF...");
+
+    try {
+      const url = await getPaymentRequestPdfLink(id);
+      window.open(url, "_blank");
+      toast.success("PDF siap dibuka", { id: toastId });
+    } catch (err) {
+      console.error(err);
+      toast.error("Gagal membuat PDF", { id: toastId });
+    }
   };
 
   /* ===== Mutations ===== */
@@ -199,12 +207,23 @@ export default function PaymentRequestDetailPage() {
           <Info label="Store" value={pr.store_location?.name} />
           <Info
             label="Bank"
-            value={`${pr.bank_account?.bank_name || ""} - ${
+            value={`${pr.bank_account?.bank_name || ""}, ${
               pr.bank_account?.account_number || ""
             }`}
           />
           <Info label="Currency" value={pr.currency} />
-          <Info label="Tanggal" value={pr.created_at?.slice(0, 10)} />
+          <Info
+            label="Tanggal"
+            value={
+              pr.created_at
+                ? new Date(pr.created_at).toLocaleDateString("id-ID", {
+                    day: "2-digit",
+                    month: "long",
+                    year: "numeric",
+                  })
+                : "-"
+            }
+          />
         </div>
       </div>
 
@@ -217,7 +236,7 @@ export default function PaymentRequestDetailPage() {
         />
       </Card>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <Card className="col-span-1">
           <SectionBalances
             balances={pr.balances}
@@ -227,7 +246,7 @@ export default function PaymentRequestDetailPage() {
           />
         </Card>
 
-        <Card className="col-span-2 flex justify-end items-end">
+        <Card className="col-span-1 flex justify-end items-end">
           <div className="w-96 text-sm space-y-2">
             <Row label="Total Tagihan" value={totals.amount} />
             <Row label="Total Potongan" value={totals.deduction} />
@@ -366,7 +385,7 @@ function SectionItems({ items, onAdd, onEdit, onDelete }) {
                   {i.remark ||
                     [i.payee?.bank_name, i.payee?.account_number, i.payee?.account_name]
                       .filter(Boolean)
-                      .join(" / ")}
+                      .join(", ")}
                 </td>
                 <td className="border px-2 py-1">
                   <div className="flex gap-2">
@@ -412,7 +431,7 @@ function SectionBalances({ balances, onAdd, onEdit, onDelete }) {
           {balances.map((b) => (
             <tr key={b.id}>
               <td className="border px-2 py-1">
-                {b.bank_account?.bank_name} - {b.bank_account?.account_number}
+                {b.bank_account?.bank_name} {b.bank_account?.account_type}, {b.bank_account?.account_number}
               </td>
               <td className="border px-2 py-1 text-right">{fmtIDR(b.saldo)}</td>
               <td className="border px-2 py-1">
