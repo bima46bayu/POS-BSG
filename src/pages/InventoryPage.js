@@ -17,7 +17,7 @@ import {
 import toast from "react-hot-toast";
 import DataTable from "../components/data-table/DataTable";
 import { getProducts } from "../api/products";
-import { getCategories, getSubCategories } from "../api/categories";
+import { getCategories, getSubCategories, listSubCategories } from "../api/categories";
 import { listStoreLocations } from "../api/storeLocations";
 import { getMe } from "../api/users";
 import { useNavigate } from "react-router-dom";
@@ -169,20 +169,14 @@ export default function InventoryProductsPage() {
       try {
         const [catRes, subRes] = await Promise.all([
           getCategories(),
-          getSubCategories(undefined),
+          listSubCategories({ per_page: 1000 }),
         ]);
         if (cancel) return;
         const cats = toArray(catRes);
-        const subsRaw = toArray(subRes);
-        const subs = subsRaw.map((s) => ({
+        const subs = (subRes?.items || []).map((s) => ({
           id: s.id,
           name: s.name,
-          category_id:
-            s.category_id ??
-            s.categoryId ??
-            s.parent_id ??
-            s.parentId ??
-            null,
+          category_id: s.category_id,
         }));
         setCategories(cats);
         setSubCategories(subs);
@@ -232,7 +226,7 @@ export default function InventoryProductsPage() {
       sort: sortKey || undefined,
       dir: sortKey ? sortDir : undefined,
       ...(storeFilterParam
-        ? { store_id: storeFilterParam, only_store: 1 }
+        ? { store_location_id: storeFilterParam, only_store: 1 }
         : {}),
     };
 
@@ -245,7 +239,7 @@ export default function InventoryProductsPage() {
       sort: sortKey || undefined,
       dir: sortKey ? sortDir : undefined,
       ...(storeFilterParam
-        ? { store_id: storeFilterParam, only_store: 1 }
+        ? { store_location_id: storeFilterParam, only_store: 1 }
         : {}),
     };
 

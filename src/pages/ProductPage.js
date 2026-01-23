@@ -29,7 +29,7 @@ import {
   updateProductWithImages,
   downloadProductImportTemplate,
 } from "../api/products";
-import { getCategories, getSubCategories } from "../api/categories";
+import { getCategories, getSubCategories, listSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
 
@@ -312,31 +312,21 @@ export default function ProductPage() {
 
     const fetchFresh = async () => {
       try {
-        const catRes = await getCategories();
+        const [catRes, subRes] = await Promise.all([
+          getCategories(),
+          listSubCategories({ per_page: 1000 }),
+        ]);
+
         if (cancel) return;
+
         const catList = toArray(catRes);
-        let subs = normalizeSubCategories(catList);
 
-        if (!subs.length) {
-          try {
-            const subRes = await getSubCategories();
-            if (!cancel) {
-              const rawSubs = toArray(subRes);
-              subs = rawSubs.map((s) => ({
-                id: s.id,
-                name: s.name,
-                category_id:
-                  s.category_id ??
-                  s.categoryId ??
-                  s.parent_id ??
-                  s.parentId ??
-                  null,
-              }));
-            }
-          } catch {}
-        }
+        const subs = (subRes?.items || []).map((s) => ({
+          id: s.id,
+          name: s.name,
+          category_id: s.category_id,
+        }));
 
-        if (cancel) return;
         setCategories(catList);
         setSubCategories(subs);
         writeCache({ categories: catList, subCategories: subs });
