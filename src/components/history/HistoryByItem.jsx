@@ -463,6 +463,7 @@ export default function HistoryByItem() {
         "Store",
         "Payment Method Filter",
       ];
+
       const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
       const storeName = chosenStore
         ? stores.find((s) => s.id === chosenStore)?.name || chosenStore
@@ -477,6 +478,7 @@ export default function HistoryByItem() {
         const p = productMap[r.product_id];
         const catName = p?.category_id ? categoryNameMap[p.category_id] : "-";
         const subName = p?.sub_category_id ? subCategoryNameMap[p.sub_category_id] : "";
+
         return [
           r.sku || "-",
           r.product_name || "-",
@@ -495,18 +497,29 @@ export default function HistoryByItem() {
       const aoa = [header, ...rowsX];
       const ws = XLSX.utils.aoa_to_sheet(aoa);
 
+      // auto column width
       const colWidths = header.map((h, i) => {
-        const maxLen = Math.max(String(h).length, ...rowsX.map((row) => String(row[i] ?? "").length));
+        const maxLen = Math.max(
+          String(h).length,
+          ...rowsX.map((row) => String(row[i] ?? "").length)
+        );
         return { wch: Math.min(Math.max(10, maxLen + 2), 40) };
       });
       ws["!cols"] = colWidths;
 
+      // ✅ BUAT WORKBOOK (INI YANG KURANG)
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "History By Item");
+
       const note = `${dateFrom || "all"}_to_${dateTo || "all"}_${
         chosenStore ? `store_${chosenStore}` : "all-stores"
       }_${paymentMethod || "all-methods"}`.replace(/[:\/\\]/g, "-");
+
       XLSX.writeFile(wb, `history-by-item_${note}.xlsx`);
+
       toast.success("Excel berhasil diunduh", { id: "exp-xlsx" });
-    } catch {
+    } catch (e) {
+      console.error(e);
       toast.error("Gagal membuat Excel", { id: "exp-xlsx" });
     }
   };

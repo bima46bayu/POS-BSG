@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Calendar, X, Search, Filter, Download, XCircle, Eye, MapPin } from "lucide-react";
 import toast from "react-hot-toast";
+import * as XLSX from "xlsx";
 import DataTable from "../data-table/DataTable";
 import { getSales, getSale, voidSale } from "../../api/sales";
 import { getMe } from "../../api/users";
@@ -484,18 +485,13 @@ export default function HistoryByTransaction() {
     },
   ];
 
-  const exportCSV = async () => {
+  // ===== EXPORT EXCEL (pengganti CSV) =====
+  const exportExcel = async () => {
     try {
-      toast.loading("Menyiapkan CSV...", { id: "exp" });
+      toast.loading("Menyiapkan Excel...", { id: "exp" });
       const data = clientFilterActive ? filteredSorted : rawRows;
 
-      const headers = ["Transaction Number", "Tanggal", "Customer", "Status", "Sub Total", "Pay", "Change", "Payment Methods", "Store"];
-      const escape = (v) => {
-        if (v == null) return "";
-        const s = String(v);
-        return /[\",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      const csvRows = (data || []).map((r) => {
+      const rows = (data || []).map((r) => {
         const pay = Array.isArray(r.payments) ? r.payments.reduce((s, p) => s + toNumber(p.amount), 0) : r.paid;
         const methods =
           Array.isArray(r.payments) && r.payments.length
@@ -505,31 +501,30 @@ export default function HistoryByTransaction() {
             : r.payment_method || r.method || "-";
 
         const storeName = r?.cashier?.store_location?.name ?? r?.store_location_name ?? "";
-        return [
-          r.code || r.number || "-",
-          formatDateTime(r.created_at),
-          r.customer_name || "General",
-          r.status === "void" ? "Void" : "Completed",
-          formatIDR(r.final_total),
-          formatIDR(pay),
-          formatIDR(r.change),
-          methods,
-          storeName,
-        ].map(escape).join(",");
+
+        return {
+          "Transaction Number": r.code || r.number || "-",
+          Tanggal: formatDateTime(r.created_at),
+          Customer: r.customer_name || "General",
+          Status: r.status === "void" ? "Void" : "Completed",
+          "Sub Total": formatIDR(r.final_total),
+          Pay: formatIDR(pay),
+          Change: formatIDR(r.change),
+          "Payment Methods": methods,
+          Store: storeName,
+        };
       });
 
-      const csv = [headers.join(","), ...csvRows].join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "History");
+
       const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-      a.download = `history-transactions-${ts}.csv`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success("CSV berhasil diunduh", { id: "exp" });
+      XLSX.writeFile(wb, `history-transactions-${ts}.xlsx`);
+
+      toast.success("Excel berhasil diunduh", { id: "exp" });
     } catch {
-      toast.error("Gagal mengekspor CSV", { id: "exp" });
+      toast.error("Gagal mengekspor Excel", { id: "exp" });
     }
   };
 
@@ -694,12 +689,12 @@ export default function HistoryByTransaction() {
           </div>
 
           <button
-            onClick={exportCSV}
+            onClick={exportExcel}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
-            title="Export CSV"
+            title="Export Excel"
           >
             <Download className="w-4 h-4" />
-            Export CSV
+            Export Excel
           </button>
         </div>
       </div>
