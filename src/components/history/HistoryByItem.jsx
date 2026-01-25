@@ -343,6 +343,19 @@ export default function HistoryByItem() {
     setDetailRow(null);
   };
 
+  function parseAsLocal(dateStr) {
+    if (!dateStr) return null;
+
+    // ubah "2026-01-25 10:00:00" → "2026-01-25T10:00:00"
+    const fixed = dateStr.replace(" ", "T");
+
+    const d = new Date(fixed);
+
+    // paksa anggap sebagai WIB (hapus offset browser)
+    const localOffsetMin = d.getTimezoneOffset();
+    return new Date(d.getTime() - localOffsetMin * 60000);
+  }
+
   const columns = useMemo(
     () => [
       {
@@ -417,14 +430,18 @@ export default function HistoryByItem() {
         key: "last_sold_at",
         header: "Last Sold",
         className: "hidden md:table-cell",
-        cell: (r) => (
-          <div className="flex items-center gap-2 whitespace-nowrap">
-            <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
-            <span className="truncate" title={r.last_sold_at || "-"}>
-              {r.last_sold_at ? new Date(r.last_sold_at).toLocaleString("id-ID") : "-"}
-            </span>
-          </div>
-        ),
+        cell: (r) => {
+          const d = r.last_sold_at ? parseAsLocal(r.last_sold_at) : null;
+
+          return (
+            <div className="flex items-center gap-2 whitespace-nowrap">
+              <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+              <span className="truncate" title={r.last_sold_at || "-"}>
+                {d ? d.toLocaleString("id-ID") : "-"}
+              </span>
+            </div>
+          );
+        },
       },
       {
         key: "actions",
@@ -488,7 +505,9 @@ export default function HistoryByItem() {
           toNumber(r.transaction_count),
           toNumber(r.gross),
           avg,
-          r.last_sold_at ? new Date(r.last_sold_at).toLocaleString("id-ID") : "-",
+          parseAsLocal(r.last_sold_at)
+            ? parseAsLocal(r.last_sold_at).toLocaleString("id-ID")
+            : "-",
           storeName,
           paymentLabel,
         ];
