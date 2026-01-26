@@ -89,7 +89,7 @@ export default function AddPurchaseModal({ open, onClose }) {
       return getProducts(
         {
           page: 1,
-          per_page: 500,
+          per_page: 2000,
           store_location_id: storeId || undefined, // ⬅️ filter berdasarkan store
         },
         signal

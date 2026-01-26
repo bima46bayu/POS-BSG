@@ -1,6 +1,5 @@
 // src/pages/ProductPage.jsx
-import React,
-{
+import React, {
   useEffect,
   useMemo,
   useRef,
@@ -16,7 +15,6 @@ import {
   Trash2,
   Plus,
   Search,
-  Store as StoreIcon,
   Upload,
 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -29,9 +27,8 @@ import {
   updateProductWithImages,
   downloadProductImportTemplate,
 } from "../api/products";
-import { getCategories, getSubCategories, listSubCategories } from "../api/categories";
+import { getCategories, listSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
-import { listStoreLocations } from "../api/storeLocations";
 
 import AddProduct from "../components/products/AddProduct";
 import UpdateProduct from "../components/products/UpdateProduct";
@@ -40,11 +37,13 @@ import DataTable from "../components/data-table/DataTable";
 import ImportExcelModal from "../components/products/ImportExcelModal";
 
 const PER_PAGE = 10;
-
-/* ========= kecil2: cache kategori ========= */
 const CACHE_KEY = "POS_CATEGORIES_CACHE_V1";
 const CACHE_DIRTY_KEY = "POS_CATS_DIRTY";
 const CAT_CACHE_TTL_MS = 5 * 60 * 1000;
+const LIST_CACHE_TTL_MS = 60 * 1000;
+const LIST_CACHE_MAX = 50;
+
+/* ========= Cache utilities ========= */
 const readCache = () => {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
@@ -53,6 +52,7 @@ const readCache = () => {
     return null;
   }
 };
+
 const writeCache = (payload) => {
   try {
     localStorage.setItem(
@@ -61,14 +61,14 @@ const writeCache = (payload) => {
     );
   } catch {}
 };
+
 const isCacheStale = (ts) => !ts || Date.now() - ts > CAT_CACHE_TTL_MS;
 const isDirty = () => localStorage.getItem(CACHE_DIRTY_KEY) === "1";
 const clearDirty = () => localStorage.removeItem(CACHE_DIRTY_KEY);
 
-/* ========= LRU cache untuk list products ========= */
-const LIST_CACHE_TTL_MS = 60 * 1000;
-const LIST_CACHE_MAX = 50;
+// LRU cache untuk list products
 const listCache = new Map();
+
 const listCacheGet = (key) => {
   const hit = listCache.get(key);
   if (!hit) return null;
@@ -76,11 +76,11 @@ const listCacheGet = (key) => {
     listCache.delete(key);
     return null;
   }
-  // LRU: refresh posisi
   listCache.delete(key);
   listCache.set(key, hit);
   return hit.payload;
 };
+
 const listCacheSet = (key, payload) => {
   if (listCache.has(key)) listCache.delete(key);
   listCache.set(key, { ts: Date.now(), payload });
@@ -90,19 +90,28 @@ const listCacheSet = (key, payload) => {
   }
 };
 
-/* ========= util kecil ========= */
+const stableKey = (obj) => {
+  const sorted = Object.keys(obj)
+    .sort()
+    .reduce((a, k) => ((a[k] = obj[k]), a), {});
+  return JSON.stringify(sorted);
+};
+
+/* ========= UI utilities ========= */
 const badgeClass = (n) => {
   const v = Number(n || 0);
   if (v === 0) return "bg-red-100 text-red-800";
   if (v <= 5) return "bg-yellow-100 text-yellow-800";
   return "bg-blue-100 text-blue-800";
 };
+
 const formatIDR = (v) =>
   Number(v ?? 0).toLocaleString("id-ID", {
     style: "currency",
     currency: "IDR",
     maximumFractionDigits: 0,
   });
+
 const formatDateTime = (s) => {
   if (!s) return "-";
   try {
@@ -117,31 +126,8 @@ const formatDateTime = (s) => {
     return s;
   }
 };
-const normalizeSubCategories = (cats = []) => {
-  const out = [];
-  cats.forEach((c) => {
-    const children =
-      c.sub_categories || c.subCategories || c.children || c.subs || [];
-    children.forEach((sc) => {
-      out.push({
-        id: sc.id,
-        name: sc.name,
-        category_id: sc.category_id ?? sc.categoryId ?? c.id,
-      });
-    });
-  });
-  return out;
-};
 
-// Serialize params ke key yang stabil
-const stableKey = (obj) => {
-  const sorted = Object.keys(obj)
-    .sort()
-    .reduce((a, k) => ((a[k] = obj[k]), a), {});
-  return JSON.stringify(sorted);
-};
-
-/* ========= debounce hook ========= */
+/* ========= Hooks ========= */
 function useDebouncedValue(value, delay = 300) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -154,9 +140,10 @@ function useDebouncedValue(value, delay = 300) {
 export default function ProductPage() {
   const [, startTransition] = useTransition();
 
-  /* ====== User store dari /api/me ====== */
+  /* ====== User store ====== */
   const [myStoreId, setMyStoreId] = useState(undefined);
   const [storeName, setStoreName] = useState("-");
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -179,51 +166,7 @@ export default function ProductPage() {
     };
   }, []);
 
-  /* ====== daftar store untuk dropdown ====== */
-  const [stores, setStores] = useState([]);
-  const [storesLoading, setStoresLoading] = useState(false);
-  useEffect(() => {
-    let cancel = false;
-    setStoresLoading(true);
-    listStoreLocations({ per_page: 100 })
-      .then(({ items }) => {
-        if (cancel) return;
-        setStores(Array.isArray(items) ? items : []);
-      })
-      .catch(() => {
-        if (!cancel) toast.error("Gagal memuat daftar cabang");
-      })
-      .finally(() => {
-        if (!cancel) setStoresLoading(false);
-      });
-    return () => {
-      cancel = true;
-    };
-  }, []);
-
-  // mapping store_id → store_name
-  const storeMap = useMemo(() => {
-    const m = {};
-    stores.forEach((s) => {
-      if (s && s.id != null) {
-        m[String(s.id)] = s.name;
-      }
-    });
-    return m;
-  }, [stores]);
-
-  // store terpilih
-  const [selectedStore, setSelectedStore] = useState("ALL");
-
-  useEffect(() => {
-    if (myStoreId !== undefined) {
-      setSelectedStore((prev) =>
-        prev === "ALL" || prev == null ? myStoreId ?? "ALL" : prev
-      );
-    }
-  }, [myStoreId]);
-
-  /* ====== filters ====== */
+  /* ====== Filters ====== */
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearch = useDebouncedValue(searchTerm, 300);
@@ -236,7 +179,6 @@ export default function ProductPage() {
   const btnRef = useRef(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
 
-  // draft dalam popover
   const [draftCategoryId, setDraftCategoryId] = useState("");
   const [draftSubCategoryId, setDraftSubCategoryId] = useState("");
   const [draftStockStatus, setDraftStockStatus] = useState("");
@@ -245,7 +187,7 @@ export default function ProductPage() {
     max: "",
   });
 
-  /* ====== data ====== */
+  /* ====== Data ====== */
   const [rows, setRows] = useState([]);
   const [meta, setMeta] = useState({
     current_page: 1,
@@ -257,48 +199,38 @@ export default function ProductPage() {
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
 
-  // category_id → nama
   const categoryMap = useMemo(() => {
     const m = {};
     categories.forEach((c) => {
-      if (c && c.id != null) {
-        m[String(c.id)] = c.name;
-      }
+      if (c?.id != null) m[String(c.id)] = c.name;
     });
     return m;
   }, [categories]);
 
-  // sub_category_id → nama
   const subCategoryMap = useMemo(() => {
     const m = {};
     subCategories.forEach((s) => {
-      if (s && s.id != null) {
-        m[String(s.id)] = s.name;
-      }
+      if (s?.id != null) m[String(s.id)] = s.name;
     });
     return m;
   }, [subCategories]);
 
-  /* ====== modal & aksi ====== */
+  /* ====== Modal & Actions ====== */
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
-
-  // Import Excel modal
   const [showImport, setShowImport] = useState(false);
 
-  /* ====== kategori (cache) ====== */
+  /* ====== Load Categories ====== */
   useEffect(() => {
     let cancel = false;
 
     const toArray = (res) => {
       const payload = res?.data ?? res;
-      if (Array.isArray(payload)) return payload;
-      if (Array.isArray(payload?.data)) return payload.data;
-      return [];
+      return Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
     };
 
     const useCacheFirst = () => {
@@ -320,7 +252,6 @@ export default function ProductPage() {
         if (cancel) return;
 
         const catList = toArray(catRes);
-
         const subs = (subRes?.items || []).map((s) => ({
           id: s.id,
           name: s.name,
@@ -349,7 +280,7 @@ export default function ProductPage() {
     };
   }, []);
 
-  /* ====== query builder ====== */
+  /* ====== Query Builder ====== */
   const queryParams = useMemo(() => {
     const p = { page: currentPage, per_page: PER_PAGE };
     if (debouncedSearch.trim()) p.search = debouncedSearch.trim();
@@ -357,16 +288,6 @@ export default function ProductPage() {
     if (subCategoryId) p.sub_category_id = subCategoryId;
     if (priceRange.min) p.min_price = priceRange.min;
     if (priceRange.max) p.max_price = priceRange.max;
-
-    if (
-      selectedStore !== "ALL" &&
-      selectedStore != null &&
-      selectedStore !== ""
-    ) {
-      // konsisten dengan BE yang baca store_location_id (dan fallback ke store_id)
-      p.store_location_id = selectedStore;
-      p.only_store = 1;
-    }
     return p;
   }, [
     currentPage,
@@ -375,12 +296,11 @@ export default function ProductPage() {
     subCategoryId,
     priceRange.min,
     priceRange.max,
-    selectedStore,
   ]);
 
   const queryKey = useMemo(() => stableKey(queryParams), [queryParams]);
 
-  /* ====== fetch ====== */
+  /* ====== Fetch List ====== */
   const abortRef = useRef(null);
 
   const fetchList = useCallback(
@@ -453,6 +373,7 @@ export default function ProductPage() {
         );
       });
 
+      // Prefetch next page
       if ((meta?.current_page ?? 1) < (meta?.last_page ?? 1)) {
         const nextParams = {
           ...queryParams,
@@ -465,13 +386,13 @@ export default function ProductPage() {
         toast.error("Gagal memuat produk");
       }
     } finally {
-      if (!cacheHit) setLoading(false);
+      setLoading(false);
       if (abortRef.current === controller) abortRef.current = null;
     }
   }, [fetchList, myStoreId, queryKey, queryParams, startTransition]);
 
   useEffect(() => {
-    if (myStoreId !== undefined && selectedStore !== undefined) refetch();
+    if (myStoreId !== undefined) refetch();
     return () => {
       if (abortRef.current) {
         try {
@@ -479,9 +400,9 @@ export default function ProductPage() {
         } catch {}
       }
     };
-  }, [refetch, myStoreId, selectedStore]);
+  }, [refetch, myStoreId]);
 
-  /* ====== filter stok FE ====== */
+  /* ====== Filter Stock (Front-end) ====== */
   const filteredRows = useMemo(() => {
     let arr = rows;
     if (stockStatus) {
@@ -494,7 +415,7 @@ export default function ProductPage() {
     return arr;
   }, [rows, stockStatus]);
 
-  /* ====== UI helpers ====== */
+  /* ====== UI Helpers ====== */
   const toggleFilters = useCallback(() => {
     if (!showFilters) {
       setDraftCategoryId(categoryId);
@@ -536,7 +457,6 @@ export default function ProductPage() {
     setDraftSubCategoryId("");
     setDraftStockStatus("");
     setDraftPriceRange({ min: "", max: "" });
-
     setCategoryId("");
     setSubCategoryId("");
     setStockStatus("");
@@ -544,25 +464,29 @@ export default function ProductPage() {
     setCurrentPage(1);
   }, []);
 
-  /* ====== CRUD handlers ====== */
+  /* ====== CRUD Handlers ====== */
   const handleEdit = useCallback((row) => {
     setSelectedProduct(row);
     setShowEdit(true);
   }, []);
-  const onDelete = useCallback((row) => {
+
+  const handleDelete = useCallback((row) => {
     setConfirmTarget(row);
     setConfirmOpen(true);
   }, []);
+
   const confirmDelete = useCallback(async () => {
     if (!confirmTarget) return;
     setDeleting(true);
     try {
       await deleteProduct(confirmTarget.id);
-      toast.success("Product deleted");
+      toast.success("Produk berhasil dihapus");
       listCache.clear();
-      if (filteredRows.length === 1 && (meta.current_page || 1) > 1)
+      if (filteredRows.length === 1 && (meta.current_page || 1) > 1) {
         setCurrentPage((p) => p - 1);
-      else refetch();
+      } else {
+        refetch();
+      }
     } catch {
       toast.error("Gagal menghapus produk");
     } finally {
@@ -581,14 +505,11 @@ export default function ProductPage() {
         }
 
         const body = { ...payload, store_location_id: myStoreId };
-
-        // normalisasi image utama
         if (!body.image && Array.isArray(body.images) && body.images[0]) {
           body.image = body.images[0];
         }
 
         await createProduct(body);
-
         toast.success("Produk berhasil dibuat");
         setShowAdd(false);
         setCurrentPage(1);
@@ -628,7 +549,80 @@ export default function ProductPage() {
     [myStoreId, refetch]
   );
 
-  /* ====== columns ====== */
+  const handleExportExcel = useCallback(async () => {
+    try {
+      toast.loading("Menyiapkan Excel...", { id: "exp" });
+      const XLSX = await import("xlsx");
+      
+      const p = {
+        ...queryParams,
+        page: 1,
+        per_page: meta?.total || 100000,
+      };
+      const k = stableKey(p);
+      const hit = listCacheGet(k);
+      const { items } = hit || (await getProducts(p));
+      const list = (hit ? hit.items : items || []) || [];
+
+      const data = list.map((r) => {
+        const unitName = r.unit?.name || r.unit_name || r.unit || "";
+        const catName = categoryMap[String(r.category_id)] || "";
+        const subName = subCategoryMap[String(r.sub_category_id)] || "";
+        const storeName = r.store_location?.name || "Global";
+
+        return {
+          SKU: r.sku,
+          "Product Name": r.name,
+          Category: catName,
+          "Sub Category": subName,
+          Price: formatIDR(r.price),
+          Stock: Number(r.stock ?? 0),
+          Unit: unitName,
+          Store: storeName,
+          "Created At": formatDateTime(r.created_at),
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Products");
+      
+      const ts = new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace(/[:T]/g, "-");
+      XLSX.writeFile(wb, `products-${ts}.xlsx`);
+      
+      toast.success("Excel berhasil diunduh", { id: "exp" });
+    } catch (err) {
+      console.error(err);
+      toast.error("Gagal mengekspor Excel", { id: "exp" });
+    }
+  }, [queryParams, meta?.total, categoryMap, subCategoryMap]);
+
+  const handleDownloadTemplate = useCallback(async () => {
+    try {
+      const blob = await downloadProductImportTemplate();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "product_import_template.xlsx";
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      toast.error("Gagal mengunduh template");
+    }
+  }, []);
+
+  const truncateWords = (text, wordLimit = 8) => {
+    if (!text) return "";
+    const words = String(text).split(" ");
+    if (words.length <= wordLimit) return text;
+    return words.slice(0, wordLimit).join(" ") + "...";
+  };
+
+  /* ====== Columns ====== */
   const columns = useMemo(
     () => [
       {
@@ -665,22 +659,20 @@ export default function ProductPage() {
       {
         key: "name",
         header: "Product Name",
-        width: "180px",
+        width: "280px",
         cell: (row) => (
-          <span className="font-medium text-gray-900 truncate block">
-            {row.name}
+          <span className="text-gray-700 text-xs" title={row.name}>
+            {truncateWords(row.name, 8)}
           </span>
         ),
       },
       {
-        // Category/Subcategory column
         key: "category",
         header: "Category",
         width: "120px",
         cell: (row) => {
           const catName = categoryMap[String(row.category_id)] || "-";
-          const subName =
-            subCategoryMap[String(row.sub_category_id)] || "";
+          const subName = subCategoryMap[String(row.sub_category_id)] || "";
           return (
             <div className="flex flex-col">
               <span className="text-xs text-gray-800">{catName}</span>
@@ -720,29 +712,10 @@ export default function ProductPage() {
         align: "center",
         cell: (row) => {
           const unitName =
-            row.unit?.name ||
-            row.unit_name || // dari BE (subquery)
-            row.unit ||
-            "-";
+            row.unit?.name || row.unit_name || row.unit || "-";
           return (
             <span className="text-xs text-gray-700 whitespace-nowrap">
               {unitName}
-            </span>
-          );
-        },
-      },
-      {
-        key: "store",
-        header: "Store",
-        width: "140px",
-        cell: (row) => {
-          const storeLabel =
-            row.store_location?.name ||
-            storeMap[String(row.store_location_id)] ||
-            (row.store_location_id ? `ID ${row.store_location_id}` : "Global");
-          return (
-            <span className="text-sm text-gray-600 truncate">
-              {storeLabel}
             </span>
           );
         },
@@ -763,10 +736,7 @@ export default function ProductPage() {
               <Edit className="w-4 h-4" />
             </button>
             <button
-              onClick={() => {
-                setConfirmTarget(row);
-                setConfirmOpen(true);
-              }}
+              onClick={() => handleDelete(row)}
               className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center justify-center"
               title="Delete"
             >
@@ -776,20 +746,10 @@ export default function ProductPage() {
         ),
       },
     ],
-    [handleEdit, categoryMap, subCategoryMap, storeMap]
+    [handleEdit, handleDelete, categoryMap, subCategoryMap]
   );
 
-  if (myStoreId === undefined) {
-    return (
-      <div className="p-6">
-        <div className="bg-white rounded-lg p-4 border">
-          Memuat informasi store user...
-        </div>
-      </div>
-    );
-  }
-
-  /* ====== UI ====== */
+  /* ====== Render ====== */
   return (
     <div className="p-6 bg-gray-50 min-h-screen space-y-4">
       {/* Header */}
@@ -818,38 +778,7 @@ export default function ProductPage() {
             />
           </div>
 
-          {/* Store filter */}
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <select
-                value={selectedStore}
-                onChange={(e) => {
-                  setSelectedStore(e.target.value);
-                  setCurrentPage(1);
-                  listCache.clear();
-                }}
-                disabled={storesLoading}
-                className="pl-9 pr-8 py-2 border rounded-lg text-sm text-gray-700 appearance-none min-w-[160px] focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="ALL">Semua</option>
-                {stores.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <StoreIcon className="w-4 h-4 text-gray-500 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <svg
-                className="w-4 h-4 text-gray-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
-              </svg>
-            </div>
-          </div>
-
-          {/* Filter popover */}
+          {/* Filter */}
           <button
             ref={btnRef}
             onClick={toggleFilters}
@@ -859,113 +788,18 @@ export default function ProductPage() {
             Filter
           </button>
 
-          {/* Export CSV */}
+          {/* Export Excel */}
           <button
-            onClick={async () => {
-              try {
-                toast.loading("Menyiapkan CSV...", { id: "exp" });
-                const p = {
-                  ...queryParams,
-                  page: 1,
-                  per_page: meta?.total || 100000,
-                };
-                const k = stableKey(p);
-                const hit = listCacheGet(k);
-                const { items } = hit || (await getProducts(p));
-                const list = (hit ? hit.items : items || []) || [];
-
-                const headers = [
-                  "SKU",
-                  "Product Name",
-                  "Category",
-                  "Sub Category",
-                  "Price",
-                  "Stock",
-                  "Unit",
-                  "Store",
-                  "Created At",
-                ];
-                const escape = (v) => {
-                  if (v == null) return "";
-                  const s = String(v);
-                  return /[\",\n]/.test(s)
-                    ? `"${s.replace(/"/g, '""')}"`
-                    : s;
-                };
-                const rowsCsv = list.map((r) => {
-                  const unitName =
-                    r.unit?.name ||
-                    r.unit_name ||
-                    r.unit ||
-                    "";
-                  const catName =
-                    categoryMap[String(r.category_id)] || "";
-                  const subName =
-                    subCategoryMap[String(r.sub_category_id)] || "";
-                  const storeLabel =
-                    r.store_location?.name ||
-                    storeMap[String(r.store_location_id)] ||
-                    (r.store_location_id
-                      ? `ID ${r.store_location_id}`
-                      : "Global");
-
-                  return [
-                    r.sku,
-                    r.name,
-                    catName,
-                    subName,
-                    formatIDR(r.price),
-                    Number(r.stock ?? 0),
-                    unitName,
-                    storeLabel,
-                    formatDateTime(r.created_at),
-                  ]
-                    .map(escape)
-                    .join(",");
-                });
-                const csv = [headers.join(","), ...rowsCsv].join("\n");
-                const blob = new Blob([csv], {
-                  type: "text/csv;charset=utf-8;",
-                });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                const ts = new Date()
-                  .toISOString()
-                  .slice(0, 19)
-                  .replace(/[:T]/g, "-");
-                a.download = `products-${ts}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                toast.success("CSV berhasil diunduh", { id: "exp" });
-              } catch {
-                toast.error("Gagal mengekspor CSV", { id: "exp" });
-              }
-            }}
+            onClick={handleExportExcel}
             className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
           >
             <Download className="w-4 h-4" />
-            Export CSV
+            Export Excel
           </button>
 
           {/* Download Template */}
           <button
-            onClick={async () => {
-              try {
-                const blob = await downloadProductImportTemplate();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "product_import_template.xlsx";
-                a.click();
-                window.URL.revokeObjectURL(url);
-              } catch (e) {
-                console.error(e);
-                toast.error("Gagal mengunduh template");
-              }
-            }}
+            onClick={handleDownloadTemplate}
             className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 border rounded-lg hover:bg-gray-50"
           >
             <Download className="w-4 h-4" />
@@ -999,12 +833,10 @@ export default function ProductPage() {
             <DataTable
               columns={columns}
               data={filteredRows}
-              loading={loading && !rows.length}
+              loading={loading}
               meta={meta}
               currentPage={meta.current_page}
-              onPageChange={(p) => {
-                setCurrentPage(p);
-              }}
+              onPageChange={setCurrentPage}
               stickyHeader
               getRowKey={(row, i) => row.id ?? row.sku ?? i}
               className="border-0 shadow-none"
@@ -1140,13 +972,13 @@ export default function ProductPage() {
             <div className="px-4 py-3 border-t flex justify-between">
               <button
                 onClick={clearAllFilters}
-                className="text-sm text-gray-600"
+                className="text-sm text-gray-600 hover:text-gray-900"
               >
                 Clear All
               </button>
               <button
                 onClick={applyFilters}
-                className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg"
+                className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600"
               >
                 Apply
               </button>
@@ -1195,7 +1027,6 @@ export default function ProductPage() {
         }}
       />
 
-      {/* Import Excel Modal */}
       {showImport && (
         <ImportExcelModal
           onClose={() => setShowImport(false)}

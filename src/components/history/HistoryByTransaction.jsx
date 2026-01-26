@@ -1,17 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, X, Search, Filter, Download, XCircle, Eye, MapPin } from "lucide-react";
+import { Calendar, X, Search, Filter, Download, XCircle, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
 import DataTable from "../data-table/DataTable";
 import { getSales, getSale, voidSale } from "../../api/sales";
 import { getMe } from "../../api/users";
-import { listStoreLocations } from "../../api/storeLocations";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import ConfirmDialog from "../common/ConfirmDialog";
 import SaleDetailModal from "../sales/SaleDetailModal";
 
 const PER_PAGE = 10;
-const STORE_KEY = "history_store_id";
 
 const toNumber = (v) => (v == null ? 0 : Number(v));
 const formatIDR = (v) =>
@@ -56,36 +54,10 @@ const isWithinDateRange = (iso, start, end) => {
   return true;
 };
 
-function mergeStoreOptions({ me, storesFromApi, rows }) {
-  const map = new Map();
-  const add = (id, name) => {
-    const key = id ? `id:${id}` : `name:${name || "-"}`;
-    if (!map.has(key)) map.set(key, { id: id ? String(id) : "", name: name || "-" });
-  };
-  if (Array.isArray(storesFromApi)) storesFromApi.forEach((s) => add(s.id, s.name));
-  if (me) {
-    const mid = me?.store_location_id ?? me?.store_location?.id;
-    const mname = me?.store_location?.name;
-    if (mid || mname) add(mid, mname);
-  }
-  if (Array.isArray(rows)) {
-    rows.forEach((r) => {
-      const id = r?.cashier?.store_location_id ?? r?.cashier?.store_location?.id ?? r?.store_location_id;
-      const name = r?.cashier?.store_location?.name ?? r?.store_location_name;
-      if (id || name) add(id, name);
-    });
-  }
-  return Array.from(map.values()).filter((s) => s.name && s.name !== "-");
-}
-
 export default function HistoryByTransaction() {
   // ===== me / role & stores =====
   const [me, setMe] = useState(null);
   const isAdmin = useMemo(() => String(me?.role || "").toLowerCase() === "admin", [me]);
-  const myStoreId = useMemo(() => me?.store_location_id ?? me?.store_location?.id ?? "", [me]);
-
-  const [stores, setStores] = useState([]);
-  const [storeId, setStoreId] = useState(localStorage.getItem(STORE_KEY) || ""); // admin: ""=All, cashier diset -> myStoreId
 
   // ===== server data & meta =====
   const [rawRows, setRawRows] = useState([]);
@@ -118,31 +90,6 @@ export default function HistoryByTransaction() {
       try {
         const meRes = await getMe().catch(() => null);
         setMe(meRes);
-
-        const { items: storesApi = [] } = await listStoreLocations({ per_page: 200 }).catch(() => ({}));
-
-        if (String(meRes?.role || "").toLowerCase() === "admin") {
-          // default: store user sendiri (kalau belum ada di localStorage)
-          if (!localStorage.getItem(STORE_KEY)) {
-            const def = meRes?.store_location_id ?? meRes?.store_location?.id;
-            if (def) {
-              setStoreId(String(def));
-              localStorage.setItem(STORE_KEY, String(def));
-            }
-          }
-          setStores((storesApi || []).filter(s => s?.id && s?.name).map(s => ({ id: String(s.id), name: s.name })));
-        } else {
-          // cashier → kunci ke store sendiri, tidak ada “All Stores”
-          const mid = meRes?.store_location_id ?? meRes?.store_location?.id;
-          const mname = meRes?.store_location?.name || "My Store";
-          if (mid) {
-            setStoreId(String(mid));
-            localStorage.setItem(STORE_KEY, String(mid));
-            setStores([{ id: String(mid), name: mname }]);
-          } else {
-            setStores([]);
-          }
-        }
       } catch {}
     })();
   }, []);
@@ -162,10 +109,9 @@ export default function HistoryByTransaction() {
 
   // ===== IMPORTANT: cashier must always filter on client =====
   const clientFilterActive = useMemo(() => {
-    // force TRUE for cashier to avoid cross-store leakage
-    if (!isAdmin) return true;
-    return Boolean(paymentMethod || dateRange.start || dateRange.end || statusFilter || storeId);
-  }, [isAdmin, paymentMethod, dateRange.start, dateRange.end, statusFilter, storeId]);
+    if (!isAdmin) return true; // kasir selalu client-filter
+    return Boolean(paymentMethod || dateRange.start || dateRange.end || statusFilter);
+  }, [isAdmin, paymentMethod, dateRange.start, dateRange.end, statusFilter]);
 
   // ===== FETCH LIST =====
   useEffect(() => {
@@ -178,7 +124,6 @@ export default function HistoryByTransaction() {
       code: searchTerm.trim() || undefined,
       sort: sortKey || undefined,
       dir: sortKey ? sortDir : undefined,
-      ...(isAdmin && storeId ? { store_id: storeId } : {}),
     };
 
     const params = clientFilterActive
@@ -192,10 +137,6 @@ export default function HistoryByTransaction() {
         setServerMeta(
           meta || { current_page: 1, last_page: 1, per_page: PER_PAGE, total: rows.length }
         );
-        setStores((prev) => {
-          const merged = mergeStoreOptions({ me, storesFromApi: prev, rows });
-          return merged;
-        });
       })
       .catch((err) => {
         const isCanceled = err?.name === "CanceledError" || err?.code === "ERR_CANCELED";
@@ -213,29 +154,15 @@ export default function HistoryByTransaction() {
     dateRange.start,
     dateRange.end,
     paymentMethod,
-    storeId,
     refreshTick,
     isAdmin,
-    me,
   ]);
 
   // ===== client-side filter/sort =====
   const filteredSorted = useMemo(() => {
     let list = rawRows;
 
-    // pilih store id yang dipakai untuk filter
-    const chosenStoreId = isAdmin ? (storeId || "") : (myStoreId ? String(myStoreId) : "");
-
     if (clientFilterActive) {
-      if (chosenStoreId) {
-        list = list.filter((r) => {
-          const fromCashier = r?.cashier?.store_location_id ?? r?.cashier?.store_location?.id;
-          const fromSale    = r?.store_location_id;
-          const chosen = fromCashier ?? fromSale;
-          return String(chosen || "") === chosenStoreId;
-        });
-      }
-
       if (paymentMethod) {
         list = list.filter((r) => {
           const fromPayments = Array.isArray(r.payments) ? r.payments.map((p) => normMethodKey(p.method)) : [];
@@ -277,9 +204,6 @@ export default function HistoryByTransaction() {
   }, [
     rawRows,
     clientFilterActive,
-    storeId,
-    myStoreId,
-    isAdmin,
     paymentMethod,
     statusFilter,
     dateRange.start,
@@ -500,7 +424,11 @@ export default function HistoryByTransaction() {
                 .join(" | ")
             : r.payment_method || r.method || "-";
 
-        const storeName = r?.cashier?.store_location?.name ?? r?.store_location_name ?? "";
+        const storeName =
+          r?.cashier?.store_location?.name ??
+          r?.store_location?.name ??
+          r?.store_location_name ??
+          "";
 
         return {
           "Transaction Number": r.code || r.number || "-",
@@ -528,22 +456,6 @@ export default function HistoryByTransaction() {
     }
   };
 
-  const onChangeStore = (val) => {
-    if (!isAdmin) return; // cashier locked
-    setStoreId(val);
-    localStorage.setItem(STORE_KEY, val);
-    setCurrentPage(1);
-  };
-
-  const chosenStoreLabel = useMemo(() => {
-    if (!isAdmin) {
-      const sid = myStoreId ? String(myStoreId) : "";
-      return stores.find(s => s.id === sid)?.name || "My Store";
-    }
-    if (!storeId) return "Store: All";
-    return stores.find(s => s.id === storeId)?.name || "Selected Store";
-  }, [isAdmin, storeId, myStoreId, stores]);
-
   return (
     <>
       {/* Controls */}
@@ -558,59 +470,6 @@ export default function HistoryByTransaction() {
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
             />
-          </div>
-
-          {/* Store popover */}
-          <div className="relative">
-            <button
-              ref={storeBtnRef}
-              onClick={() => isAdmin && store.setOpen(!store.open)}
-              disabled={!isAdmin}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border ${
-                isAdmin ? "text-gray-700 bg-white border-gray-300 hover:bg-gray-50" : "text-gray-400 bg-gray-50 border-gray-200 cursor-not-allowed"
-              }`}
-              title="Filter Store"
-            >
-              <MapPin className="w-4 h-4" />
-              {chosenStoreLabel}
-            </button>
-            {isAdmin && store.open && (
-              <>
-                <div className="fixed inset-0 z-40" onMouseDown={() => store.setOpen(false)} />
-                <div
-                  className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200"
-                  style={{ top: store.pos.top, left: store.pos.left, width: store.pos.width }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-gray-900">Store</h3>
-                    <button onClick={() => store.setOpen(false)} className="text-gray-400 hover:text-gray-600">
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <div className="p-3 max-h-[300px] overflow-auto">
-                    <div className="mb-2">
-                      <button
-                        className={`w-full text-left px-3 py-2 rounded-md border ${!storeId ? 'bg-blue-50 border-blue-200' : 'border-transparent hover:bg-gray-50'}`}
-                        onClick={() => { onChangeStore(""); store.setOpen(false); }}
-                      >
-                        All Stores
-                      </button>
-                    </div>
-                    {stores.map((s) => (
-                      <button
-                        key={`${s.id}-${s.name}`}
-                        className={`w-full text-left px-3 py-2 rounded-md border ${storeId === String(s.id) ? 'bg-blue-50 border-blue-200' : 'border-transparent hover:bg-gray-50'}`}
-                        onClick={() => { onChangeStore(String(s.id)); store.setOpen(false); }}
-                        title={s.name}
-                      >
-                        {s.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
           </div>
 
           {/* General filter popover */}

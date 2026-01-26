@@ -1,11 +1,10 @@
 // src/components/reports/HistoryByItem.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Calendar, Download, Package, MapPin, X, Filter as FilterIcon, Eye } from "lucide-react";
+import { Search, Calendar, Download, Package, X, Filter as FilterIcon, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../data-table/DataTable";
 import { listSaleItems } from "../../api/reports";
 import { getMe } from "../../api/users";
-import { listStoreLocations } from "../../api/storeLocations";
 import { getProducts } from "../../api/products";
 import { getCategories, getSubCategories } from "../../api/categories";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
@@ -13,7 +12,6 @@ import * as XLSX from "xlsx";
 import HistoryItemDetailModal from "./HistoryItemDetailModal";
 
 const PER_PAGE = 10;
-const STORE_KEY = "history_store_id";
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: "", label: "All Methods" },
@@ -33,23 +31,13 @@ const todayStr = () => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-function defaultStoreFromMe(me) {
-  const id = me?.store_location_id ?? me?.store_location?.id;
-  return id ? String(id) : "";
-}
-function normalizeStores(arr = []) {
-  return (arr || [])
-    .filter((s) => s && s.id != null && s.name)
-    .map((s) => ({ id: String(s.id), name: s.name }));
-}
-
 export default function HistoryByItem() {
   // me & role
   const [me, setMe] = useState(null);
   const isAdmin = useMemo(() => String(me?.role || "").toLowerCase() === "admin", [me]);
-  const myStoreId = useMemo(() => defaultStoreFromMe(me), [me]);
 
   // filters
+  const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
   const [dateFrom, setDateFrom] = useState(todayStr());
   const [dateTo, setDateTo] = useState(todayStr());
@@ -69,10 +57,6 @@ export default function HistoryByItem() {
   // category lists
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
-
-  // store (admin boleh "", kasir terkunci myStoreId)
-  const [storeId, setStoreId] = useState("");
-  const [stores, setStores] = useState([]);
 
   // data
   const [rows, setRows] = useState([]);
@@ -111,13 +95,6 @@ export default function HistoryByItem() {
     });
     return m;
   }, [subCategories]);
-
-  // popover store
-  const storeBtnRef = useRef(null);
-  const store = useAnchoredPopover();
-  useEffect(() => {
-    store.setAnchor(storeBtnRef.current);
-  }, [store]);
 
   // popover filter
   const filterBtnRef = useRef(null);
@@ -165,36 +142,22 @@ export default function HistoryByItem() {
     setPage(1);
   };
 
-  // load me & stores (default dari getMe)
   useEffect(() => {
     (async () => {
       try {
-        const meRes = await getMe().catch(() => null);
+        const meRes = await getMe();
         setMe(meRes);
-
-        const def = defaultStoreFromMe(meRes);
-        setStoreId(def);
-        if (def) localStorage.setItem(STORE_KEY, def);
-
-        const { items: storesApi = [] } = await listStoreLocations({ per_page: 200 }).catch(() => ({}));
-        const normalized = normalizeStores(storesApi);
-
-        if (String(meRes?.role || "").toLowerCase() === "admin") {
-          setStores(normalized);
-        } else {
-          const mid = def;
-          const mname = meRes?.store_location?.name || "My Store";
-          setStores(mid ? [{ id: mid, name: mname }] : []);
-          if (mid) {
-            setStoreId(mid);
-            localStorage.setItem(STORE_KEY, mid);
-          }
-        }
-      } catch {
-        // noop
-      }
+      } catch {}
     })();
   }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(searchInput.trim());
+    }, 400); // delay debounce (ms)
+
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   // load categories + subcategories LIST (buat pilihan filter)
   useEffect(() => {
@@ -247,26 +210,16 @@ export default function HistoryByItem() {
   useEffect(() => {
     (async () => {
       try {
-        const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
-        const params = {
-          per_page: 1000,
-          ...(chosenStore ? { store_location_id: chosenStore, only_store: 1 } : {}),
-        };
-        const { items } = await getProducts(params);
+        const { items } = await getProducts({ per_page: 1000 });
         setProducts(items || []);
-      } catch {
-        // kalau gagal, category/subcategory di table jadi "-"
-      }
+      } catch {}
     })();
-  }, [isAdmin, storeId, myStoreId]);
+  }, []);
 
   const fetchList = useCallback(() => {
     const controller = new AbortController();
     setLoading(true);
 
-    // Admin: "" = All (pakai { all:1 } agar backend ambil semua), ada nilai → { store_id }
-    // Kasir: { store_id: myStoreId }
-    const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
     const params = {
       page,
       per_page: PER_PAGE,
@@ -274,14 +227,6 @@ export default function HistoryByItem() {
       date_to: dateTo || undefined,
       q: q || undefined,
       payment_method: paymentMethod || undefined,
-      ...(isAdmin
-        ? chosenStore
-          ? { store_id: chosenStore }
-          : { all: 1 }
-        : myStoreId
-        ? { store_id: String(myStoreId) }
-        : {}),
-      // filter category/subcategory sengaja TIDAK dikirim ke BE, kita filter di FE
     };
 
     listSaleItems(params, controller.signal)
@@ -302,7 +247,7 @@ export default function HistoryByItem() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [page, dateFrom, dateTo, q, storeId, isAdmin, myStoreId, paymentMethod]);
+  }, [page, dateFrom, dateTo, q, paymentMethod]);
 
   useEffect(() => {
     fetchList();
@@ -356,6 +301,13 @@ export default function HistoryByItem() {
     return new Date(d.getTime() - localOffsetMin * 60000);
   }
 
+  const truncateWords = (text, wordLimit = 5) => {
+    if (!text) return "";
+    const words = String(text).split(" ");
+    if (words.length <= wordLimit) return text;
+    return words.slice(0, wordLimit).join(" ") + "...";
+  };
+
   const columns = useMemo(
     () => [
       {
@@ -370,7 +322,7 @@ export default function HistoryByItem() {
             </div>
             <div className="min-w-0">
               <div className="font-medium text-gray-900 truncate" title={r.product_name}>
-                {r.product_name || "-"}
+                {truncateWords(r.product_name || "-")}
               </div>
               <div className="text-xs text-gray-500 truncate" title={r.sku}>
                 {r.sku || "-"}
@@ -382,7 +334,7 @@ export default function HistoryByItem() {
       {
         key: "category",
         header: "Category",
-        className: "hidden sm:table-cell min-w-[200px]",
+        className: "hidden sm:table-cell min-w-[160px]",
         cell: (r) => {
           const p = productMap[r.product_id];
           const catName = p?.category_id ? categoryNameMap[p.category_id] : "-";
@@ -481,10 +433,7 @@ export default function HistoryByItem() {
         "Payment Method Filter",
       ];
 
-      const chosenStore = isAdmin ? storeId : myStoreId ? String(myStoreId) : "";
-      const storeName = chosenStore
-        ? stores.find((s) => s.id === chosenStore)?.name || chosenStore
-        : "All Stores";
+      const storeName = me?.store_location?.name || "My Store";
 
       const paymentLabel =
         PAYMENT_METHOD_OPTIONS.find((opt) => opt.value === paymentMethod)?.label || "All Methods";
@@ -531,7 +480,7 @@ export default function HistoryByItem() {
       XLSX.utils.book_append_sheet(wb, ws, "History By Item");
 
       const note = `${dateFrom || "all"}_to_${dateTo || "all"}_${
-        chosenStore ? `store_${chosenStore}` : "all-stores"
+        "auto-store"
       }_${paymentMethod || "all-methods"}`.replace(/[:\/\\]/g, "-");
 
       XLSX.writeFile(wb, `history-by-item_${note}.xlsx`);
@@ -542,21 +491,6 @@ export default function HistoryByItem() {
       toast.error("Gagal membuat Excel", { id: "exp-xlsx" });
     }
   };
-
-  const onChangeStore = (val) => {
-    if (!isAdmin) return; // kasir terkunci
-    setStoreId(val); // "" = All Stores
-    localStorage.setItem(STORE_KEY, val);
-    setPage(1);
-  };
-
-  const chosenStoreLabel = useMemo(() => {
-    if (!isAdmin) {
-      return me?.store_location?.name || "My Store";
-    }
-    if (!storeId) return "All Stores";
-    return stores.find((s) => s.id === storeId)?.name || "Selected Store";
-  }, [isAdmin, storeId, stores, me]);
 
   return (
     <>
@@ -569,79 +503,13 @@ export default function HistoryByItem() {
             <input
               type="text"
               placeholder="Cari product / SKU..."
-              value={q}
+              value={searchInput}
               onChange={(e) => {
-                setQ(e.target.value);
+                setSearchInput(e.target.value);
                 setPage(1);
               }}
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
             />
-          </div>
-
-          {/* store popover */}
-          <div className="relative">
-            <button
-              ref={storeBtnRef}
-              onClick={() => isAdmin && store.setOpen(!store.open)}
-              disabled={!isAdmin}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border ${
-                isAdmin
-                  ? "text-gray-700 bg-white border-gray-300 hover:bg-gray-50"
-                  : "text-gray-400 bg-gray-50 border-gray-200 cursor-not-allowed"
-              }`}
-            >
-              <MapPin className="w-4 h-4" />
-              {chosenStoreLabel}
-            </button>
-            {isAdmin && store.open && (
-              <>
-                <div className="fixed inset-0 z-40" onMouseDown={() => store.setOpen(false)} />
-                <div
-                  className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200"
-                  style={{ top: store.pos.top, left: store.pos.left, width: store.pos.width }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                >
-                  <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-gray-900">Store</h3>
-                    <button onClick={() => store.setOpen(false)} className="text-gray-400 hover:text-gray-600">
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <div className="p-3 max-h-[300px] overflow-auto">
-                    <div className="mb-2">
-                      <button
-                        className={`w-full text-left px-3 py-2 rounded-md border ${
-                          !storeId ? "bg-blue-50 border-blue-200" : "border-transparent hover:bg-gray-50"
-                        }`}
-                        onClick={() => {
-                          onChangeStore("");
-                          store.setOpen(false);
-                        }}
-                      >
-                        All Stores
-                      </button>
-                    </div>
-                    {stores.map((s) => (
-                      <button
-                        key={`${s.id}-${s.name}`}
-                        className={`w-full text-left px-3 py-2 rounded-md border ${
-                          storeId === String(s.id)
-                            ? "bg-blue-50 border-blue-200"
-                            : "border-transparent hover:bg-gray-50"
-                        }`}
-                        onClick={() => {
-                          onChangeStore(String(s.id));
-                          store.setOpen(false);
-                        }}
-                        title={s.name}
-                      >
-                        {s.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
           </div>
 
           {/* date range */}
@@ -809,9 +677,6 @@ export default function HistoryByItem() {
           dateFrom,
           dateTo,
           paymentMethod,
-          isAdmin,
-          storeId,
-          myStoreId,
         }}
       />
     </>

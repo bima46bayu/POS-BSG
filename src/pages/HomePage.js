@@ -136,18 +136,30 @@ export default function HomePage() {
   const me = meQ.data;
   const isCashier = (me?.role || "") === "kasir";
 
-  // Kunci filter saat kasir (1 hari + cabang user)
+  // Kunci filter saat kasir (1 hari + cabang user) + set default store untuk admin
   React.useEffect(() => {
-    if (!me || !isCashier) return;
+    if (!me) return;
     const today = new Date().toISOString().slice(0, 10);
-    setFilters((prev) => ({
-      ...prev,
-      from: today,
-      to: today,
-      storeId: me.store_location_id ? String(me.store_location_id) : "",
-      search: "",
-      onlyDiscount: false,
-    }));
+    
+    if (isCashier) {
+      // Kasir: terkunci ke store_location_id mereka
+      setFilters((prev) => ({
+        ...prev,
+        from: today,
+        to: today,
+        storeId: me.store_location_id ? String(me.store_location_id) : "",
+        search: "",
+        onlyDiscount: false,
+      }));
+    } else {
+      // Admin: default ke store_location_id, tapi bisa diubah
+      setFilters((prev) => ({
+        ...prev,
+        from: today,
+        to: today,
+        storeId: prev.storeId || (me.store_location_id ? String(me.store_location_id) : ""),
+      }));
+    }
   }, [isCashier, me]);
 
   // Master data
@@ -385,6 +397,13 @@ export default function HomePage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {(salesQ.isFetching || allSummariesQ.isFetching) && (
+              <div className="text-sm text-slate-600 flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                Memuat data...
+              </div>
+            )}
+
             {/* Tombol Matriks Harian */}
             <button
               onClick={() => setMatrixOpen(true)}
@@ -404,13 +423,6 @@ export default function HomePage() {
               <FileText className="w-4 h-4" />
               <span className="text-sm font-medium">Payment Request</span>
             </button>
-
-            {(salesQ.isFetching || allSummariesQ.isFetching) && (
-              <div className="text-sm text-slate-600 flex items-center gap-2">
-                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                Memuat data...
-              </div>
-            )}
           </div>
         </div>
       </div>

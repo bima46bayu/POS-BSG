@@ -161,6 +161,8 @@ export default function POSPage() {
     staleTime: 30 * 60 * 1000,
   });
 
+  const mainScrollRef = React.useRef(null);
+
   /* ===== Products (infinite) ===== */
   const productsQuery = useInfiniteQuery({
     queryKey: [
@@ -377,23 +379,30 @@ export default function POSPage() {
 
   /* ===== Infinite scroll trigger ===== */
   useEffect(() => {
+    const el = mainScrollRef.current;
+    if (!el) return;
+
     function onScroll() {
       if (!hasMore || productsQuery.isFetchingNextPage) return;
-      if (
-        window.innerHeight + window.scrollY >=
-        document.body.offsetHeight - 200
-      ) {
+
+      const { scrollTop, scrollHeight, clientHeight } = el;
+
+      if (scrollTop + clientHeight >= scrollHeight - 200) {
         productsQuery.fetchNextPage();
       }
     }
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [hasMore, productsQuery.isFetchingNextPage, productsQuery.fetchNextPage]);
+
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [hasMore, productsQuery.isFetchingNextPage]);
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-50">
       {/* Main Content */}
-      <main className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-24 md:pb-0 relative z-0">
+      <main
+        ref={mainScrollRef}
+        className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-24 md:pb-0 relative z-0"
+      >
         <div className="max-w-6xl mx-auto">
           {/* Toolbar */}
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-4">

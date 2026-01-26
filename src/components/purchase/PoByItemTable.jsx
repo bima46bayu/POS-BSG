@@ -98,6 +98,13 @@ export default function PoByItemTable({
 
   const aggregated = useMemo(() => aggregateByProduct(details), [details]);
 
+  const truncateWords = (text, wordLimit = 8) => {
+    if (!text) return "";
+    const words = String(text).split(" ");
+    if (words.length <= wordLimit) return text;
+    return words.slice(0, wordLimit).join(" ") + "...";
+  };
+
   // Kolom untuk DataTable
   const columns = useMemo(
     () => [
@@ -105,7 +112,7 @@ export default function PoByItemTable({
         key: "product",
         header: "Product",
         width: "260px",
-        cell: (row) => row?.product?.name || `#${row.product_id}`,
+        cell: (row) => truncateWords(row?.product?.name || `#${row.product_id}`),
       },
       {
         key: "qty_order",
