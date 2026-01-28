@@ -343,14 +343,14 @@ export default function MasterUserPage() {
     {
       key: "name",
       header: "Name",
-      width: "220px",
+      width: "160px",
       sticky: "left",
       cell: (u) => <span className="font-medium text-gray-900">{u.name}</span>,
     },
     {
       key: "email",
       header: "Email",
-      width: "260px",
+      width: "160px",
       cell: (u) => <span className="text-gray-700">{u.email}</span>,
     },
     {
@@ -371,7 +371,7 @@ export default function MasterUserPage() {
     {
       key: "store",
       header: "Store",
-      width: "220px",
+      width: "140px",
       cell: (u) => <span className="text-gray-700">{resolveUserStoreName(u)}</span>,
     },
     {

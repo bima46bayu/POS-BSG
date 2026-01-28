@@ -42,32 +42,28 @@ api.interceptors.response.use(
   (r) => r,
   (err) => {
     const status = err?.response?.status;
-    if (status === 401) {
-      // bersihkan sesi
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
 
-      // emit sekali untuk batch 401 yg beruntun
-      if (!isEmitting401) {
-        isEmitting401 = true;
-        emitUnauthorized();
-        Promise.resolve().then(() => { isEmitting401 = false; });
+    if (status === 401) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
+
+      // ⬇️ TAMBAHKAN INI
+      if (!window.__redirecting401) {
+        window.__redirecting401 = true;
+
+        setTimeout(() => {
+          window.location.replace("/"); // halaman login
+        }, 100);
       }
 
-      // ⬇️ penting: JANGAN throw/reject
-      // kembalikan "fulfilled response" supaya tidak memicu overlay merah
-      // caller (React Query / fetcher) akan menerima { data: null, __unauthorized: true }
-      return Promise.resolve({
-        data: null,
-        status: 401,
-        headers: err?.response?.headers ?? {},
-        config: err?.config,
-        request: err?.request,
-        __unauthorized: true,
-      });
+      return Promise.reject(err);
     }
+
     return Promise.reject(err);
   }
 );
+
 
 // helper URL absolut (tetap)
 const ABS_URL = /^(https?:)?\/\//i;

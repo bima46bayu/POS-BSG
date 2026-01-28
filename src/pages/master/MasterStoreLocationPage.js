@@ -483,7 +483,7 @@ export default function MasterStoreLocationPage() {
       {
         key: "code",
         header: "Code",
-        width: "120px",
+        width: "80px",
         sticky: "left",
         className: "font-medium",
         cell: (r) => (
@@ -495,7 +495,7 @@ export default function MasterStoreLocationPage() {
       {
         key: "name",
         header: "Name",
-        width: "220px",
+        width: "180px",
         cell: (r) => (
           <span className="font-medium text-gray-900">{r.name}</span>
         ),
@@ -503,7 +503,7 @@ export default function MasterStoreLocationPage() {
       {
         key: "address",
         header: "Address",
-        width: "380px",
+        width: "300px",
         cell: (r) => (
           <span className="text-gray-700 text-xs">
             {truncateWords(r.address, 8)}
@@ -513,7 +513,7 @@ export default function MasterStoreLocationPage() {
       {
         key: "phone",
         header: "Phone",
-        width: "160px",
+        width: "140px",
         cell: (r) => (
           <span className="inline-flex items-center gap-1.5 text-xs text-gray-700">
             <Phone className="w-3.5 h-3.5 text-gray-400" />
@@ -604,7 +604,7 @@ export default function MasterStoreLocationPage() {
                   {
                     key: "__actions",
                     header: "Action",
-                    width: "190px",
+                    width: "120px",
                     sticky: "right",
                     align: "center",
                     cell: (r) => (

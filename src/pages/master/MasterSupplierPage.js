@@ -259,14 +259,14 @@ export default function MasterSupplierPage() {
     {
       key: "name",
       header: "Name",
-      width: "220px",
+      width: "180px",
       sticky: "left",
       cell: (r) => <span className="font-medium text-gray-900">{r.name}</span>,
     },
     {
       key: "type",
       header: "Type",
-      width: "120px",
+      width: "100px",
       align: "center",
       cell: (r) => (
         <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${badgeType(r.type)}`}>
@@ -277,7 +277,7 @@ export default function MasterSupplierPage() {
     {
       key: "contact",
       header: "Contact",
-      width: "220px",
+      width: "180px",
       cell: (r) => (
         <div className="flex flex-col text-gray-700 text-xs">
           <span className="inline-flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 text-gray-400" />{r.phone || "-"}</span>
@@ -288,7 +288,7 @@ export default function MasterSupplierPage() {
     {
       key: "pic",
       header: "PIC",
-      width: "180px",
+      width: "120px",
       cell: (r) => (
         <div className="flex flex-col text-gray-700 text-xs">
           <span className="font-medium">{r.pic_name || "-"}</span>
@@ -299,13 +299,13 @@ export default function MasterSupplierPage() {
     {
       key: "address",
       header: "Address",
-      width: "280px",
+      width: "200px",
       cell: (r) => <span className="text-gray-700 text-xs line-clamp-2">{truncateWords(r.address, 6) || "-"}</span>,
     },
     {
       key: "created_at",
       header: "Created",
-      width: "150px",
+      width: "140px",
       cell: (r) => (
         <div className="flex items-center gap-1.5 text-gray-700 text-xs">
           <Calendar className="w-3.5 h-3.5 text-gray-400" />
@@ -383,7 +383,7 @@ export default function MasterSupplierPage() {
                   {
                     key: "__actions",
                     header: "Action",
-                    width: "190px",
+                    width: "120px",
                     sticky: "right",
                     align: "center",
                     cell: (r) => (

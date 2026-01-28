@@ -399,65 +399,76 @@ export default function POSPage() {
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-50">
       {/* Main Content */}
-      <main
-        ref={mainScrollRef}
-        className="order-1 flex-1 p-4 sm:p-5 md:p-6 overflow-y-auto pb-24 md:pb-0 relative z-0"
-      >
-        <div className="max-w-6xl mx-auto">
-          {/* Toolbar */}
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-4">
-            <div className="flex-1">
-              <SearchBar
-                onSearch={handleSearch}
-                onScan={handleScan}
-                onFilterChange={handleFilterChange}
-                categories={categories}
-                subCategories={subCategories}
-                onPickCategory={setPickedCategory}
-                /* selector cabang untuk admin */
-                showStoreSelector={isAdmin}
-                storeOptions={[
-                  { value: "ALL", label: "Semua" },
-                  ...stores.map((s) => ({
-                    value: String(s.id),
-                    label: s.name,
-                  })),
-                ]}
-                selectedStoreId={selectedStoreId || "ALL"}
-                onChangeStore={(val) => setSelectedStoreId(val || "ALL")}
-                storeDisabled={storesQ.isLoading}
-              />
-            </div>
+      <main className="order-1 flex-1 flex flex-col relative bg-gray-50">
+
+        {/* ===== SearchBar (Sticky Header) ===== */}
+        <div className="sticky top-0 z-30 bg-gray-50">
+          <div className="max-w-6xl mx-auto px-3 sm:px-5 md:px-6 py-2 sm:py-3">
+            <SearchBar
+              onSearch={handleSearch}
+              onScan={handleScan}
+              onFilterChange={handleFilterChange}
+              categories={categories}
+              subCategories={subCategories}
+              onPickCategory={setPickedCategory}
+              showStoreSelector={isAdmin}
+              storeOptions={[
+                { value: "ALL", label: "Semua" },
+                ...stores.map((s) => ({
+                  value: String(s.id),
+                  label: s.name,
+                })),
+              ]}
+              selectedStoreId={selectedStoreId || "ALL"}
+              onChangeStore={(val) => setSelectedStoreId(val || "ALL")}
+              storeDisabled={storesQ.isLoading}
+            />
           </div>
-
-          {loading && (
-            <div className="text-gray-500 mt-3">Loading products…</div>
-          )}
-          {err && <div className="text-red-600 mt-3">{err}</div>}
-          {!loading && !err && filteredProducts.length === 0 && (
-            <div className="text-gray-500 mt-3">
-              {isAdmin && selectedStoreId === "ALL"
-                ? "Tidak ada produk (semua cabang)."
-                : "Tidak ada produk di cabang ini."}
-            </div>
-          )}
-
-          <ProductGrid
-            products={filteredProducts}
-            onAddToCart={handleAddToCart}
-          />
-
-          {loadingMore && (
-            <div className="text-center py-3 text-gray-500">
-              Loading more…
-            </div>
-          )}
-          {!hasMore && filteredProducts.length > 0 && (
-            <div className="text-center py-3 text-gray-400 text-sm">
-              Semua produk sudah ditampilkan
-            </div>
-          )}
         </div>
+
+        {/* ===== Product Scroll Area ===== */}
+        <div
+          ref={mainScrollRef}
+          className="flex-1 overflow-y-auto"
+        >
+          <div className="max-w-6xl mx-auto px-4 sm:px-5 md:px-6 pt-4 pb-24">
+
+            {loading && (
+              <div className="text-gray-500 mb-3">Loading products…</div>
+            )}
+
+            {err && (
+              <div className="text-red-600 mb-3">{err}</div>
+            )}
+
+            {!loading && !err && filteredProducts.length === 0 && (
+              <div className="text-gray-500 mb-3">
+                {isAdmin && selectedStoreId === "ALL"
+                  ? "Tidak ada produk (semua cabang)."
+                  : "Tidak ada produk di cabang ini."}
+              </div>
+            )}
+
+            <ProductGrid
+              products={filteredProducts}
+              onAddToCart={handleAddToCart}
+            />
+
+            {loadingMore && (
+              <div className="text-center py-3 text-gray-500">
+                Loading more…
+              </div>
+            )}
+
+            {!hasMore && filteredProducts.length > 0 && (
+              <div className="text-center py-3 text-gray-400 text-sm">
+                Semua produk sudah ditampilkan
+              </div>
+            )}
+
+          </div>
+        </div>
+
       </main>
 
       {/* Desktop order panel */}

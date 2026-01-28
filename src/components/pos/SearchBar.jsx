@@ -121,7 +121,7 @@ export default function SearchBar({
 
   return (
     <>
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-2 mb-4">
+      <div className="flex w-full flex-wrap items-center gap-1.5 sm:gap-2 py-1 sm:py-2 mt-1 sm:mt-2">
         {/* Search pill */}
         <div className="relative flex-1">
           <input

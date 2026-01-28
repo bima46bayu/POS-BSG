@@ -720,28 +720,38 @@ export default function MasterDiscountPage() {
       {
         key: "name",
         header: "Name",
-        width: "320px",
+        width: "280px",
         sticky: "left",
-        cell: (r) => (
-          <div className="flex items-center gap-2">
-            <BadgePercent className="w-4 h-4 text-gray-400" />
-            <span className="font-medium text-gray-900">{r.name}</span>
-          </div>
-        ),
+        cell: (r) => {
+          const truncateWords = (text, limit = 5) => {
+            if (!text) return "-";
+            const words = String(text).split(" ");
+            if (words.length <= limit) return text;
+            return words.slice(0, limit).join(" ") + "...";
+          };
+          return (
+            <div className="flex items-center gap-2">
+              <BadgePercent className="w-4 h-4 text-gray-400" />
+              <span className="font-medium text-gray-900 truncate" title={r.name}>
+                {truncateWords(r.name, 5)}
+              </span>
+            </div>
+          );
+        },
       },
-      { key: "scope", header: "Scope", width: "140px", cell: (r) => <span className="text-xs">{r.scope}</span> },
-      { key: "kind", header: "Kind", width: "140px", cell: (r) => <span className="text-xs">{r.kind}</span> },
+      { key: "scope", header: "Scope", width: "80px", cell: (r) => <span className="text-xs">{r.scope}</span> },
+      { key: "kind", header: "Kind", width: "80px", cell: (r) => <span className="text-xs">{r.kind}</span> },
       {
         key: "value",
         header: "Value",
-        width: "160px",
+        width: "80px",
         align: "right",
         cell: (r) => <span className="font-medium">{discountLabel(r)}</span>,
       },
       {
         key: "max_amount",
         header: "Max Amount",
-        width: "160px",
+        width: "140px",
         align: "right",
         cell: (r) => (
           <span className="text-xs text-gray-800">
@@ -752,7 +762,7 @@ export default function MasterDiscountPage() {
       {
         key: "min_subtotal",
         header: "Min Amount",
-        width: "160px",
+        width: "140px",
         align: "right",
         cell: (r) => (
           <span className="text-xs text-gray-800">
