@@ -56,7 +56,7 @@ const todayStr = () => {
 const isWithinDateRange = (iso, start, end) => {
   if (!iso) return false;
 
-  const d = new Date(iso);
+  const d = new Date(iso); // waktu lokal
 
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -66,10 +66,8 @@ const isWithinDateRange = (iso, start, end) => {
 
   if (start && localDate < start) return false;
   if (end && localDate > end) return false;
-
   return true;
 };
-
 
 export default function HistoryByTransaction() {
   // ===== me / role & stores =====
