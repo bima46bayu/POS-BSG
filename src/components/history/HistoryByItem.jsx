@@ -293,15 +293,7 @@ export default function HistoryByItem() {
 
   function parseAsLocal(dateStr) {
     if (!dateStr) return null;
-
-    // ubah "2026-01-25 10:00:00" → "2026-01-25T10:00:00"
-    const fixed = dateStr.replace(" ", "T");
-
-    const d = new Date(fixed);
-
-    // paksa anggap sebagai WIB (hapus offset browser)
-    const localOffsetMin = d.getTimezoneOffset();
-    return new Date(d.getTime() - localOffsetMin * 60000);
+    return new Date(dateStr.replace(" ", "T"));
   }
 
   const truncateWords = (text, wordLimit = 5) => {

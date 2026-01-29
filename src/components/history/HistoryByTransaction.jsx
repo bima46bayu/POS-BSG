@@ -55,11 +55,21 @@ const todayStr = () => {
 
 const isWithinDateRange = (iso, start, end) => {
   if (!iso) return false;
-  const d = String(iso).slice(0, 10);
-  if (start && d < start) return false;
-  if (end && d > end) return false;
+
+  const d = new Date(iso);
+
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+
+  const localDate = `${yyyy}-${mm}-${dd}`;
+
+  if (start && localDate < start) return false;
+  if (end && localDate > end) return false;
+
   return true;
 };
+
 
 export default function HistoryByTransaction() {
   // ===== me / role & stores =====
