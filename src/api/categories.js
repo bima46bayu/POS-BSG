@@ -183,3 +183,20 @@ export async function deleteSubCategory(id, signal) {
   const { data } = await api.delete(`/api/sub-categories/${id}`, { signal });
   return data;
 }
+
+/** ========= REPORTS ========= */
+
+/**
+ * Report subcategory per month (aggregated from backend)
+ * @param {{ year?: number }} params
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<{ year:number, data: Record<string, Array<{category, subcategory, products, revenue}>> }>}
+ */
+export async function getSubcategoryMonthlyReport(params = {}, signal) {
+  const { data } = await api.get("/api/reports/subcategory-month", {
+    params,
+    signal,
+  });
+
+  return data;
+}

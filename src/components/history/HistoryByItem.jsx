@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Search, Calendar, Download, Package, X, Filter as FilterIcon, Eye } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../data-table/DataTable";
+import DateRangePicker from "../DateRangePicker";
 import { listSaleItems } from "../../api/reports";
 import { getMe } from "../../api/users";
 import { getProducts } from "../../api/products";
@@ -39,8 +40,7 @@ export default function HistoryByItem() {
   // filters
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
-  const [dateFrom, setDateFrom] = useState(todayStr());
-  const [dateTo, setDateTo] = useState(todayStr());
+  const [dateRange, setDateRange] = useState({ start: todayStr(), end: todayStr() });
 
   // category filters (real value)
   const [categoryId, setCategoryId] = useState("");
@@ -98,8 +98,11 @@ export default function HistoryByItem() {
 
   // popover filter
   const filterBtnRef = useRef(null);
+  const dateRangeBtnRef = useRef(null);
   const [showFilters, setShowFilters] = useState(false);
   const [filterPos, setFilterPos] = useState({ top: 0, left: 0, width: 320 });
+  const dateRangePopover = useAnchoredPopover();
+  useEffect(() => { dateRangePopover.setAnchor(dateRangeBtnRef.current); }, [dateRangePopover]);
 
   const openFilterPopover = () => {
     const el = filterBtnRef.current;
@@ -223,8 +226,8 @@ export default function HistoryByItem() {
     const params = {
       page,
       per_page: PER_PAGE,
-      date_from: dateFrom || undefined,
-      date_to: dateTo || undefined,
+      date_from: dateRange.start || undefined,
+      date_to: dateRange.end || undefined,
       q: q || undefined,
       payment_method: paymentMethod || undefined,
     };
@@ -247,7 +250,7 @@ export default function HistoryByItem() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [page, dateFrom, dateTo, q, paymentMethod]);
+  }, [page, dateRange, q, paymentMethod]);
 
   useEffect(() => {
     fetchList();
@@ -479,7 +482,7 @@ export default function HistoryByItem() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "History By Item");
 
-      const note = `${dateFrom || "all"}_to_${dateTo || "all"}_${
+      const note = `${dateRange.start || "all"}_to_${dateRange.end || "all"}_${
         "auto-store"
       }_${paymentMethod || "all-methods"}`.replace(/[:\/\\]/g, "-");
 
@@ -512,26 +515,34 @@ export default function HistoryByItem() {
             />
           </div>
 
-          {/* date range */}
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => {
-                setDateFrom(e.target.value);
-                setPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-            />
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => {
-                setDateTo(e.target.value);
-                setPage(1);
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
-            />
+          {/* Date Range Button */}
+          <div className="relative">
+            <button
+              ref={dateRangeBtnRef}
+              onClick={() => dateRangePopover.setOpen(!dateRangePopover.open)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 whitespace-nowrap"
+            >
+              <Calendar className="w-4 h-4" />
+              {dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} - ${dateRange.end}`}
+            </button>
+            {dateRangePopover.open && (
+              <>
+                <div className="fixed inset-0 z-40" onMouseDown={() => dateRangePopover.setOpen(false)} />
+                <div
+                  className="fixed z-50"
+                  style={{ top: dateRangePopover.pos.top, left: dateRangePopover.pos.left }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <DateRangePicker
+                    startDate={dateRange.start}
+                    endDate={dateRange.end}
+                    onStartChange={(d) => setDateRange(p => ({ ...p, start: d }))}
+                    onEndChange={(d) => setDateRange(p => ({ ...p, end: d }))}
+                    onClose={() => { dateRangePopover.setOpen(false); setPage(1); }}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           {/* Filter button (Category, Subcategory, Payment Method) */}
@@ -674,8 +685,7 @@ export default function HistoryByItem() {
         onClose={handleCloseDetail}
         row={detailRow}
         filters={{
-          dateFrom,
-          dateTo,
+          dateRange,
           paymentMethod,
         }}
       />

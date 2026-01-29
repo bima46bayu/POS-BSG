@@ -483,8 +483,11 @@ export default function InventoryProductsPage() {
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-800">Inventory Products</h2>
+        <p className="text-xs text-gray-500">
+          Store aktif: <span className="font-medium">{me?.store_location?.name}</span>
+        </p>
       </div>
 
       {/* Controls */}

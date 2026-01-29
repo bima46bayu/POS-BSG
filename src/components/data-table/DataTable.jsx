@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 
 /**
  * DataTable (headerless)
@@ -238,8 +238,33 @@ export default function DataTable({
 
         const page = meta?.current_page || currentPage || 1;
 
+        const handleGoToPage = (e) => {
+          const val = parseInt(e.target.value, 10);
+          if (val > 0 && val <= computedTotalPages) {
+            onPageChange(val);
+            e.target.value = '';
+          }
+        };
+
         return (
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <select
+                value=""
+                onChange={handleGoToPage}
+                className="pl-3 pr-9 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer appearance-none"
+                title="Go to page"
+              >
+                <option value="">Page {page}</option>
+                {Array.from({ length: computedTotalPages }, (_, i) => i + 1).map((p) => (
+                  <option key={p} value={p}>
+                    Page {p}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+            </div>
+
             <button
               onClick={() => onPageChange(Math.max(1, page - 1))}
               disabled={page <= 1}

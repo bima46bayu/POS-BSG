@@ -3,6 +3,7 @@ import { Calendar, X, Search, Filter, Download, XCircle, Eye } from "lucide-reac
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
 import DataTable from "../data-table/DataTable";
+import DateRangePicker from "../DateRangePicker";
 import { getSales, getSale, voidSale } from "../../api/sales";
 import { getMe } from "../../api/users";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
@@ -46,6 +47,12 @@ const STATUS_OPTIONS = [
 ];
 
 const normMethodKey = (m) => (m === "QRIS" ? "QRIS" : String(m || "").toLowerCase());
+const todayStr = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 const isWithinDateRange = (iso, start, end) => {
   if (!iso) return false;
   const d = String(iso).slice(0, 10);
@@ -75,14 +82,20 @@ export default function HistoryByTransaction() {
   // general filters
   const [paymentMethod, setPaymentMethod] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [dateRange, setDateRange] = useState({ start: "", end: "" });
+  const [dateRange, setDateRange] = useState({ start: todayStr(), end: todayStr() });
 
   // popovers
   const generalBtnRef = useRef(null);
   const storeBtnRef = useRef(null);
+  const dateRangeBtnRef = useRef(null);
   const general = useAnchoredPopover();
   const store = useAnchoredPopover();
-  useEffect(() => { general.setAnchor(generalBtnRef.current); store.setAnchor(storeBtnRef.current); }, [general, store]);
+  const dateRangePopover = useAnchoredPopover();
+  useEffect(() => { 
+    general.setAnchor(generalBtnRef.current); 
+    store.setAnchor(storeBtnRef.current); 
+    dateRangePopover.setAnchor(dateRangeBtnRef.current);
+  }, [general, store, dateRangePopover]);
 
   // ===== init: me & stores, set default store =====
   useEffect(() => {
@@ -376,7 +389,24 @@ export default function HistoryByTransaction() {
     { key: "created_at", header: "Tanggal", cell: (row) => <DateCell row={row} /> },
     { key: "customer_name", header: "Customer", cell: (row) => <TextCell title={row.customer_name || "General"}>{row.customer_name || "General"}</TextCell> },
     { key: "status", header: "Status", className: "hidden sm:table-cell", cell: (row) => <StatusBadge status={row.status} /> },
-    { key: "subtotal", header: "Sub Total", align: "right", className: "hidden sm:table-cell", cell: (row) => <TextCell title={String(formatIDR(row.final_total))}>{formatIDR(row.final_total)}</TextCell> },
+    {
+      key: "subtotal",
+      header: "Sub Total",
+      align: "right",
+      className: "hidden sm:table-cell",
+      cell: (row) => {
+      const value =
+        row.final_total === null || row.final_total === 0
+          ? row.total ?? 0
+          : row.final_total;
+
+      return (
+        <TextCell title={String(formatIDR(value))}>
+          {formatIDR(value)}
+        </TextCell>
+      );
+    },
+    },
     {
       key: "paid",
       header: "Pay",
@@ -471,6 +501,36 @@ export default function HistoryByTransaction() {
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
             />
           </div>
+          
+          {/* Date Range Button */}
+          <div className="relative">
+            <button
+              ref={dateRangeBtnRef}
+              onClick={() => dateRangePopover.setOpen(!dateRangePopover.open)}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              <Calendar className="w-4 h-4" />
+              {dateRange.start === dateRange.end ? dateRange.start : `${dateRange.start} - ${dateRange.end}`}
+            </button>
+            {dateRangePopover.open && (
+              <>
+                <div className="fixed inset-0 z-40" onMouseDown={() => dateRangePopover.setOpen(false)} />
+                <div
+                  className="fixed z-50"
+                  style={{ top: dateRangePopover.pos.top, left: dateRangePopover.pos.left }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <DateRangePicker
+                    startDate={dateRange.start}
+                    endDate={dateRange.end}
+                    onStartChange={(d) => setDateRange(p => ({ ...p, start: d }))}
+                    onEndChange={(d) => setDateRange(p => ({ ...p, end: d }))}
+                    onClose={() => { dateRangePopover.setOpen(false); setCurrentPage(1); }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
 
           {/* General filter popover */}
           <div className="relative">
@@ -481,9 +541,9 @@ export default function HistoryByTransaction() {
             >
               <Filter className="w-4 h-4" />
               Filter
-              {(paymentMethod || dateRange.start || dateRange.end || statusFilter) && (
+              {(paymentMethod || statusFilter) && (
                 <span className="ml-1 px-2 py-0.5 text-xs bg-blue-500 text-white rounded-full">
-                  {(paymentMethod ? 1 : 0) + (dateRange.start ? 1 : 0) + (dateRange.end ? 1 : 0) + (statusFilter ? 1 : 0)}
+                  {(paymentMethod ? 1 : 0) + (statusFilter ? 1 : 0)}
                 </span>
               )}
             </button>
@@ -512,13 +572,6 @@ export default function HistoryByTransaction() {
                         <option value="">All</option>
                         {METHOD_OPTIONS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                       </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Date Range</label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input type="date" value={dateRange.start} onChange={(e) => { setDateRange(p => ({ ...p, start: e.target.value })); setCurrentPage(1); }} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-                        <input type="date" value={dateRange.end}   onChange={(e) => { setDateRange(p => ({ ...p, end: e.target.value }));   setCurrentPage(1); }} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-                      </div>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
@@ -556,6 +609,40 @@ export default function HistoryByTransaction() {
             Export Excel
           </button>
         </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+          <div className="text-sm text-gray-600 font-medium">Total Transaksi</div>
+          <div className="text-2xl font-bold text-gray-900 mt-1">
+            {(filteredSorted || []).length.toLocaleString("id-ID")}
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+          <div className="text-sm text-gray-600 font-medium">Total Produk Terjual</div>
+          <div className="text-2xl font-bold text-blue-600 mt-1">
+            {((filteredSorted || []).reduce((sum, r) => {
+              const items = Array.isArray(r.items) ? r.items : [];
+              return sum + items.reduce((itemSum, item) => itemSum + toNumber(item.qty || item.quantity || 1), 0);
+            }, 0)).toLocaleString("id-ID")}
+          </div>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="text-sm text-gray-600 font-medium">Total Pendapatan</div>
+        <div className="text-2xl font-bold text-emerald-600 mt-1">
+          {formatIDR(
+            (filteredSorted || []).reduce((sum, r) => {
+              const value =
+                r.final_total === null || r.final_total === 0 || r.final_total === undefined
+                  ? r.total ?? 0
+                  : r.final_total;
+
+              return sum + toNumber(value);
+            }, 0)
+          )}
+        </div>
+      </div>
       </div>
 
       {/* Table */}

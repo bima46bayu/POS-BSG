@@ -13,6 +13,12 @@ const OrderItem = ({
   const formatCurrency = (amount) =>
     `Rp${Number(amount || 0).toLocaleString("id-ID")}`;
 
+  // Batasan nama item maksimal 20 karakter
+  const truncateCharacter = (name, maxLength = 28) => {
+    if (!name) return "";
+    return name.length > maxLength ? name.substring(0, maxLength) + "..." : name;
+  };
+
   /* ===== Product Thumbnail ===== */
   function ProductThumb({ src, alt }) {
     const [err, setErr] = React.useState(false);
@@ -51,8 +57,11 @@ const OrderItem = ({
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="text-gray-800 font-medium truncate">
-            {item.name}
+          <div 
+            className="text-gray-800 font-medium truncate"
+            title={item.name}
+          >
+            {truncateCharacter(item.name)}
           </div>
           <div className="text-xs text-gray-500">
             Harga: {formatCurrency(unitPrice)}

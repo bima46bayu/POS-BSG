@@ -17,7 +17,7 @@ import { toAbsoluteUrl } from "../api/client";
 import { listDiscounts } from "../api/discounts";
 import { listAdditionalCharges } from "../api/additionalCharges";
 
-const PER_PAGE = 60;
+const PER_PAGE = 30;
 const TAX_RATE = 0;
 
 /* ===== Debounce util ===== */

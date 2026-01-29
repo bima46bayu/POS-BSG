@@ -1,6 +1,8 @@
 // src/components/dashboard/FilterBar.jsx
-import React from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { Search, Calendar, Store, Tag, Download, ChevronDown } from "lucide-react";
+import DateRangePicker from "../DateRangePicker";
+import useAnchoredPopover from "../../lib/useAnchoredPopover";
 
 export default function FilterBar({
   filters,
@@ -10,6 +12,10 @@ export default function FilterBar({
   isLoading,
   locked = false,
 }) {
+  const dateRangeBtnRef = useRef(null);
+  const dateRangePopover = useAnchoredPopover();
+  useEffect(() => { dateRangePopover.setAnchor(dateRangeBtnRef.current); }, [dateRangePopover]);
+
   const onChange = (patch) => {
     if (locked) return; // cegah perubahan di mode terkunci, kecuali yang kita izinkan di bawah
     setFilters((prev) => ({ ...prev, ...patch }));
@@ -27,8 +33,8 @@ export default function FilterBar({
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
         {/* gunakan lebar kolom yang sama seperti mode normal */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
-          {/* Pencarian (tidak aktif) - lebar 4 kolom */}
-          <div className="lg:col-span-4">
+          {/* Pencarian (tidak aktif) */}
+          <div className="lg:col-span-6">
             <label className="block text-sm font-medium text-slate-700 mb-2">Pencarian</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -38,30 +44,18 @@ export default function FilterBar({
             </div>
           </div>
 
-          {/* Dari Tanggal (read-only) - lebar 3 kolom */}
+          {/* Periode (read-only) */}
           <div className="lg:col-span-3">
-            <label className="block text-sm font-medium text-slate-700 mb-2">Dari Tanggal</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Periode</label>
             <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <div className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-700">
-                {filters.from}
+              <div className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-700">
+                {filters.from === filters.to ? filters.from : `${filters.from} - ${filters.to}`}
               </div>
             </div>
           </div>
 
-          {/* Sampai Tanggal (read-only) - lebar 3 kolom */}
+          {/* Cabang (read-only) */}
           <div className="lg:col-span-3">
-            <label className="block text-sm font-medium text-slate-700 mb-2">Sampai Tanggal</label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <div className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-700">
-                {filters.to}
-              </div>
-            </div>
-          </div>
-
-          {/* Cabang (read-only) - lebar 2 kolom */}
-          <div className="lg:col-span-2">
             <label className="block text-sm font-medium text-slate-700 mb-2">Cabang</label>
             <div className="relative">
               <Store className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -105,7 +99,7 @@ export default function FilterBar({
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
-        <div className="lg:col-span-4">
+        <div className="lg:col-span-7">
           <label className="block text-sm font-medium text-slate-700 mb-2">Pencarian</label>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -120,28 +114,34 @@ export default function FilterBar({
         </div>
 
         <div className="lg:col-span-3">
-          <label className="block text-sm font-medium text-slate-700 mb-2">Dari Tanggal</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Periode</label>
           <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="date"
-              value={filters.from}
-              onChange={(e) => onChange({ from: e.target.value })}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="lg:col-span-3">
-          <label className="block text-sm font-medium text-slate-700 mb-2">Sampai Tanggal</label>
-          <div className="relative">
-            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="date"
-              value={filters.to}
-              onChange={(e) => onChange({ to: e.target.value })}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-            />
+            <button
+              ref={dateRangeBtnRef}
+              onClick={() => dateRangePopover.setOpen(!dateRangePopover.open)}
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-left flex items-center gap-2 bg-white hover:bg-slate-50"
+            >
+              <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+              <span className="truncate">{filters.from === filters.to ? filters.from : `${filters.from} - ${filters.to}`}</span>
+            </button>
+            {dateRangePopover.open && (
+              <>
+                <div className="fixed inset-0 z-40" onMouseDown={() => dateRangePopover.setOpen(false)} />
+                <div
+                  className="fixed z-50"
+                  style={{ top: dateRangePopover.pos.top, left: dateRangePopover.pos.left }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <DateRangePicker
+                    startDate={filters.from}
+                    endDate={filters.to}
+                    onStartChange={(d) => onChange({ from: d })}
+                    onEndChange={(d) => onChange({ to: d })}
+                    onClose={() => dateRangePopover.setOpen(false)}
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
 
