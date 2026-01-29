@@ -226,6 +226,12 @@ export default function HistoryByTransaction() {
     sortDir,
   ]);
 
+  const summaryRows = useMemo(() => {
+    return (filteredSorted || []).filter(
+      (r) => String(r.status || "").toLowerCase() !== "void"
+    );
+  }, [filteredSorted]);
+
   // ===== paginate & meta normalize =====
   const { pageRows, meta } = useMemo(() => {
     if (clientFilterActive) {
@@ -616,23 +622,26 @@ export default function HistoryByTransaction() {
         <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
           <div className="text-sm text-gray-600 font-medium">Total Transaksi</div>
           <div className="text-2xl font-bold text-gray-900 mt-1">
-            {(filteredSorted || []).length.toLocaleString("id-ID")}
+            {summaryRows.length.toLocaleString("id-ID")}
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
           <div className="text-sm text-gray-600 font-medium">Total Produk Terjual</div>
           <div className="text-2xl font-bold text-blue-600 mt-1">
-            {((filteredSorted || []).reduce((sum, r) => {
+            {summaryRows.reduce((sum, r) => {
               const items = Array.isArray(r.items) ? r.items : [];
-              return sum + items.reduce((itemSum, item) => itemSum + toNumber(item.qty || item.quantity || 1), 0);
-            }, 0)).toLocaleString("id-ID")}
+              return sum + items.reduce(
+                (itemSum, item) => itemSum + toNumber(item.qty || item.quantity || 1),
+                0
+              );
+            }, 0).toLocaleString("id-ID")}
           </div>
         </div>
         <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <div className="text-sm text-gray-600 font-medium">Total Pendapatan</div>
         <div className="text-2xl font-bold text-emerald-600 mt-1">
           {formatIDR(
-            (filteredSorted || []).reduce((sum, r) => {
+            summaryRows.reduce((sum, r) => {
               const value =
                 r.final_total === null || r.final_total === 0 || r.final_total === undefined
                   ? r.total ?? 0
