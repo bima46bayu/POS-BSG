@@ -338,17 +338,12 @@ export default function HistoryByItem() {
         key: "category",
         header: "Category",
         className: "hidden sm:table-cell min-w-[160px]",
-        cell: (r) => {
-          const p = productMap[r.product_id];
-          const catName = p?.category_id ? categoryNameMap[p.category_id] : "-";
-          const subName = p?.sub_category_id ? subCategoryNameMap[p.sub_category_id] : "";
-          return (
-            <div className="flex flex-col">
-              <span className="text-sm text-gray-900">{catName || "-"}</span>
-              <span className="text-xs text-gray-500">{subName || ""}</span>
-            </div>
-          );
-        },
+        cell: (r) => (
+          <div className="flex flex-col">
+            <span className="text-sm text-gray-900">{r.category_name || "-"}</span>
+            <span className="text-xs text-gray-500">{r.subcategory_name || ""}</span>
+          </div>
+        ),
       },
       {
         key: "qty",
@@ -444,9 +439,8 @@ export default function HistoryByItem() {
       const rowsX = filteredRows.map((r) => {
         const qty = toNumber(r.qty) || 1;
         const avg = Math.round(toNumber(r.gross) / qty);
-        const p = productMap[r.product_id];
-        const catName = p?.category_id ? categoryNameMap[p.category_id] : "-";
-        const subName = p?.sub_category_id ? subCategoryNameMap[p.sub_category_id] : "";
+        const catName = r.category_name || "-";
+        const subName = r.subcategory_name || "";
 
         return [
           r.sku || "-",
