@@ -30,19 +30,28 @@ const ProductCard = memo(function ProductCard({
       className={`flex flex-col bg-white rounded-2xl p-3 shadow-md hover:shadow-lg transition-shadow duration-150 ${className}`}
     >
       {/* Image area */}
-      <div className="w-full h-28 bg-gray-100 rounded-xl mb-2 overflow-hidden flex items-center justify-center">
-        {image ? (
-          <img
-            src={image}
-            alt={name}
-            className="max-h-full max-w-full object-contain"
-            loading="lazy"
-            decoding="async"
-          />
-        ) : (
-          <div className="text-gray-400 text-xs">No Image</div>
-        )}
-      </div>
+      <div className="relative w-full h-28 bg-gray-100 rounded-xl mb-2 overflow-hidden">
+      {image ? (
+        <img
+          src={image}
+          alt={name}
+          loading="lazy"
+          decoding="async"
+          className="
+            absolute inset-0
+            w-full h-full
+            object-contain
+            transition-opacity duration-300
+            opacity-0
+          "
+          onLoad={(e) => e.currentTarget.classList.remove("opacity-0")}
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center text-gray-400 text-xs">
+          No Image
+        </div>
+      )}
+    </div>
 
       {/* Info */}
       <div className="text-center mb-2">

@@ -405,9 +405,48 @@ export default function HistoryByItem() {
     [productMap, categoryNameMap, subCategoryNameMap]
   );
 
-  const exportExcel = () => {
+  async function fetchAllSaleItems(params) {
+    let page = 1;
+    let lastPage = 1;
+    const allItems = [];
+
+    do {
+      const res = await listSaleItems({
+        ...params,
+        page,
+        per_page: 200, // khusus export
+      });
+
+      allItems.push(...(res.items || []));
+      lastPage = res.meta?.last_page || 1;
+      page++;
+    } while (page <= lastPage);
+
+    return allItems;
+  }
+
+  const exportExcel = async () => {
     try {
       toast.loading("Menyiapkan Excel…", { id: "exp-xlsx" });
+
+      // 🔥 PARAMETER SAMA DENGAN TABLE
+      const params = {
+        date_from: dateRange.start || undefined,
+        date_to: dateRange.end || undefined,
+        q: q || undefined,
+        payment_method: paymentMethod || undefined,
+      };
+
+      // 🔥 FETCH SEMUA DATA (BUKAN DARI STATE TABLE)
+      const allRows = await fetchAllSaleItems(params);
+
+      // 🔥 APPLY FILTER CATEGORY / SUBCATEGORY DI FE
+      const finalRows = allRows.filter((r) => {
+        const p = productMap[r.product_id];
+        if (categoryId && String(p?.category_id) !== String(categoryId)) return false;
+        if (subCategoryId && String(p?.sub_category_id) !== String(subCategoryId)) return false;
+        return true;
+      });
 
       const header = [
         "SKU",
@@ -420,63 +459,41 @@ export default function HistoryByItem() {
         "Avg Price (IDR)",
         "Last Sold At",
         "Store",
-        "Payment Method Filter",
+        "Payment Method",
       ];
 
       const storeName = me?.store_location?.name || "My Store";
-
       const paymentLabel =
-        PAYMENT_METHOD_OPTIONS.find((opt) => opt.value === paymentMethod)?.label || "All Methods";
+        PAYMENT_METHOD_OPTIONS.find((p) => p.value === paymentMethod)?.label || "All Methods";
 
-      const rowsX = filteredRows.map((r) => {
+      const rowsX = finalRows.map((r) => {
         const qty = toNumber(r.qty) || 1;
         const avg = Math.round(toNumber(r.gross) / qty);
-        const catName = r.category_name || "-";
-        const subName = r.subcategory_name || "";
 
         return [
           r.sku || "-",
           r.product_name || "-",
-          catName || "-",
-          subName || "",
+          r.category_name || "-",
+          r.subcategory_name || "",
           toNumber(r.qty),
           toNumber(r.transaction_count),
           toNumber(r.gross),
           avg,
-          parseAsLocal(r.last_sold_at)
-            ? parseAsLocal(r.last_sold_at).toLocaleString("id-ID")
-            : "-",
+          r.last_sold_at || "-",
           storeName,
           paymentLabel,
         ];
       });
 
-      const aoa = [header, ...rowsX];
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-      // auto column width
-      const colWidths = header.map((h, i) => {
-        const maxLen = Math.max(
-          String(h).length,
-          ...rowsX.map((row) => String(row[i] ?? "").length)
-        );
-        return { wch: Math.min(Math.max(10, maxLen + 2), 40) };
-      });
-      ws["!cols"] = colWidths;
-
-      // ✅ BUAT WORKBOOK (INI YANG KURANG)
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rowsX]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "History By Item");
 
-      const note = `${dateRange.start || "all"}_to_${dateRange.end || "all"}_${
-        "auto-store"
-      }_${paymentMethod || "all-methods"}`.replace(/[:\/\\]/g, "-");
-
-      XLSX.writeFile(wb, `history-by-item_${note}.xlsx`);
+      XLSX.writeFile(wb, "history-by-item.xlsx");
 
       toast.success("Excel berhasil diunduh", { id: "exp-xlsx" });
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error(err);
       toast.error("Gagal membuat Excel", { id: "exp-xlsx" });
     }
   };
