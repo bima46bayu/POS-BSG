@@ -139,7 +139,7 @@ export default function GRModal({ open, onClose, purchaseId }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl w-full max-w-3xl">
+      <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] my-6 flex flex-col">
         <div className="p-5 border-b flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-blue-100 rounded-full">
@@ -183,7 +183,7 @@ export default function GRModal({ open, onClose, purchaseId }) {
           Sisa total: <b>{totalRemain}</b> | Terima sekarang: <b>{totalReceiveNow}</b>
         </div>
 
-        <div className="px-5 pb-5">
+        <div className="px-5 pb-5 overflow-y-auto">
           {isLoading && <div>Loading remaining items...</div>}
 
           {isError && (

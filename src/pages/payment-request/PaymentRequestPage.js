@@ -213,15 +213,16 @@ export default function PaymentRequestPage() {
     onError: () => toast.error("Gagal membuat payment request"),
   });
 
-  const mDelete = useMutation({
-    mutationFn: deletePaymentRequest,
-    onSuccess: () => {
-      toast.success("Payment request dihapus");
-      setConfirmDel(null);
-      qc.invalidateQueries(["payment-requests"]);
-    },
-    onError: () => toast.error("Gagal menghapus"),
-  });
+const mDelete = useMutation({
+  mutationFn: deletePaymentRequest,
+  onSuccess: async () => {
+    toast.success("Payment request dihapus");
+    setConfirmDel(null);
+
+    await qc.invalidateQueries({ queryKey: ["payment-requests"] });
+  },
+  onError: () => toast.error("Gagal menghapus"),
+});
 
   /* ===== Columns ===== */
 

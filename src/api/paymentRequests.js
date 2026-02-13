@@ -41,9 +41,9 @@ export async function createPaymentRequest(payload, signal) {
   return data;
 }
 
-export async function deletePaymentRequest(id, signal) {
-  const { data } = await api.delete(`api/payment-requests/${id}`, { signal });
-  return data;
+export async function deletePaymentRequest(id) {
+  const res = await api.delete(`api/payment-requests/${id}`);
+  return res.status;
 }
 
 export async function getPaymentRequestDetail(id, signal) {

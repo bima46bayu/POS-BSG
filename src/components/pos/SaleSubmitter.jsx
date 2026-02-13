@@ -1,5 +1,5 @@
 // src/components/pos/SaleSubmitter.jsx
-import React, { useMemo, useCallback, useState } from "react";
+import React, { useMemo, useCallback, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import html2canvas from "html2canvas";
@@ -191,30 +191,26 @@ export default function SaleSubmitter({
     [items]
   );
 
-  /* =======================
-     CONFIRM & SUBMIT
-     ======================= */
-  const confirmAndSubmit = () => {
-    if (!pendingPayment) return;
-    const p = pendingPayment;
+  const submittingRef = useRef(false);
 
-    // FE TIDAK VALIDASI TOTAL
-    // FE TIDAK KIRIM TOTAL
-    // BACKEND = SOURCE OF TRUTH
+  const confirmAndSubmit = () => {
+    if (submittingRef.current || saleMutation.isPending) return;
+    if (!pendingPayment) return;
+
+    submittingRef.current = true;
+
+    const p = pendingPayment;
 
     const payload = {
       customer_name: p.customer_name || null,
       note: p.note || null,
-
       items: items.map((i) => ({
         product_id: i.product_id ?? i.id,
         qty: Number(i.quantity || 0),
         unit_price: Number(i.price || 0),
         discount_id: i.item_discount_id ?? null,
       })),
-
       global_discount_id: p.global_discount_id ?? null,
-
       payments: [
         {
           method:
@@ -227,7 +223,14 @@ export default function SaleSubmitter({
       ],
     };
 
-    saleMutation.mutate(payload);
+    saleMutation.mutate(payload, {
+      onSuccess: () => {
+        submittingRef.current = false;
+      },
+      onError: () => {
+        submittingRef.current = false;
+      },
+    });
   };
 
   /* =======================
