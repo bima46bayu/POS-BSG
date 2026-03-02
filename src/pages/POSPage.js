@@ -1,6 +1,11 @@
 // src/pages/POSPage.jsx
-import React, { useCallback, useMemo, useEffect } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import React, { useCallback, useMemo, useEffect, useState } from "react";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import SearchBar from "../components/pos/SearchBar";
 import ProductGrid from "../components/pos/ProductGrid";
 import OrderDetails from "../components/pos/OrderDetails";
@@ -16,6 +21,17 @@ import { listStoreLocations } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
 import { listDiscounts } from "../api/discounts";
 import { listAdditionalCharges } from "../api/additionalCharges";
+import {
+  getCurrentRegister,
+  openRegister,
+  closeRegister,
+  getRegisterSession,
+} from "../api/registerSessions";
+import {
+  OpenRegisterModal,
+  RegisterSummaryModal,
+} from "../components/pos/RegisterModals";
+import html2canvas from "html2canvas";
 
 const PER_PAGE = 30;
 const TAX_RATE = 0;
@@ -163,6 +179,72 @@ export default function POSPage() {
 
   const mainScrollRef = React.useRef(null);
 
+  const queryClient = useQueryClient();
+
+  // ===== Register session =====
+  const pickCurrentRegister = (raw) => {
+    if (!raw) return null;
+    const candidate =
+      (raw && typeof raw === "object" && !Array.isArray(raw) && raw.session) ||
+      raw;
+    if (
+      candidate &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate) &&
+      (typeof candidate.id === "number" || typeof candidate.id === "string")
+    ) {
+      return candidate;
+    }
+    return null;
+  };
+
+  const registerQ = useQuery({
+    queryKey: ["register", "current"],
+    queryFn: ({ signal }) => getCurrentRegister(signal),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // normalisasi bentuk data register
+  const currentRegister = pickCurrentRegister(registerQ.data);
+  const registerReady = !!currentRegister;
+
+  const [openRegisterModal, setOpenRegisterModal] = useState(false);
+  const [registerSummary, setRegisterSummary] = useState(null);
+  const [registerClosed, setRegisterClosed] = useState(false);
+
+  const openRegisterMutation = useMutation({
+    mutationFn: openRegister,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["register", "current"] });
+      setOpenRegisterModal(false);
+      toast.success("Register berhasil dibuka.");
+    },
+    onError: (err) => {
+      toast.error(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Gagal membuka register"
+      );
+    },
+  });
+
+  const closeRegisterMutation = useMutation({
+    mutationFn: ({ id, payload }) => closeRegister(id, payload),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["register", "current"] });
+      setRegisterSummary(res);
+      setRegisterClosed(true);
+      toast.success("Register ditutup.");
+    },
+    onError: (err) => {
+      toast.error(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Gagal menutup register"
+      );
+    },
+  });
+
   /* ===== Products (infinite) ===== */
   const productsQuery = useInfiniteQuery({
     queryKey: [
@@ -228,6 +310,7 @@ export default function POSPage() {
   const loading =
     (productsQuery.isFetching && !productsQuery.isFetchingNextPage) ||
     meQ.isLoading ||
+    registerQ.isLoading ||
     (isAdmin && storesQ.isLoading && selectedStoreId === undefined);
   const loadingMore = productsQuery.isFetchingNextPage;
   const err =
@@ -422,6 +505,30 @@ export default function POSPage() {
               selectedStoreId={selectedStoreId || "ALL"}
               onChangeStore={(val) => setSelectedStoreId(val || "ALL")}
               storeDisabled={storesQ.isLoading}
+              registerState={
+                currentRegister
+                  ? { status: "open", session: currentRegister }
+                  : { status: "closed" }
+              }
+              onClickRegister={() => {
+                if (currentRegister) {
+                  // buka modal summary (preview) tanpa langsung close
+                  getRegisterSession(currentRegister.id)
+                    .then((res) => {
+                      setRegisterSummary(res);
+                      setRegisterClosed(false);
+                    })
+                    .catch((err) => {
+                      toast.error(
+                        err?.response?.data?.message ||
+                          err?.message ||
+                          "Gagal memuat summary register"
+                      );
+                    });
+                } else {
+                  setOpenRegisterModal(true);
+                }
+              }}
             />
           </div>
         </div>
@@ -429,7 +536,10 @@ export default function POSPage() {
         {/* ===== Product Scroll Area ===== */}
         <div
           ref={mainScrollRef}
-          className="flex-1 overflow-y-auto"
+          className={
+            "flex-1 overflow-y-auto " +
+            (!registerReady ? "opacity-40 pointer-events-none" : "")
+          }
         >
           <div className="max-w-6xl mx-auto px-4 sm:px-5 md:px-6 pt-4 pb-24">
 
@@ -473,11 +583,13 @@ export default function POSPage() {
 
       {/* Desktop order panel */}
       <aside
-        className="hidden md:block order-2 w-full md:w-[340px] lg
-        md:w-[400px] xl:w-[480px]
-                   bg-white border-t md:border-t-0 md:border-l border-gray-200
-                   p-4 sm:p-5 md:p-6 overflow-y-auto md:sticky md:top-0 md:h-screen
-                   relative z-10"
+        className={
+          "hidden md:block order-2 w-full md:w-[340px] md:w-[400px] xl:w-[480px] " +
+          "bg-white border-t md:border-t-0 md:border-l border-gray-200 " +
+          "p-4 sm:p-5 md:p-6 overflow-y-auto md:sticky md:top-0 md:h-screen " +
+          "relative z-10 " +
+          (!registerReady ? "opacity-40 pointer-events-none" : "")
+        }
       >
         <OrderDetails
           items={cartItems}
@@ -508,6 +620,7 @@ export default function POSPage() {
                 ? Number(selectedStoreId)
                 : undefined,
           }}
+          registerOpen={!!currentRegister}
         />
       </aside>
 
@@ -549,6 +662,52 @@ export default function POSPage() {
         additionalCharges={additionalCharges}
         onClearCart={() => setCartItems([])}
       />
+
+      {/* Open register modal */}
+      <OpenRegisterModal
+        open={openRegisterModal}
+        onClose={() => setOpenRegisterModal(false)}
+        onSubmit={(values) => openRegisterMutation.mutate(values)}
+        loading={openRegisterMutation.isPending}
+      />
+
+      {/* Register summary modal (preview & after close) */}
+      <RegisterSummaryModal
+        open={!!registerSummary}
+        onClose={() => {
+          setRegisterSummary(null);
+          setRegisterClosed(false);
+        }}
+        data={registerSummary}
+        isClosed={registerClosed}
+        closing={closeRegisterMutation.isPending}
+        onCloseRegister={(payload) => {
+          const sid =
+            registerSummary?.session?.id ??
+            registerSummary?.summary?.session_id ??
+            null;
+          if (!sid || closeRegisterMutation.isPending) return;
+
+          closeRegisterMutation.mutate({
+            id: sid,
+            payload: payload || {},
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+function SimpleModal({ children, onClose }) {
+  return (
+    <div className="fixed inset-0 z-[2147483000] flex items-center justify-center px-4">
+      <div
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+      <div className="relative bg-white rounded-2xl shadow-xl w-[min(720px,100%)] max-h-[90vh] overflow-auto">
+        {children}
+      </div>
     </div>
   );
 }

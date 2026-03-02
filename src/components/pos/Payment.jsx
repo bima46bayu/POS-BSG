@@ -24,6 +24,7 @@ export default function Payment({
   onCancel,
   loading,
   onSummaryChange,
+  registerOpen = true,
 }) {
   const [method, setMethod] = useState("cash");
   const [customer, setCustomer] = useState("General");
@@ -80,6 +81,7 @@ export default function Payment({
 
   const canSubmit = useMemo(() => {
     if (loading) return false;
+    if (!registerOpen) return false;
     if (finalTotal <= 0) return false;
     if (method === "cash") return Number(paid) >= finalTotal;
     return true;
@@ -259,6 +261,12 @@ export default function Payment({
           {loading ? "Processing…" : "Pay"}
         </button>
       </div>
+
+      {!registerOpen && (
+        <div className="mt-2 text-xs text-red-600">
+          Register belum dibuka. Silakan buka register terlebih dahulu sebelum melakukan pembayaran.
+        </div>
+      )}
     </div>
   );
 }

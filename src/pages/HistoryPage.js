@@ -5,6 +5,7 @@ import {
   HistoryByTransaction,
   HistoryByItem,
   HistoryBySubcategoryMonth,
+  HistoryByRegister,
 } from "../components/history";
 import { getMe } from "../api/users";
 
@@ -14,6 +15,7 @@ const TABS = [
   { id: "tx", label: "Transactions", icon: CalendarClock },
   { id: "item", label: "By Item", icon: PackageSearch },
   { id: "subcat_month", label: "Subcategory / Month", icon: Layers },
+  { id: "register", label: "Register", icon: CalendarClock },
 ];
 
 export default function HistoryPage() {
@@ -116,6 +118,7 @@ export default function HistoryPage() {
         {current === "tx" && <HistoryByTransaction />}
         {current === "item" && <HistoryByItem />}
         {current === "subcat_month" && <HistoryBySubcategoryMonth />}
+        {current === "register" && <HistoryByRegister />}
       </div>
     </div>
   );

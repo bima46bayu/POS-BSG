@@ -5,6 +5,7 @@ import {
   ChevronUp,
   ScanLine,
   Store as StoreIcon,
+  BadgeDollarSign,
 } from "lucide-react";
 
 export default function SearchBar({
@@ -21,6 +22,8 @@ export default function SearchBar({
   selectedStoreId,                           // string
   onChangeStore,                             // (val:string)=>void
   storeDisabled = false,                     // loading dsb.
+  registerState,                             // {status:'open'|'closed', session?:any}
+  onClickRegister,                           // () => void
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -224,6 +227,23 @@ export default function SearchBar({
         >
           <ScanLine className="h-4 w-4" />
           {scanActive ? "Scanning…" : "Scanner"}
+        </button>
+
+        {/* Register pill */}
+        <button
+          type="button"
+          onClick={onClickRegister}
+          className={`h-11 inline-flex items-center gap-2 rounded-full px-4 border text-sm font-medium transition
+            ${
+              registerState?.status === "open"
+                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+            }`}
+        >
+          <BadgeDollarSign className="h-4 w-4" />
+          {registerState?.status === "open"
+            ? "Close Register"
+            : "Open Register"}
         </button>
 
         {/* Store selector pill (admin only, custom dropdown) */}

@@ -70,6 +70,7 @@ export default function SaleSubmitter({
   onSuccess,
   onCancel,
   showSummary = true,
+  registerOpen = true,
 }) {
   /* =====================================================
      NET ITEM SUBTOTAL (IKUT BACKEND)
@@ -262,6 +263,7 @@ export default function SaleSubmitter({
         onPayment={handlePayment}
         onCancel={onCancel}
         loading={saleMutation.isLoading}
+        registerOpen={registerOpen}
         onSummaryChange={({ discountAmount }) => {
           setDiscountAmount(discountAmount);
         }}
