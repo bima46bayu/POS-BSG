@@ -82,7 +82,7 @@ export default function HistoryPage() {
 
           {/* Kanan: segmented tabs */}
           <div>
-            <div className="inline-flex bg-white border border-gray-200 rounded-lg p-1 shadow-sm grid grid-cols-3 gap-1.5 min-w-[480px]">
+            <div className="inline-flex bg-white border border-gray-200 rounded-lg p-1 shadow-sm gap-1.5">
               {TABS.map((t) => {
                 const Icon = t.icon;
                 const isActive = current === t.id;
@@ -92,7 +92,7 @@ export default function HistoryPage() {
                     key={t.id}
                     onClick={() => setTab(t.id)}
                     className={
-                      "flex-1 basis-0 inline-flex items-center justify-center gap-2 px-6 py-2 text-sm font-medium rounded-lg transition " +
+                      "flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition whitespace-nowrap " +
                       (isActive
                         ? "bg-blue-600 text-white shadow"
                         : "bg-transparent text-gray-500 hover:bg-gray-50")
