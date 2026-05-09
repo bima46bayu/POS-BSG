@@ -161,7 +161,7 @@ export default function InventoryProductsPage() {
 
     const baseForClient = {
       page: 1,
-      per_page: 100000,
+      per_page: 1000,
       search: searchTerm.trim() || undefined,
       sort: sortKey || undefined,
       dir: sortKey ? sortDir : undefined,

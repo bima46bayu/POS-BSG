@@ -147,8 +147,22 @@ export default function HistoryByTransaction() {
       dir: sortKey ? sortDir : undefined,
     };
 
+    // Push server-supported filters (from/to/status) even in client-filter mode
+    // so we don't pull the entire history for a JS filter.
+    // payment method is still client-only (server doesn't support it yet).
+    const serverFilterParams = {
+      ...baseParams,
+      from: dateRange.start || undefined,
+      to: dateRange.end || undefined,
+      status: statusFilter || undefined,
+    };
+
+    // Hard upper bound to protect the API from OOM. If a single date range
+    // ever exceeds this, the user must narrow the date range.
+    const CLIENT_FILTER_PER_PAGE = 1000;
+
     const params = clientFilterActive
-      ? { page: 1, per_page: 100000, ...baseParams }
+      ? { page: 1, per_page: CLIENT_FILTER_PER_PAGE, ...serverFilterParams }
       : { page: currentPage, per_page: PER_PAGE, ...baseParams };
 
     getSales(params, controller.signal)

@@ -553,16 +553,31 @@ export default function ProductPage() {
     try {
       toast.loading("Menyiapkan Excel...", { id: "exp" });
       const XLSX = await import("xlsx");
-      
-      const p = {
-        ...queryParams,
-        page: 1,
-        per_page: meta?.total || 100000,
-      };
-      const k = stableKey(p);
-      const hit = listCacheGet(k);
-      const { items } = hit || (await getProducts(p));
-      const list = (hit ? hit.items : items || []) || [];
+
+      // Fetch in chunks instead of asking the server for everything at once.
+      // The backend caps per_page anyway and a huge single page causes OOM
+      // on the server (LengthAwarePaginator JSON serialization).
+      const CHUNK_SIZE = 200;
+      const MAX_ROWS = 50000; // hard ceiling so an export can never run away
+
+      const list = [];
+      let page = 1;
+      let lastPage = 1;
+      do {
+        const params = {
+          ...queryParams,
+          page,
+          per_page: CHUNK_SIZE,
+        };
+        const k = stableKey(params);
+        const hit = listCacheGet(k);
+        const { items, meta: m } = hit || (await getProducts(params));
+        const rows = (hit ? hit.items : items) || [];
+        list.push(...rows);
+        lastPage = Number(m?.last_page ?? hit?.meta?.last_page ?? 1);
+        page += 1;
+        if (list.length >= MAX_ROWS) break;
+      } while (page <= lastPage);
 
       const data = list.map((r) => {
         const unitName = r.unit?.name || r.unit_name || r.unit || "";
