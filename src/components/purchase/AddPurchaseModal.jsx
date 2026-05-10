@@ -38,6 +38,25 @@ export default function AddPurchaseModal({ open, onClose }) {
   const [supplierOpen, setSupplierOpen] = useState(false);
   const [supplierSearch, setSupplierSearch] = useState("");
 
+  // debounced search (server-side), supaya tidak nge-spam API tiap keystroke
+  const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
+  const [debouncedSupplierSearch, setDebouncedSupplierSearch] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedProductSearch(productSearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [productSearch]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSupplierSearch(supplierSearch.trim()), 250);
+    return () => clearTimeout(t);
+  }, [supplierSearch]);
+
+  // cache produk/supplier yang sudah pernah dipilih, supaya nama tetap terlihat
+  // walau hasil query sekarang berubah karena search berubah.
+  const [productCache, setProductCache] = useState({}); // { [id]: product }
+  const [supplierCache, setSupplierCache] = useState({}); // { [id]: supplier }
+
   // refs buat anchor tombol product
   const productBtnRefs = useRef([]);
 
@@ -53,9 +72,13 @@ export default function AddPurchaseModal({ open, onClose }) {
     ]);
     setActiveProductRow(null);
     setProductSearch("");
+    setDebouncedProductSearch("");
     setProductMenuPos(null);
     setSupplierOpen(false);
     setSupplierSearch("");
+    setDebouncedSupplierSearch("");
+    setProductCache({});
+    setSupplierCache({});
   }, [open]);
 
   // --- profile user (ambil store_location_id untuk filter produk)
@@ -73,23 +96,31 @@ export default function AddPurchaseModal({ open, onClose }) {
     null;
 
   // --- queries
+  // Server-side search: backend cap per_page=100 (suppliers) & 200 (products),
+  // jadi kalau dataset banyak kita HARUS kirim `search` ke BE, bukan filter di FE.
   const { data: supResp, isLoading: supLoading } = useQuery({
     enabled: open,
-    queryKey: ["suppliers"],
-    queryFn: ({ signal }) =>
-      listSuppliers({ page: 1, per_page: 200, search: "" }, signal),
+    queryKey: ["suppliers", { search: debouncedSupplierSearch }],
+    queryFn: ({ signal, queryKey }) => {
+      const { search } = queryKey[1] || {};
+      return listSuppliers(
+        { page: 1, per_page: 100, search: search || "" },
+        signal
+      );
+    },
     keepPreviousData: true,
   });
 
   const { data: prodResp, isLoading: prodLoading } = useQuery({
     enabled: open,
-    queryKey: ["products", { storeId }],
+    queryKey: ["products", { storeId, search: debouncedProductSearch }],
     queryFn: ({ signal, queryKey }) => {
-      const { storeId } = queryKey[1] || {};
+      const { storeId, search } = queryKey[1] || {};
       return getProducts(
         {
           page: 1,
-          per_page: 2000,
+          per_page: 100,
+          search: search || "",
           store_location_id: storeId || undefined, // ⬅️ filter berdasarkan store
         },
         signal
@@ -102,26 +133,13 @@ export default function AddPurchaseModal({ open, onClose }) {
   const suppliers = supResp?.items || supResp?.data || supResp || [];
   const products = prodResp?.items || prodResp?.data || prodResp || [];
 
-  // filter FE
-  const filteredSuppliers = useMemo(() => {
-    const k = supplierSearch.trim().toLowerCase();
-    if (!k) return suppliers || [];
-    return (suppliers || []).filter((s) => {
-      const name = (s.name || "").toLowerCase();
-      const code = (s.code || "").toLowerCase();
-      return name.includes(k) || code.includes(k);
-    });
-  }, [suppliers, supplierSearch]);
+  // search sudah dikerjakan di server, jadi pakai langsung.
+  const filteredSuppliers = suppliers || [];
+  const filteredProducts = products || [];
 
-  const filteredProducts = useMemo(() => {
-    const k = productSearch.trim().toLowerCase();
-    if (!k) return products || [];
-    return (products || []).filter((p) => {
-      const name = (p.name || "").toLowerCase();
-      const sku = (p.sku || "").toLowerCase();
-      return name.includes(k) || sku.includes(k);
-    });
-  }, [products, productSearch]);
+  // info kalau hasil dipotong oleh pagination (BE cap 100/200 per page)
+  const productTotal = Number(prodResp?.meta?.total ?? products.length);
+  const productTruncated = productTotal > products.length;
 
   // --- items ops
   const addRow = () =>
@@ -138,6 +156,7 @@ export default function AddPurchaseModal({ open, onClose }) {
 
   const onSelectProduct = (idx, productId) => {
     const p = products.find((x) => String(x.id) === String(productId));
+    if (p) setProductCache((c) => ({ ...c, [String(p.id)]: p }));
     setItems((rows) =>
       rows.map((r, i) =>
         i === idx
@@ -154,13 +173,27 @@ export default function AddPurchaseModal({ open, onClose }) {
     setActiveProductRow(null);
     setProductMenuPos(null);
     setProductSearch("");
+    setDebouncedProductSearch("");
   };
 
   const onSelectSupplier = (s) => {
+    if (s?.id != null) setSupplierCache((c) => ({ ...c, [String(s.id)]: s }));
     setSupplierId(s?.id ?? "");
     setSupplierOpen(false);
     setSupplierSearch("");
+    setDebouncedSupplierSearch("");
   };
+
+  // helper lookup: cek hasil query dulu, fallback ke cache pilihan sebelumnya.
+  const findProduct = (id) =>
+    products.find((p) => String(p.id) === String(id)) ||
+    productCache[String(id)] ||
+    null;
+
+  const findSupplier = (id) =>
+    suppliers.find((s) => String(s.id) === String(id)) ||
+    supplierCache[String(id)] ||
+    null;
 
   // buka dropdown product → hitung posisi dari viewport
   const openProductMenu = (idx) => {
@@ -177,6 +210,7 @@ export default function AddPurchaseModal({ open, onClose }) {
     });
     setActiveProductRow(idx);
     setProductSearch("");
+    setDebouncedProductSearch("");
   };
 
   // tutup dropdown product saat resize/scroll besar
@@ -186,6 +220,7 @@ export default function AddPurchaseModal({ open, onClose }) {
       setActiveProductRow(null);
       setProductMenuPos(null);
       setProductSearch("");
+      setDebouncedProductSearch("");
     };
     window.addEventListener("resize", handler);
     window.addEventListener("scroll", handler);
@@ -304,6 +339,7 @@ export default function AddPurchaseModal({ open, onClose }) {
                 onClick={() => {
                   setSupplierOpen((v) => !v);
                   setSupplierSearch("");
+                  setDebouncedSupplierSearch("");
                 }}
                 className="w-full px-3 py-2 border rounded-lg text-sm bg-white flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500/70"
               >
@@ -313,9 +349,8 @@ export default function AddPurchaseModal({ open, onClose }) {
                   }
                 >
                   {supplierId
-                    ? suppliers.find(
-                        (s) => String(s.id) === String(supplierId)
-                      )?.name || "Supplier tidak ditemukan"
+                    ? findSupplier(supplierId)?.name ||
+                      "Supplier tidak ditemukan"
                     : "-- Pilih Supplier --"}
                 </span>
                 <Search className="w-4 h-4 text-slate-400" />
@@ -374,6 +409,7 @@ export default function AddPurchaseModal({ open, onClose }) {
                       onClick={() => {
                         setSupplierOpen(false);
                         setSupplierSearch("");
+                        setDebouncedSupplierSearch("");
                       }}
                       className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
                     >
@@ -453,10 +489,7 @@ export default function AddPurchaseModal({ open, onClose }) {
                 <tbody className="divide-y">
                   {items.map((it, idx) => {
                     const lt = subTotals[idx] || 0;
-                    const selectedProduct =
-                      products.find(
-                        (p) => String(p.id) === String(it.product_id)
-                      ) || null;
+                    const selectedProduct = findProduct(it.product_id);
 
                     return (
                       <tr key={idx} className="hover:bg-slate-50/60">
@@ -469,7 +502,8 @@ export default function AddPurchaseModal({ open, onClose }) {
                               activeProductRow === idx
                                 ? (setActiveProductRow(null),
                                   setProductMenuPos(null),
-                                  setProductSearch(""))
+                                  setProductSearch(""),
+                                  setDebouncedProductSearch(""))
                                 : openProductMenu(idx)
                             }
                             className="w-full px-3 py-1.5 border rounded-lg bg-white text-left text-sm flex items-center justify-between gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500/70"
@@ -681,6 +715,12 @@ export default function AddPurchaseModal({ open, onClose }) {
                   Tidak ada produk yang cocok.
                 </div>
               )}
+              {productTruncated && filteredProducts.length > 0 && (
+                <div className="px-3 py-1.5 text-[11px] text-amber-600 bg-amber-50 border-t">
+                  Menampilkan {products.length} dari {productTotal} produk.
+                  Ketik untuk mempersempit pencarian.
+                </div>
+              )}
             </div>
             <div className="p-2 border-t flex justify-end">
               <button
@@ -689,6 +729,7 @@ export default function AddPurchaseModal({ open, onClose }) {
                   setActiveProductRow(null);
                   setProductMenuPos(null);
                   setProductSearch("");
+                  setDebouncedProductSearch("");
                 }}
                 className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
               >
