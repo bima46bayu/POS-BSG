@@ -26,6 +26,7 @@ import {
   openRegister,
   closeRegister,
   getRegisterSession,
+  saveRegisterCart,
 } from "../api/registerSessions";
 import {
   OpenRegisterModal,
@@ -35,6 +36,34 @@ import html2canvas from "html2canvas";
 
 const PER_PAGE = 30;
 const TAX_RATE = 0;
+
+const DEFAULT_CHECKOUT = {
+  payment_method: "cash",
+  customer_name: "General",
+  paid: "",
+  reference: "",
+  note: "",
+  global_discount_id: null,
+};
+
+const normalizeCartItem = (item) => {
+  if (!item || item.id == null) return null;
+  const inventoryType = String(
+    item.inventoryType ?? item.inventory_type ?? "stock"
+  ).toLowerCase();
+  return {
+    ...item,
+    id: item.id,
+    price: Number(item.price ?? 0),
+    quantity: Math.max(1, Number(item.quantity ?? 1)),
+    discount_type: item.discount_type || "%",
+    discount_value: Number(item.discount_value ?? 0),
+    item_discount_id: item.item_discount_id ?? null,
+    inventoryType,
+    isStockTracked:
+      item.isStockTracked ?? item.is_stock_tracked ?? inventoryType === "stock",
+  };
+};
 
 /* ===== Debounce util ===== */
 function useDebouncedValue(value, delay = 300) {
@@ -89,6 +118,10 @@ export default function POSPage() {
   const [pickedCategory, setPickedCategory] = React.useState(undefined);
 
   const [cartItems, setCartItems] = React.useState([]);
+  const [cartCheckout, setCartCheckout] = React.useState(DEFAULT_CHECKOUT);
+  const [cartHydrated, setCartHydrated] = React.useState(false);
+  const cartSaveTimerRef = React.useRef(null);
+  const hydratedSessionIdRef = React.useRef(null);
   const [sheetOpen, setSheetOpen] = React.useState(false);
   // ===== Discount master (NEW) =====
   const [itemDiscounts, setItemDiscounts] = React.useState([]);
@@ -208,6 +241,78 @@ export default function POSPage() {
   const currentRegister = pickCurrentRegister(registerQ.data);
   const registerReady = !!currentRegister;
 
+  const clearCartState = useCallback(() => {
+    setCartItems([]);
+    setCartCheckout(DEFAULT_CHECKOUT);
+  }, []);
+
+  const persistCartToServer = useCallback(
+    async (items, checkout) => {
+      const sessionId = currentRegister?.id;
+      if (!sessionId) return;
+      try {
+        await saveRegisterCart(sessionId, { items, checkout });
+      } catch {
+        // silent — cart still works locally; will retry on next change
+      }
+    },
+    [currentRegister?.id]
+  );
+
+  // Restore cart once per open register session (from server)
+  useEffect(() => {
+    if (registerQ.isLoading) return;
+
+    if (!currentRegister?.id) {
+      hydratedSessionIdRef.current = null;
+      setCartHydrated(false);
+      clearCartState();
+      return;
+    }
+
+    if (hydratedSessionIdRef.current === currentRegister.id) return;
+    hydratedSessionIdRef.current = currentRegister.id;
+
+    const saved = currentRegister.cart_data;
+    if (saved && Array.isArray(saved.items) && saved.items.length > 0) {
+      const restored = saved.items.map(normalizeCartItem).filter(Boolean);
+      if (restored.length > 0) {
+        setCartItems(restored);
+        toast.success(`Cart dipulihkan (${restored.length} item)`);
+      } else {
+        setCartItems([]);
+      }
+    } else {
+      setCartItems([]);
+    }
+
+    if (saved?.checkout && typeof saved.checkout === "object") {
+      setCartCheckout({ ...DEFAULT_CHECKOUT, ...saved.checkout });
+    } else {
+      setCartCheckout(DEFAULT_CHECKOUT);
+    }
+
+    setCartHydrated(true);
+  }, [currentRegister?.id, currentRegister?.cart_data, registerQ.isLoading, clearCartState]);
+
+  // Auto-save cart to server (debounced)
+  useEffect(() => {
+    if (!cartHydrated || !currentRegister?.id) return;
+
+    clearTimeout(cartSaveTimerRef.current);
+    cartSaveTimerRef.current = setTimeout(() => {
+      persistCartToServer(cartItems, cartCheckout);
+    }, 600);
+
+    return () => clearTimeout(cartSaveTimerRef.current);
+  }, [
+    cartItems,
+    cartCheckout,
+    cartHydrated,
+    currentRegister?.id,
+    persistCartToServer,
+  ]);
+
   const [openRegisterModal, setOpenRegisterModal] = useState(false);
   const [registerSummary, setRegisterSummary] = useState(null);
   const [registerClosed, setRegisterClosed] = useState(false);
@@ -234,6 +339,8 @@ export default function POSPage() {
       queryClient.invalidateQueries({ queryKey: ["register", "current"] });
       setRegisterSummary(res);
       setRegisterClosed(true);
+      clearCartState();
+      setCartHydrated(false);
       toast.success("Register ditutup.");
     },
     onError: (err) => {
@@ -372,6 +479,13 @@ export default function POSPage() {
   const handleRemoveItem = useCallback((id) => {
     setCartItems((prev) => prev.filter((i) => i.id !== id));
   }, []);
+
+  const handleClearCart = useCallback(() => {
+    clearCartState();
+    if (currentRegister?.id) {
+      persistCartToServer([], DEFAULT_CHECKOUT);
+    }
+  }, [clearCartState, currentRegister?.id, persistCartToServer]);
 
   /* ===== Search / Filter / Category pick / Scan ===== */
   const handleSearch = useCallback((text) => setQ(text), []);
@@ -586,7 +700,7 @@ export default function POSPage() {
         className={
           "hidden md:block order-2 w-full md:w-[340px] md:w-[400px] xl:w-[480px] " +
           "bg-white border-t md:border-t-0 md:border-l border-gray-200 " +
-          "p-4 sm:p-5 md:p-6 overflow-y-auto md:sticky md:top-0 md:h-screen " +
+          "p-4 sm:p-5 md:p-6 overflow-y-auto overflow-x-hidden md:sticky md:top-0 md:h-screen min-w-0 " +
           "relative z-10 " +
           (!registerReady ? "opacity-40 pointer-events-none" : "")
         }
@@ -606,13 +720,15 @@ export default function POSPage() {
           additionalCharges={additionalCharges}
           total={total}
           globalDiscounts={globalDiscounts}
+          checkout={cartCheckout}
+          onCheckoutChange={setCartCheckout}
           onSuccess={(res) => {
-            setCartItems([]);
+            handleClearCart();
             toast.success(
               `Transaction success! Code: ${res?.code || res?.id || "-"}`
             );
           }}
-          onCancel={() => setCartItems([])}
+          onCancel={handleClearCart}
           showSummary={true}
           extraPayload={{
             store_location_id:
@@ -660,7 +776,10 @@ export default function POSPage() {
         tax={tax}
         total={total}
         additionalCharges={additionalCharges}
-        onClearCart={() => setCartItems([])}
+        checkout={cartCheckout}
+        onCheckoutChange={setCartCheckout}
+        registerOpen={!!currentRegister}
+        onClearCart={handleClearCart}
       />
 
       {/* Open register modal */}

@@ -34,3 +34,12 @@ export async function getRegisterSession(id, signal) {
   return data;
 }
 
+/** Persist POS cart on the open register session (survives page refresh). */
+export async function saveRegisterCart(id, payload) {
+  if (!id && id !== 0) {
+    throw new Error("Missing register session id for saveRegisterCart");
+  }
+  const { data } = await api.put(`/api/pos/registers/${id}/cart`, payload);
+  return data;
+}
+

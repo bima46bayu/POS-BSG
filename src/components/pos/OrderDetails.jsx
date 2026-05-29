@@ -9,7 +9,7 @@ const OrderDetails = ({
   onRemoveItem,
 }) => {
   return (
-    <div className="mb-6">
+    <div className="mb-6 min-w-0 max-w-full overflow-x-hidden">
       <h2 className="text-xl font-semibold mb-4 text-gray-800">
         Order Details
       </h2>
@@ -19,20 +19,16 @@ const OrderDetails = ({
           <p>No items in cart</p>
         </div>
       ) : (
-        <div className="space-y-1">
-          {items.map((item, index) => (
-            <div key={item.id}>
-              <OrderItem
-                item={item}
-                itemDiscounts={itemDiscounts}   
-                onUpdateQuantity={onUpdateQuantity}
-                onUpdateDiscount={onUpdateDiscount}
-                onRemove={onRemoveItem}
-              />
-              {index < items.length - 1 && (
-                <hr className="border-gray-200" />
-              )}
-            </div>
+        <div className="space-y-0 min-w-0 max-w-full">
+          {items.map((item) => (
+            <OrderItem
+              key={item.id}
+              item={item}
+              itemDiscounts={itemDiscounts}
+              onUpdateQuantity={onUpdateQuantity}
+              onUpdateDiscount={onUpdateDiscount}
+              onRemove={onRemoveItem}
+            />
           ))}
         </div>
       )}

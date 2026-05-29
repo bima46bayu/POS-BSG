@@ -141,9 +141,29 @@ export async function voidSale(saleId, payload = {}, signal) {
   return data;
 }
 
+/** Backend caps per_page at 200; callers must walk all pages for a full range. */
+const SALES_PAGE_SIZE = 200;
+const SALES_MAX_PAGES = 500;
+
+/** Fetch every page of /api/sales for the given filters (from, to, status, code, …). */
+export async function listAllSales(params = {}, signal) {
+  const all = [];
+  let page = 1;
+  let lastPage = 1;
+
+  do {
+    const { items, meta } = await getSales(
+      { ...params, page, per_page: SALES_PAGE_SIZE },
+      signal
+    );
+    all.push(...items);
+    lastPage = meta?.last_page ?? 1;
+    page += 1;
+  } while (page <= lastPage && page <= SALES_MAX_PAGES);
+
+  return all;
+}
+
 export async function listSalesForDashboard(params = {}, signal) {
-  // batasi aman di BE; di sini minta besar supaya range harian/bulanan cukup
-  const p = { page: 1, per_page: 50000, ...params };
-  const { items } = await getSales(p, signal); // getSales kamu sudah normalisasi
-  return items;
+  return listAllSales(params, signal);
 }

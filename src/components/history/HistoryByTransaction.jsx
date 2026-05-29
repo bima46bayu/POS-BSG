@@ -4,7 +4,7 @@ import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
 import DataTable from "../data-table/DataTable";
 import DateRangePicker from "../DateRangePicker";
-import { getSales, getSale, voidSale } from "../../api/sales";
+import { getSales, listAllSales, getSale, voidSale } from "../../api/sales";
 import { getMe } from "../../api/users";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import ConfirmDialog from "../common/ConfirmDialog";
@@ -157,15 +157,17 @@ export default function HistoryByTransaction() {
       status: statusFilter || undefined,
     };
 
-    // Hard upper bound to protect the API from OOM. If a single date range
-    // ever exceeds this, the user must narrow the date range.
-    const CLIENT_FILTER_PER_PAGE = 1000;
+    const fetchList = clientFilterActive
+      ? listAllSales(serverFilterParams, controller.signal).then((items) => ({
+          items,
+          meta: { current_page: 1, last_page: 1, per_page: PER_PAGE, total: items.length },
+        }))
+      : getSales(
+          { page: currentPage, per_page: PER_PAGE, ...baseParams },
+          controller.signal
+        );
 
-    const params = clientFilterActive
-      ? { page: 1, per_page: CLIENT_FILTER_PER_PAGE, ...serverFilterParams }
-      : { page: currentPage, per_page: PER_PAGE, ...baseParams };
-
-    getSales(params, controller.signal)
+    fetchList
       .then(({ items, meta }) => {
         const rows = items || [];
         setRawRows(rows);
@@ -189,6 +191,7 @@ export default function HistoryByTransaction() {
     dateRange.start,
     dateRange.end,
     paymentMethod,
+    statusFilter,
     refreshTick,
     isAdmin,
   ]);

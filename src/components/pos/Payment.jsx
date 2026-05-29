@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo } from "react";
 import {
   CreditCard,
   Wallet,
@@ -25,15 +25,27 @@ export default function Payment({
   loading,
   onSummaryChange,
   registerOpen = true,
+  checkout,
+  onCheckoutChange,
 }) {
-  const [method, setMethod] = useState("cash");
-  const [customer, setCustomer] = useState("General");
-  const [paid, setPaid] = useState("");
-  const [reference, setReference] = useState("");
-  const [note, setNote] = useState("");
+  const method = checkout?.payment_method ?? "cash";
+  const customer = checkout?.customer_name ?? "General";
+  const paid = checkout?.paid ?? "";
+  const reference = checkout?.reference ?? "";
+  const note = checkout?.note ?? "";
+  const globalDiscountId = checkout?.global_discount_id ?? null;
 
-  /* ===== GLOBAL DISCOUNT ===== */
-  const [globalDiscountId, setGlobalDiscountId] = useState(null);
+  const patchCheckout = (patch) => {
+    onCheckoutChange?.({
+      payment_method: method,
+      customer_name: customer,
+      paid,
+      reference,
+      note,
+      global_discount_id: globalDiscountId,
+      ...patch,
+    });
+  };
 
   const selectedDiscount = useMemo(
     () => globalDiscounts.find((d) => d.id === globalDiscountId),
@@ -71,8 +83,24 @@ export default function Payment({
 
   /* ===== AUTO FILL NON-CASH ===== */
   useEffect(() => {
-    if (method !== "cash") setPaid(String(finalTotal || 0));
-  }, [method, finalTotal]);
+    if (method === "cash" || !onCheckoutChange) return;
+    onCheckoutChange({
+      payment_method: method,
+      customer_name: customer,
+      paid: String(finalTotal || 0),
+      reference,
+      note,
+      global_discount_id: globalDiscountId,
+    });
+  }, [
+    method,
+    finalTotal,
+    customer,
+    reference,
+    note,
+    globalDiscountId,
+    onCheckoutChange,
+  ]);
 
   const change = useMemo(() => {
     if (method !== "cash") return 0;
@@ -113,9 +141,9 @@ export default function Payment({
         <select
           value={globalDiscountId || ""}
           onChange={(e) =>
-            setGlobalDiscountId(
-              e.target.value ? Number(e.target.value) : null
-            )
+            patchCheckout({
+              global_discount_id: e.target.value ? Number(e.target.value) : null,
+            })
           }
           className="w-full h-11 appearance-none rounded-full border px-4 pr-9
                      text-sm bg-white border-gray-300
@@ -146,7 +174,7 @@ export default function Payment({
         <div className="relative">
           <select
             value={customer}
-            onChange={(e) => setCustomer(e.target.value)}
+            onChange={(e) => patchCheckout({ customer_name: e.target.value })}
             className="w-full h-11 appearance-none rounded-full border px-4 pr-9
                        text-sm bg-white border-gray-300
                        focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -171,7 +199,7 @@ export default function Payment({
         <div className="relative">
           <select
             value={method}
-            onChange={(e) => setMethod(e.target.value)}
+            onChange={(e) => patchCheckout({ payment_method: e.target.value })}
             className="w-full h-11 appearance-none rounded-full border px-4 pr-9
                        text-sm bg-white border-gray-300
                        focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -200,7 +228,7 @@ export default function Payment({
           type="number"
           inputMode="numeric"
           value={paid}
-          onChange={(e) => setPaid(e.target.value)}
+          onChange={(e) => patchCheckout({ paid: e.target.value })}
           className="w-full h-11 rounded-full border px-4 text-sm
                      border-gray-300 focus:outline-none
                      focus:ring-2 focus:ring-blue-500"
@@ -231,7 +259,7 @@ export default function Payment({
         <textarea
           rows={2}
           value={note}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={(e) => patchCheckout({ note: e.target.value })}
           className="w-full border rounded-2xl px-4 py-2 text-sm
                      border-gray-300 focus:outline-none
                      focus:ring-2 focus:ring-blue-500"

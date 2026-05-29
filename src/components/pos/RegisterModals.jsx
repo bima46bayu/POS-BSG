@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import html2canvas from "html2canvas";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -113,6 +113,264 @@ function RegisterSummaryRow({ label, value, highlight }) {
   );
 }
 
+function aggregateSoldItemsFromSales(sales = []) {
+  const map = new Map();
+  for (const sale of sales) {
+    if (String(sale?.status || "").toLowerCase() !== "completed") continue;
+    for (const item of sale.items || []) {
+      const unitPrice = Number(item.unit_price ?? 0);
+      const key = `${item.product_id}@${unitPrice.toFixed(2)}`;
+      const prev = map.get(key);
+      if (prev) {
+        prev.qty += Number(item.qty ?? 0);
+        prev.line_total += Number(item.line_total ?? 0);
+      } else {
+        map.set(key, {
+          product_id: item.product_id,
+          product_name: item.product_name || "-",
+          product_sku: item.product_sku,
+          qty: Number(item.qty ?? 0),
+          unit_price: unitPrice,
+          line_total: Number(item.line_total ?? 0),
+        });
+      }
+    }
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    String(a.product_name).localeCompare(String(b.product_name))
+  );
+}
+
+const SOLD_ITEMS_PREVIEW_COUNT = 5;
+const SALES_PREVIEW_COUNT = 10;
+
+function SoldItemsBlock({ items, compact, expanded = false, onToggleExpanded, forPrint = false }) {
+  if (!items?.length) return null;
+
+  const totalQty = items.reduce((s, i) => s + Number(i.qty ?? 0), 0);
+  const itemsTotal = items.reduce((s, i) => s + Number(i.line_total ?? 0), 0);
+
+  const canCollapse =
+    !forPrint && compact && items.length > SOLD_ITEMS_PREVIEW_COUNT;
+  const isCollapsed = canCollapse && !expanded;
+  const visibleItems = isCollapsed
+    ? items.slice(0, SOLD_ITEMS_PREVIEW_COUNT)
+    : items;
+  const hiddenCount = items.length - SOLD_ITEMS_PREVIEW_COUNT;
+
+  return (
+    <div className={compact ? "text-[10px]" : "text-xs"}>
+      <div
+        className={
+          compact
+            ? "font-semibold text-gray-800 mb-1"
+            : "text-sm font-semibold text-gray-800 mb-2"
+        }
+      >
+        Items Sold
+      </div>
+      <ul className={compact ? "space-y-1" : "space-y-1.5 max-h-48 overflow-y-auto"}>
+        {visibleItems.map((item) => (
+          <li key={`${item.product_id}-${item.unit_price}`}>
+            <div className="flex justify-between gap-2">
+              <span
+                className={
+                  forPrint
+                    ? "min-w-0 flex-1 break-words"
+                    : "min-w-0 flex-1 truncate"
+                }
+                title={item.product_name}
+              >
+                {item.product_name}
+                {item.product_sku ? ` (${item.product_sku})` : ""} × {item.qty}
+              </span>
+              <span className="shrink-0 font-medium tabular-nums">
+                Rp{Number(item.line_total ?? 0).toLocaleString("id-ID")}
+              </span>
+            </div>
+            <div className="text-gray-500">
+              @ Rp{Number(item.unit_price ?? 0).toLocaleString("id-ID")} / item
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {canCollapse && onToggleExpanded && (
+        <button
+          type="button"
+          onClick={onToggleExpanded}
+          className="mt-1.5 w-full text-center text-[10px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
+        >
+          {isCollapsed
+            ? `See more (${hiddenCount} items)`
+            : "See less"}
+        </button>
+      )}
+
+      <div
+        className={
+          "flex justify-between gap-2 font-semibold border-t border-dashed border-gray-300 mt-2 pt-1 " +
+          (compact ? "text-[11px]" : "text-sm")
+        }
+      >
+        <span>
+          Total qty: {totalQty.toLocaleString("id-ID")}
+        </span>
+        <span className="tabular-nums">
+          Rp{itemsTotal.toLocaleString("id-ID")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RegisterSummaryTicket({
+  session,
+  summary,
+  totals,
+  soldItems,
+  forPrint = false,
+  soldItemsExpanded = false,
+  onToggleSoldItems,
+  className = "",
+}) {
+  return (
+    <div className={className}>
+      <div className="text-center font-semibold text-gray-900">
+        REGISTER SUMMARY
+      </div>
+      <div className="text-center text-[11px] text-gray-500 mb-2">
+        Session #{summary?.session_id ?? session?.id}
+      </div>
+      <div className="border-t border-dashed border-gray-300 my-2" />
+
+      <div className="space-y-0.5 text-[11px]">
+        <div className="flex justify-between">
+          <span>Opened</span>
+          <span className="font-medium">{summary?.opened_at}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Closed</span>
+          <span className="font-medium">{summary?.closed_at}</span>
+        </div>
+      </div>
+
+      <div className="border-t border-dashed border-gray-300 my-2" />
+
+      <div className="space-y-0.5 text-[11px]">
+        <div className="flex justify-between">
+          <span>Opening Cash</span>
+          <span className="font-medium">
+            Rp{Number(totals?.opening_cash ?? 0).toLocaleString("id-ID")}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span>Closing Cash</span>
+          <span className="font-medium">
+            Rp{Number(totals?.closing_cash ?? 0).toLocaleString("id-ID")}
+          </span>
+        </div>
+      </div>
+
+      <div className="border-t border-dashed border-gray-300 my-2" />
+
+      <div className="space-y-0.5 text-[11px]">
+        <div className="flex justify-between">
+          <span>Total Transactions</span>
+          <span className="font-medium">{totals?.total_transactions ?? 0}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Total Sales</span>
+          <span className="font-medium">
+            Rp{Number(totals?.total_sales ?? 0).toLocaleString("id-ID")}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span>Cash Payments</span>
+          <span className="font-medium">
+            Rp{Number(totals?.cash_payments ?? 0).toLocaleString("id-ID")}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span>Non-Cash Payments</span>
+          <span className="font-medium">
+            Rp{Number(totals?.non_cash_payments ?? 0).toLocaleString("id-ID")}
+          </span>
+        </div>
+        {(totals?.void_transactions ?? 0) > 0 && (
+          <>
+            <div className="flex justify-between">
+              <span>Void Transactions</span>
+              <span className="font-medium">{totals?.void_transactions ?? 0}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Void Amount</span>
+              <span className="font-medium text-red-600">
+                Rp{Number(totals?.void_amount ?? 0).toLocaleString("id-ID")}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="border-t border-dashed border-gray-300 my-2" />
+
+      <div className="space-y-0.5 text-[11px]">
+        <div className="flex justify-between">
+          <span>Expected Cash</span>
+          <span className="font-medium">
+            Rp{Number(totals?.expected_cash ?? 0).toLocaleString("id-ID")}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span>Difference</span>
+          <span
+            className={
+              "font-semibold " +
+              ((totals?.difference ?? 0) < 0
+                ? "text-red-600"
+                : (totals?.difference ?? 0) > 0
+                ? "text-emerald-600"
+                : "text-gray-900")
+            }
+          >
+            Rp{Number(totals?.difference ?? 0).toLocaleString("id-ID")}
+          </span>
+        </div>
+      </div>
+
+      {session?.note_close && (
+        <>
+          <div className="border-t border-dashed border-gray-300 my-2" />
+          <div className="text-left text-[11px]">
+            <span className="font-semibold">Note:</span>{" "}
+            <span>{session.note_close}</span>
+          </div>
+        </>
+      )}
+
+      {soldItems.length > 0 && (
+        <>
+          <div className="border-t border-dashed border-gray-300 my-2" />
+          <SoldItemsBlock
+            items={soldItems}
+            compact
+            forPrint={forPrint}
+            expanded={forPrint ? true : soldItemsExpanded}
+            onToggleExpanded={forPrint ? undefined : onToggleSoldItems}
+          />
+        </>
+      )}
+
+      <div className="border-t border-dashed border-gray-300 my-3" />
+      <div className="text-center text-[11px] text-gray-500 space-y-0.5">
+        <div>End of register</div>
+        <div>Simpan struk ini sebagai bukti tutup kas</div>
+      </div>
+    </div>
+  );
+}
+
 async function printRegisterTicketById(id = "register-summary-print-area") {
   const el = document.getElementById(id);
   if (!el) return;
@@ -121,6 +379,8 @@ async function printRegisterTicketById(id = "register-summary-print-area") {
     scale: 2,
     backgroundColor: "#ffffff",
     useCORS: true,
+    height: el.scrollHeight,
+    windowHeight: el.scrollHeight,
   });
 
   const imgData = canvas.toDataURL("image/png");
@@ -180,9 +440,39 @@ export function RegisterSummaryModal({
   }, [open, data?.totals?.expected_cash]);
 
   const [expandedSaleId, setExpandedSaleId] = useState(null);
+  const [soldItemsExpanded, setSoldItemsExpanded] = useState(false);
+  const [salesHistoryExpanded, setSalesHistoryExpanded] = useState(false);
   const toggleExpand = (id) => {
     setExpandedSaleId((prev) => (prev === id ? null : id));
   };
+
+  React.useEffect(() => {
+    if (!open) {
+      setSoldItemsExpanded(false);
+      setSalesHistoryExpanded(false);
+      setExpandedSaleId(null);
+    }
+  }, [open]);
+
+  const soldItems = useMemo(() => {
+    if (!data) return [];
+    const fromApi = data.sold_items;
+    if (Array.isArray(fromApi) && fromApi.length > 0) return fromApi;
+    return aggregateSoldItemsFromSales(data.sales);
+  }, [data]);
+
+  const visibleSales = useMemo(() => {
+    const list = data?.sales ?? [];
+    if (!list.length) return [];
+    if (salesHistoryExpanded || list.length <= SALES_PREVIEW_COUNT) return list;
+    return list.slice(0, SALES_PREVIEW_COUNT);
+  }, [data?.sales, salesHistoryExpanded]);
+
+  const hiddenSalesCount = Math.max(
+    0,
+    (data?.sales?.length ?? 0) - SALES_PREVIEW_COUNT
+  );
+  const canExpandSales = (data?.sales?.length ?? 0) > SALES_PREVIEW_COUNT;
 
   if (!open || !data) return null;
   const { session, summary, totals, sales } = data || {};
@@ -319,137 +609,31 @@ export function RegisterSummaryModal({
             </div>
           </div>
 
-          {/* Right: receipt-style mini ticket */}
-          <div
-            id="register-summary-print-area"
+          {/* Right: receipt-style mini ticket (screen preview) */}
+          <RegisterSummaryTicket
+            session={session}
+            summary={summary}
+            totals={totals}
+            soldItems={soldItems}
+            soldItemsExpanded={soldItemsExpanded}
+            onToggleSoldItems={() => setSoldItemsExpanded((v) => !v)}
             className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-xs text-gray-800 shadow-sm"
-          >
-            <div className="text-center font-semibold text-gray-900">
-              REGISTER SUMMARY
-            </div>
-            <div className="text-center text-[11px] text-gray-500 mb-2">
-              Session #{summary?.session_id ?? session?.id}
-            </div>
-            <div className="border-t border-dashed border-gray-300 my-2" />
+          />
+        </div>
 
-            <div className="space-y-0.5 text-[11px]">
-              <div className="flex justify-between">
-                <span>Opened</span>
-                <span className="font-medium">{summary?.opened_at}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Closed</span>
-                <span className="font-medium">{summary?.closed_at}</span>
-              </div>
-            </div>
-
-            <div className="border-t border-dashed border-gray-300 my-2" />
-
-            <div className="space-y-0.5 text-[11px]">
-              <div className="flex justify-between">
-                <span>Opening Cash</span>
-                <span className="font-medium">
-                  Rp{Number(totals?.opening_cash ?? 0).toLocaleString("id-ID")}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Closing Cash</span>
-                <span className="font-medium">
-                  Rp{Number(totals?.closing_cash ?? 0).toLocaleString("id-ID")}
-                </span>
-              </div>
-            </div>
-
-            <div className="border-t border-dashed border-gray-300 my-2" />
-
-            <div className="space-y-0.5 text-[11px]">
-              <div className="flex justify-between">
-                <span>Total Transactions</span>
-                <span className="font-medium">
-                  {totals?.total_transactions ?? 0}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Total Sales</span>
-                <span className="font-medium">
-                  Rp{Number(totals?.total_sales ?? 0).toLocaleString("id-ID")}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Cash Payments</span>
-                <span className="font-medium">
-                  Rp{Number(totals?.cash_payments ?? 0).toLocaleString("id-ID")}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Non-Cash Payments</span>
-                <span className="font-medium">
-                  Rp
-                  {Number(totals?.non_cash_payments ?? 0).toLocaleString(
-                    "id-ID"
-                  )}
-                </span>
-              </div>
-              {(totals?.void_transactions ?? 0) > 0 && (
-                <>
-                  <div className="flex justify-between">
-                    <span>Void Transactions</span>
-                    <span className="font-medium">
-                      {totals?.void_transactions ?? 0}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Void Amount</span>
-                    <span className="font-medium text-red-600">
-                      Rp{Number(totals?.void_amount ?? 0).toLocaleString("id-ID")}
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="border-t border-dashed border-gray-300 my-2" />
-
-            <div className="space-y-0.5 text-[11px]">
-              <div className="flex justify-between">
-                <span>Expected Cash</span>
-                <span className="font-medium">
-                  Rp{Number(totals?.expected_cash ?? 0).toLocaleString("id-ID")}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Difference</span>
-                <span
-                  className={
-                    "font-semibold " +
-                    ((totals?.difference ?? 0) < 0
-                      ? "text-red-600"
-                      : (totals?.difference ?? 0) > 0
-                      ? "text-emerald-600"
-                      : "text-gray-900")
-                  }
-                >
-                  Rp{Number(totals?.difference ?? 0).toLocaleString("id-ID")}
-                </span>
-              </div>
-            </div>
-
-            {session?.note_close && (
-              <>
-                <div className="border-t border-dashed border-gray-300 my-2" />
-                <div className="text-left text-[11px]">
-                  <span className="font-semibold">Note:</span>{" "}
-                  <span>{session.note_close}</span>
-                </div>
-              </>
-            )}
-
-            <div className="border-t border-dashed border-gray-300 my-3" />
-            <div className="text-center text-[11px] text-gray-500 space-y-0.5">
-              <div>End of register</div>
-              <div>Simpan struk ini sebagai bukti tutup kas</div>
-            </div>
-          </div>
+        {/* Full receipt for print — always shows every item, no See more */}
+        <div
+          id="register-summary-print-area"
+          aria-hidden="true"
+          className="fixed left-[-10000px] top-0 w-[302px] bg-white border border-gray-200 rounded-2xl px-4 py-3 text-xs text-gray-800 pointer-events-none box-border"
+        >
+          <RegisterSummaryTicket
+            session={session}
+            summary={summary}
+            totals={totals}
+            soldItems={soldItems}
+            forPrint
+          />
         </div>
 
         {/* Transaction history */}
@@ -464,8 +648,15 @@ export function RegisterSummaryModal({
           </div>
 
           <div className="border rounded-xl overflow-hidden">
+            <div
+              className={
+                salesHistoryExpanded && canExpandSales
+                  ? "max-h-[420px] overflow-y-auto"
+                  : ""
+              }
+            >
             <table className="min-w-full text-xs">
-              <thead className="bg-gray-100 text-gray-600">
+              <thead className="bg-gray-100 text-gray-600 sticky top-0 z-[1]">
                 <tr>
                   <th className="w-9 px-1 py-2" aria-label="Expand" />
                   <th className="px-3 py-2 text-left">Code</th>
@@ -476,8 +667,8 @@ export function RegisterSummaryModal({
                 </tr>
               </thead>
               <tbody>
-                {sales && sales.length > 0 ? (
-                  sales.map((row) => (
+                {visibleSales.length > 0 ? (
+                  visibleSales.map((row) => (
                     <React.Fragment key={row.id}>
                       <tr className="border-t border-gray-100 hover:bg-gray-50/50">
                         <td className="w-9 px-1 py-2 align-top">
@@ -558,6 +749,19 @@ export function RegisterSummaryModal({
                 )}
               </tbody>
             </table>
+            </div>
+
+            {canExpandSales && (
+              <button
+                type="button"
+                onClick={() => setSalesHistoryExpanded((v) => !v)}
+                className="w-full py-2.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 border-t border-gray-100"
+              >
+                {salesHistoryExpanded
+                  ? "See less"
+                  : `See more (${hiddenSalesCount} records)`}
+              </button>
+            )}
           </div>
         </div>
 

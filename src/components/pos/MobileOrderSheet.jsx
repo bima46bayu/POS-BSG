@@ -31,6 +31,9 @@ export default function MobileOrderSheet({
   tax,        // ⛔ diterima tapi tidak dipakai
   total,      // ⛔ diterima tapi tidak dipakai
   onClearCart,
+  checkout,
+  onCheckoutChange,
+  registerOpen = true,
 }) {
   /* Lock body scroll saat sheet terbuka */
   useEffect(() => {
@@ -98,6 +101,9 @@ export default function MobileOrderSheet({
             subtotal={subtotal}
             globalDiscounts={globalDiscounts}
             additionalCharges={additionalCharges} // 🔥 INI KUNCI
+            checkout={checkout}
+            onCheckoutChange={onCheckoutChange}
+            registerOpen={registerOpen}
             onSuccess={(res) => {
               onClearCart?.();
               onClose?.();
