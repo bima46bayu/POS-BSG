@@ -2,63 +2,16 @@
 import React, { useMemo, useCallback, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import html2canvas from "html2canvas";
 import toast from "react-hot-toast";
+import { printElementById } from "../../lib/printTicket";
 
 import { createSale } from "../../api/sales";
 import OrderSummary from "./OrderSummary";
 import Payment from "./Payment";
 import ReceiptTicket from "../ReceiptTicket";
 
-/* =======================
-   Print helper
-   ======================= */
-async function printNodeById(id = "receipt-print-area") {
-  const el = document.getElementById(id);
-  if (!el) return;
-
-  const canvas = await html2canvas(el, {
-    scale: 2,
-    backgroundColor: "#ffffff",
-    useCORS: true,
-    ignoreElements: (node) => node.classList?.contains("no-print"),
-  });
-
-  const imgData = canvas.toDataURL("image/png");
-
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "absolute";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "none";
-  document.body.appendChild(iframe);
-
-  const doc = iframe.contentWindow.document;
-  doc.open();
-  doc.write(`
-    <html>
-      <head>
-        <style>
-          @page { size: 80mm auto; margin: 6mm; }
-          body { margin: 0; }
-          img { width: 80mm; display: block; }
-        </style>
-      </head>
-      <body>
-        <img src="${imgData}" />
-      </body>
-    </html>
-  `);
-  doc.close();
-
-  iframe.onload = () => {
-    setTimeout(() => {
-      iframe.contentWindow.focus();
-      iframe.contentWindow.print();
-      setTimeout(() => document.body.removeChild(iframe), 1000);
-    }, 250);
-  };
-}
+const POS_RECEIPT_PRINT_ID = "receipt-print-only-pos";
+const POS_RECEIPT_PREVIEW_ID = "receipt-preview-pos";
 
 /* =======================
    Main Component
@@ -239,8 +192,15 @@ export default function SaleSubmitter({
   /* =======================
      PRINT
      ======================= */
-  const handlePrint = () => {
-    printNodeById("receipt-print-area");
+  const handlePrint = async () => {
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      await printElementById(POS_RECEIPT_PRINT_ID);
+    } catch (e) {
+      toast.error(
+        e?.message || "Gagal mencetak struk. Izinkan pop-up jika diminta."
+      );
+    }
   };
 
   /* =======================
@@ -310,6 +270,21 @@ export default function SaleSubmitter({
       )}
 
       {/* RECEIPT */}
+      {receiptOpen &&
+        createPortal(
+          <div
+            aria-hidden="true"
+            className="fixed top-0 pointer-events-none box-border bg-white"
+            style={{ left: -10000, width: 302 }}
+          >
+            <ReceiptTicket
+              saleId={saleId}
+              printableId={POS_RECEIPT_PRINT_ID}
+            />
+          </div>,
+          document.body
+        )}
+
       {receiptOpen && (
         <Modal onClose={() => setReceiptOpen(false)} z={10000}>
           <div className="p-4 pb-20">
@@ -318,7 +293,10 @@ export default function SaleSubmitter({
             </h3>
 
             <div className="max-h-[60vh] overflow-auto rounded-lg bg-gray-50 p-3">
-              <ReceiptTicket saleId={saleId} />
+              <ReceiptTicket
+                saleId={saleId}
+                printableId={POS_RECEIPT_PREVIEW_ID}
+              />
             </div>
 
             <div className="sticky bottom-0 bg-white border-t mt-4 p-4 flex gap-3">
