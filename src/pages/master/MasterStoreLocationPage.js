@@ -23,6 +23,8 @@ import {
   uploadStoreLocationLogo, // 🔥 helper baru: POST /store-locations/{id}/logo (form-data: logo)
 } from "../../api/storeLocations";
 import { toAbsoluteUrl } from "../../api/client";
+import { getMe } from "../../api/users";
+import { isHqAdmin } from "../../utils/roles";
 
 const PER_PAGE = 10;
 localStorage.setItem("POS_STORES_DIRTY", "1");
@@ -71,13 +73,14 @@ function BaseModal({ open, title, onClose, children, footer, maxW = "max-w-xl" }
 }
 
 /* ===== Add/Edit Modals ===== */
-function AddStoreModal({ open, loading, onClose, onSubmit }) {
+function AddStoreModal({ open, loading, onClose, onSubmit, parentOptions, allowRoot }) {
   const [form, setForm] = useState({
     code: "",
     name: "",
     address: "",
     phone: "",
     logoFile: null,
+    parent_id: "",
   });
 
   useEffect(() => {
@@ -88,9 +91,10 @@ function AddStoreModal({ open, loading, onClose, onSubmit }) {
         address: "",
         phone: "",
         logoFile: null,
+        parent_id: allowRoot ? "" : (parentOptions[0]?.id ? String(parentOptions[0].id) : ""),
       });
     }
-  }, [open]);
+  }, [open, allowRoot, parentOptions]);
 
   const set = (k) => (e) =>
     setForm((p) => ({
@@ -128,6 +132,25 @@ function AddStoreModal({ open, loading, onClose, onSubmit }) {
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium mb-1">Region / Parent</label>
+          <select
+            value={form.parent_id}
+            onChange={(e) => setForm((p) => ({ ...p, parent_id: e.target.value }))}
+            disabled={!allowRoot && parentOptions.length <= 1}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+          >
+            {allowRoot && <option value="">— Region root (no parent) —</option>}
+            {parentOptions.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-gray-500">
+            Cabang harus punya parent (mis. Tanabambu A → Tanabambu).
+          </p>
+        </div>
         <div>
           <label className="block text-sm font-medium mb-1">Code</label>
           <input
@@ -195,13 +218,14 @@ function AddStoreModal({ open, loading, onClose, onSubmit }) {
   );
 }
 
-function EditStoreModal({ open, loading, onClose, onSubmit, initial }) {
+function EditStoreModal({ open, loading, onClose, onSubmit, initial, parentOptions, allowRoot }) {
   const [form, setForm] = useState({
     code: "",
     name: "",
     address: "",
     phone: "",
     logoFile: null,
+    parent_id: "",
   });
 
   useEffect(() => {
@@ -212,6 +236,7 @@ function EditStoreModal({ open, loading, onClose, onSubmit, initial }) {
         address: initial.address || "",
         phone: initial.phone || "",
         logoFile: null,
+        parent_id: initial.parent_id != null ? String(initial.parent_id) : "",
       });
     }
   }, [open, initial]);
@@ -254,6 +279,22 @@ function EditStoreModal({ open, loading, onClose, onSubmit, initial }) {
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium mb-1">Region / Parent</label>
+          <select
+            value={form.parent_id}
+            onChange={(e) => setForm((p) => ({ ...p, parent_id: e.target.value }))}
+            disabled={!allowRoot && parentOptions.length <= 1}
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+          >
+            {allowRoot && <option value="">— Region root (no parent) —</option>}
+            {parentOptions.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="block text-sm font-medium mb-1">Code</label>
           <input
@@ -370,6 +411,27 @@ export default function MasterStoreLocationPage() {
     () => (Array.isArray(itemsRaw) ? itemsRaw : []),
     [itemsRaw]
   );
+
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: ({ signal }) => getMe(signal),
+    staleTime: 5 * 60 * 1000,
+  });
+  const allowRoot = isHqAdmin(me?.role);
+  const parentOptions = useMemo(
+    () => items.filter((s) => !s.parent_id),
+    [items]
+  );
+
+  const normalizeStorePayload = (form) => {
+    const { logoFile, parent_id, ...rest } = form;
+    const parentId = parent_id === "" || parent_id == null ? null : Number(parent_id);
+    return {
+      payload: { ...rest, parent_id: parentId },
+      logoFile,
+    };
+  };
+
   const meta = useMemo(() => {
     const m = res?.meta;
     if (m)
@@ -417,8 +479,8 @@ export default function MasterStoreLocationPage() {
   });
 
   const mUpdate = useMutation({
-    mutationFn: async ({ id, payload, signal }) => {
-      const { logoFile, ...data } = payload;
+    mutationFn: async ({ id, payload, logoFile, signal }) => {
+      const data = payload;
       // 1) update data store
       const store = await updateStoreLocation(id, data, signal);
       const storeId = store?.id ?? store?.data?.id ?? id;
@@ -479,6 +541,16 @@ export default function MasterStoreLocationPage() {
             </div>
           );
         },
+      },
+      {
+        key: "parent",
+        header: "Parent",
+        width: "140px",
+        cell: (r) => (
+          <span className="text-gray-700 text-xs">
+            {r.parent?.name || (r.parent_id ? `#${r.parent_id}` : "— Root —")}
+          </span>
+        ),
       },
       {
         key: "code",
@@ -647,7 +719,9 @@ export default function MasterStoreLocationPage() {
         open={showAdd}
         onClose={() => setShowAdd(false)}
         loading={mCreate.isLoading}
-        onSubmit={(payload) => mCreate.mutate({ payload })}
+        parentOptions={parentOptions}
+        allowRoot={allowRoot}
+        onSubmit={(form) => mCreate.mutate(normalizeStorePayload(form))}
       />
 
       <EditStoreModal
@@ -655,9 +729,13 @@ export default function MasterStoreLocationPage() {
         onClose={() => setEditTarget(null)}
         loading={mUpdate.isLoading}
         initial={editTarget}
-        onSubmit={(payload) =>
-          mUpdate.mutate({ id: payload.id, payload })
-        }
+        parentOptions={parentOptions}
+        allowRoot={allowRoot}
+        onSubmit={(form) => {
+          const { id, ...rest } = form;
+          const normalized = normalizeStorePayload(rest);
+          mUpdate.mutate({ id, payload: normalized.payload, logoFile: normalized.logoFile });
+        }}
       />
 
       <ConfirmDialog

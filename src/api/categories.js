@@ -137,9 +137,9 @@ export async function deleteCategory(id, signal) {
 /** ========= SUB-CATEGORIES ========= */
 
 /** GET all sub-categories (opsional filter by category_id) – legacy */
-export async function getSubCategories(category_id, signal) {
+export async function getSubCategories(category_id, signal, extraParams = {}) {
   const { data } = await api.get("/api/sub-categories", {
-    params: { category_id },
+    params: { category_id, per_page: 200, ...extraParams },
     signal,
   });
   return unwrap(data); // [{ id, name, category_id }]

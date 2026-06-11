@@ -1,8 +1,7 @@
 import React from "react";
 import { Eye, EyeOff } from "lucide-react";
 
-const roleLabel = (r) =>
-  (String(r ?? "").toLowerCase() === "admin" ? "Admin" : "Kasir");
+import { roleLabel } from "../../utils/roles";
 
 function Field({ label, children }) {
   return (
@@ -120,15 +119,9 @@ export default function AddUserModal({
                 value={form.role || "kasir"}
                 onChange={(e) => set({ role: e.target.value })}
               >
-                {(roleOptions.length
-                  ? roleOptions
-                  : [
-                      { value: "admin", label: "Admin" },
-                      { value: "kasir", label: "Kasir" },
-                    ]
-                ).map((o) => (
+                {roleOptions.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {roleLabel(o.value)}
+                    {o.label || roleLabel(o.value)}
                   </option>
                 ))}
               </select>

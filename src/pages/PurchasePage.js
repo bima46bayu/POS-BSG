@@ -23,6 +23,7 @@ import SupplierBreakdownDrawer from "../components/purchase/SupplierBreakdownDra
 import { approvePurchase, cancelPurchase } from "../api/purchases";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
+import { canSwitchStores } from "../utils/roles";
 
 const STORAGE_KEY = "purchase_store_id";
 
@@ -52,10 +53,7 @@ export default function PurchasePage() {
     };
   }, []);
 
-  const isAdmin = useMemo(
-    () => String(me?.role || "").toLowerCase() === "admin",
-    [me]
-  );
+  const canPickStore = useMemo(() => canSwitchStores(me?.role, me), [me]);
   const myStoreId = useMemo(
     () => me?.store_location_id ?? me?.store_location?.id ?? null,
     [me]
@@ -102,7 +100,7 @@ export default function PurchasePage() {
   useEffect(() => {
     if (!myStoreId) return;
 
-    if (!isAdmin) {
+    if (!canPickStore) {
       // kasir: selalu pakai store dia, abaikan storage
       setStoreId(String(myStoreId));
       return;
@@ -112,7 +110,7 @@ export default function PurchasePage() {
     // - kalau storeId masih kosong (nggak ada di storage / belum pernah pilih) → default ke store dia
     // - kalau sudah ada value → pakai yang lama (termasuk kasus "Semua Store" = "")
     setStoreId((prev) => (prev ? prev : String(myStoreId)));
-  }, [myStoreId, isAdmin]);
+  }, [myStoreId, canPickStore]);
 
   const handleChangeStore = useCallback((val) => {
     // kosongkan = semua store (hanya bisa admin)
@@ -251,7 +249,7 @@ export default function PurchasePage() {
     // PRIORITAS:
     // - Admin: pakai storeId dari dropdown ('' = semua store → hapus store_location_id)
     // - Non-admin: paksa ke store miliknya
-    if (isAdmin) {
+    if (canPickStore) {
       if (storeId) {
         out.store_location_id = String(storeId);
       } else {
@@ -262,7 +260,7 @@ export default function PurchasePage() {
     }
 
     return out;
-  }, [filters, storeId, isAdmin, myStoreId]);
+  }, [filters, storeId, canPickStore, myStoreId]);
 
   // ======= Supplier Breakdown =======
   const handleOpenSupplierBreakdown = (row) => {
@@ -324,13 +322,13 @@ export default function PurchasePage() {
           stores={stores}
           // admin: pakai state storeId (boleh kosong = semua store)
           // non-admin: lock ke myStoreId
-          storeId={isAdmin ? storeId : myStoreId ? String(myStoreId) : ""}
+          storeId={canPickStore ? storeId : myStoreId ? String(myStoreId) : ""}
           onChangeStore={(val) => {
-            if (!isAdmin) return; // guard tambahan (meski di FilterBar juga sudah disable)
+            if (!canPickStore) return; // guard tambahan (meski di FilterBar juga sudah disable)
             handleChangeStore(val);
             setPage(1);
           }}
-          isAdmin={isAdmin}
+          isAdmin={canPickStore}
           onExport={() => toast("Export CSV")}
           onAdd={() => setAddOpen(true)}
         />
@@ -386,7 +384,17 @@ export default function PurchasePage() {
       />
 
       {/* Add Purchase Modal */}
-      <AddPurchaseModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <AddPurchaseModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        storeLocationId={
+          canPickStore
+            ? storeId
+              ? Number(storeId)
+              : null
+            : myStoreId
+        }
+      />
     </div>
   );
 }

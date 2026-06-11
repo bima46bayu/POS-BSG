@@ -13,17 +13,18 @@ import {
   resetUserPassword,
   fetchRoleOptions,
   listStoreLocations,
+  getMe,
 } from "../../api/users";
 
 import ConfirmDialog from "../../components/common/ConfirmDialog";
 import AddUserModal from "../../components/users/AddUserModal";
 import EditUserModal from "../../components/users/EditUserModal";
 import DataTable from "../../components/data-table/DataTable";
+import { roleLabel, isHqAdmin, isRegionalManager, isStoreAdmin, roleOptionsForActor } from "../../utils/roles";
 
 /* ===================== helpers & formatters ===================== */
 const toLower = (v) => String(v ?? "").toLowerCase();
-const isAdminRole = (r) => toLower(r) === "admin";
-const fallbackRoleLabel = (r) => (isAdminRole(r) ? "Admin" : "Kasir");
+const fallbackRoleLabel = (r) => roleLabel(r);
 const fmtDateTime = (s) => {
   if (!s) return "-";
   try {
@@ -36,6 +37,38 @@ const fmtDateTime = (s) => {
 
 const PER_PAGE = 10;
 const STORES_DIRTY_KEY = "POS_STORES_DIRTY";
+
+function roleBadgeClass(role) {
+  const r = toLower(role);
+  if (r === "admin") return "bg-blue-50 text-blue-700";
+  if (r === "regional_manager") return "bg-violet-50 text-violet-700";
+  if (r === "store_admin") return "bg-amber-50 text-amber-700";
+  return "bg-emerald-50 text-emerald-700";
+}
+
+function canManageTargetUser(me, targetUser) {
+  if (!me || !targetUser) return false;
+  if (isHqAdmin(me.role)) return true;
+
+  const targetRole = toLower(targetUser.role);
+  const targetStore = targetUser.store_location_id ?? targetUser.store_location?.id ?? null;
+  const allowed = me.allowed_store_ids;
+
+  if (isRegionalManager(me.role)) {
+    if (targetRole === "admin" || targetRole === "regional_manager") return false;
+    if (targetStore == null) return false;
+    if (allowed == null) return true;
+    return allowed.map(Number).includes(Number(targetStore));
+  }
+
+  if (isStoreAdmin(me.role)) {
+    if (targetRole !== "kasir") return false;
+    const myStore = me.store_location_id ?? me.store_location?.id ?? null;
+    return myStore != null && Number(myStore) === Number(targetStore);
+  }
+
+  return false;
+}
 
 export default function MasterUserPage() {
   const qc = useQueryClient();
@@ -71,16 +104,26 @@ export default function MasterUserPage() {
     id: null, name: "", email: "", role: "kasir", store_location_id: ""
   });
 
-  // ====== roles ======
-  const { data: rolesOpt } = useQuery({
-    queryKey: ["user-roles"],
-    queryFn: () => fetchRoleOptions(),
-    initialData: [
-      { value: "admin", label: "Admin" },
-      { value: "kasir", label: "Kasir" },
-    ],
+  // ====== current actor ======
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: ({ signal }) => getMe(signal),
     staleTime: 5 * 60_000,
   });
+
+  const { data: rolesFromApi } = useQuery({
+    queryKey: ["user-roles", me?.id],
+    queryFn: ({ signal }) => fetchRoleOptions(signal),
+    enabled: !!me?.role,
+    staleTime: 5 * 60_000,
+  });
+
+  const rolesOpt = useMemo(
+    () => roleOptionsForActor(me, rolesFromApi),
+    [me, rolesFromApi]
+  );
+
+  const canAddUser = rolesOpt.length > 0;
 
   const roleMap = useMemo(() => {
     const m = new Map();
@@ -359,10 +402,9 @@ export default function MasterUserPage() {
       width: "140px",
       align: "center",
       cell: (u) => {
-        const admin = isAdminRole(u.role);
         const roleText = roleMap.get(toLower(u.role)) || fallbackRoleLabel(u.role);
         return (
-          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${admin ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700"}`}>
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${roleBadgeClass(u.role)}`}>
             {roleText}
           </span>
         );
@@ -426,8 +468,20 @@ export default function MasterUserPage() {
             </button>
 
             <button
-              onClick={() => setOpenAdd(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+              onClick={() => {
+                const defaultRole = rolesOpt[0]?.value || "kasir";
+                setAddForm({
+                  name: "",
+                  email: "",
+                  password: "",
+                  password_confirmation: "",
+                  role: defaultRole,
+                  store_location_id: "",
+                });
+                setOpenAdd(true);
+              }}
+              disabled={!canAddUser}
+              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               Add User
@@ -470,45 +524,55 @@ export default function MasterUserPage() {
                     sticky: "right",
                     align: "center",
                     cell: (u) => {
-                      const admin = isAdminRole(u.role);
+                      const manageable = canManageTargetUser(me, u);
+                      const showHqRoleToggle = isHqAdmin(me?.role)
+                        && (toLower(u.role) === "admin" || toLower(u.role) === "kasir");
+
                       return (
                         <div className="flex items-center justify-center gap-2">
-                          {/* Make Admin/Kasir — fixed width */}
-                          <button
-                            onClick={() => mToggleRole.mutate({ id: u.id, role: admin ? "kasir" : "admin" })}
-                            className="inline-flex items-center justify-center h-8 px-3 min-w-[128px] text-xs rounded-lg border border-slate-300 hover:bg-slate-50"
-                            title={admin ? "Make Kasir" : "Make Admin"}
-                          >
-                            {admin ? "Make Kasir" : "Make Admin"}
-                          </button>
+                          {showHqRoleToggle && (
+                            <button
+                              onClick={() => mToggleRole.mutate({
+                                id: u.id,
+                                role: toLower(u.role) === "admin" ? "kasir" : "admin",
+                              })}
+                              className="inline-flex items-center justify-center h-8 px-3 min-w-[128px] text-xs rounded-lg border border-slate-300 hover:bg-slate-50"
+                              title={toLower(u.role) === "admin" ? "Make Kasir" : "Make Admin"}
+                            >
+                              {toLower(u.role) === "admin" ? "Make Kasir" : "Make Admin"}
+                            </button>
+                          )}
 
-                          {/* Reset Password — jelas & kontras */}
-                          <button
-                            onClick={() => setResetTarget(u)}
-                            className="inline-flex items-center justify-center h-8 px-3 min-w-[100px] text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600"
-                            title="Reset Password"
-                          >
-                            <RotateCcw className="w-4 h-4 mr-1.5" />
-                            Reset
-                          </button>
+                          {manageable ? (
+                            <>
+                              <button
+                                onClick={() => setResetTarget(u)}
+                                className="inline-flex items-center justify-center h-8 px-3 min-w-[100px] text-xs rounded-lg bg-amber-500 text-white hover:bg-amber-600"
+                                title="Reset Password"
+                              >
+                                <RotateCcw className="w-4 h-4 mr-1.5" />
+                                Reset
+                              </button>
 
-                          {/* Edit */}
-                          <button
-                            onClick={() => openEdit(u)}
-                            className="w-8 h-8 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center"
-                            title="Edit"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
+                              <button
+                                onClick={() => openEdit(u)}
+                                className="w-8 h-8 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center"
+                                title="Edit"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
 
-                          {/* Delete */}
-                          <button
-                            onClick={() => setConfirmDel(u)}
-                            className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center justify-center"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                              <button
+                                onClick={() => setConfirmDel(u)}
+                                className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center justify-center"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
                         </div>
                       );
                     },
@@ -586,7 +650,7 @@ export default function MasterUserPage() {
         onClose={() => setOpenAdd(false)}
         form={addForm}
         setForm={setAddForm}
-        roleOptions={rolesOpt || []}
+        roleOptions={rolesOpt}
         storeOptions={storeOptions.map((s) => ({ value: s.id, label: s.name }))}
         loading={mCreate.isLoading}
         onSubmit={() => mCreate.mutate({
@@ -602,7 +666,7 @@ export default function MasterUserPage() {
         onClose={() => setEditData(null)}
         form={editForm}
         setForm={setEditForm}
-        roleOptions={rolesOpt || []}
+        roleOptions={rolesOpt}
         storeOptions={storeOptions.map((s) => ({ value: s.id, label: s.name }))}
         loading={mUpdate.isLoading}
         onSubmit={() =>

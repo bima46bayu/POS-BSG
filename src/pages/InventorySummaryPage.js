@@ -5,6 +5,9 @@ import { ArrowLeft, ClipboardList, Tag, Download, ArrowUpDown } from "lucide-rea
 import toast from "react-hot-toast";
 
 import { getProductSummary, getProductLogs } from "../api/inventory";
+import { getMe } from "../api/users";
+import { listStoreLocations } from "../api/storeLocations";
+import { canSwitchStores } from "../utils/roles";
 import DataTable from "../components/data-table/DataTable";
 import ExportPdfModal from "../components/common/ExportPdfModal";
 import { exportStockCardPdf } from "../lib/exportStockCardPdf";
@@ -12,6 +15,7 @@ import { exportStockCardPdf } from "../lib/exportStockCardPdf";
 /* ===================== Konstanta ===================== */
 const PER_PAGE = 10;
 const MAX_PAGES = 200;
+const STORAGE_KEY = "inventory_store_id";
 
 /* ===================== Formatter ===================== */
 const fmtIDR = (n) =>
@@ -239,6 +243,100 @@ export default function InventorySummaryPage() {
   const { state } = useLocation();
   const navigate = useNavigate();
   const productFromState = state?.product || null;
+  const storeIdFromState = state?.storeId ?? null;
+
+  const [me, setMe] = useState(null);
+  const [stores, setStores] = useState([]);
+  const [storeFilterId, setStoreFilterId] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return window.localStorage.getItem(STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
+
+  const canPickStore = useMemo(
+    () => canSwitchStores(me?.role, me),
+    [me]
+  );
+
+  const myStoreId = useMemo(
+    () => me?.store_location_id ?? me?.store_location?.id ?? null,
+    [me]
+  );
+
+  const effectiveStoreId = useMemo(() => {
+    if (storeIdFromState != null && storeIdFromState !== "") {
+      return Number(storeIdFromState);
+    }
+    if (!canPickStore) {
+      return myStoreId != null ? Number(myStoreId) : null;
+    }
+    if (storeFilterId) return Number(storeFilterId);
+    return null;
+  }, [storeIdFromState, canPickStore, myStoreId, storeFilterId]);
+
+  const activeStoreLabel = useMemo(() => {
+    if (canPickStore && !effectiveStoreId && !storeIdFromState) return "Pilih cabang";
+    const sid = effectiveStoreId;
+    if (sid == null) return "-";
+    const found = stores.find((s) => String(s.id) === String(sid));
+    return found?.name ?? me?.store_location?.name ?? "-";
+  }, [canPickStore, effectiveStoreId, storeIdFromState, stores, me]);
+
+  const needsStoreSelection =
+    canPickStore && effectiveStoreId == null && !storeIdFromState;
+
+  useEffect(() => {
+    let cancelled = false;
+    getMe()
+      .then((profile) => {
+        if (cancelled) return;
+        setMe(profile);
+        if (!canSwitchStores(profile?.role, profile)) {
+          const sid =
+            profile?.store_location?.id ?? profile?.store_location_id ?? null;
+          if (sid != null) setStoreFilterId(String(sid));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMe(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canPickStore) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listStoreLocations({ page: 1, per_page: 100 });
+        if (!cancelled) setStores(res?.items || []);
+      } catch {
+        if (!cancelled) setStores([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canPickStore]);
+
+  useEffect(() => {
+    if (!canPickStore || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, storeFilterId || "");
+    } catch {
+      // ignore
+    }
+  }, [canPickStore, storeFilterId]);
+
+  const storeParams = useMemo(
+    () => (effectiveStoreId != null ? { store_id: effectiveStoreId } : {}),
+    [effectiveStoreId]
+  );
 
   const [period, setPeriod] = useState({ from: null, to: null });
   const [allLogs, setAllLogs] = useState([]);
@@ -258,11 +356,21 @@ export default function InventorySummaryPage() {
   const [sortOrder, setSortOrder] = useState("desc");
 
   const load = useCallback(async () => {
+    if (needsStoreSelection) {
+      setAllLogs([]);
+      setSummary({
+        stockBeginning: 0, stockIn: 0, stockOut: 0, stockEnding: 0,
+        costBeginning: 0, costIn: 0, costOut: 0, costEnding: 0,
+      });
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
       const [sum, first] = await Promise.all([
-        getProductSummary(id),
-        getProductLogs(id, { page: 1, per_page: PER_PAGE }),
+        getProductSummary(id, storeParams),
+        getProductLogs(id, { page: 1, per_page: PER_PAGE, ...storeParams }),
       ]);
 
       setPeriod(sum?.period ?? { from: null, to: null });
@@ -350,7 +458,11 @@ export default function InventorySummaryPage() {
       const lastPage = Number(first?.meta?.last_page ?? 1);
       const tasks = [];
       for (let p = 2; p <= Math.min(lastPage, MAX_PAGES); p++) {
-        tasks.push(getProductLogs(id, { page: p, per_page: PER_PAGE }).then((res) => normalize(res?.items)));
+        tasks.push(
+          getProductLogs(id, { page: p, per_page: PER_PAGE, ...storeParams }).then((res) =>
+            normalize(res?.items)
+          )
+        );
       }
       if (tasks.length) {
         const pages = await Promise.all(tasks);
@@ -364,7 +476,7 @@ export default function InventorySummaryPage() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, storeParams, needsStoreSelection]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -524,10 +636,41 @@ export default function InventorySummaryPage() {
             <ArrowLeft className="w-4 h-4 text-slate-700" />
             <span className="text-sm text-slate-700">Kembali</span>
           </button>
+          {canPickStore && !storeIdFromState ? (
+            <div className="flex items-center gap-2">
+              <label htmlFor="summary-store" className="text-xs text-slate-600">
+                Cabang
+              </label>
+              <select
+                id="summary-store"
+                value={storeFilterId}
+                onChange={(e) => setStoreFilterId(e.target.value)}
+                className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm min-w-[160px]"
+              >
+                <option value="">— Pilih cabang —</option>
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.code ? `${s.code} — ` : ""}
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <span className="text-xs text-slate-500">
+              Cabang: <span className="font-medium text-slate-700">{activeStoreLabel}</span>
+            </span>
+          )}
           <div className="flex-1" />
           <div className="text-xs text-slate-500">Product ID: {id}</div>
         </div>
       </div>
+
+      {needsStoreSelection && (
+        <div className="mx-4 md:mx-6 mt-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+          Pilih cabang untuk melihat ringkasan stok dan log produk ini.
+        </div>
+      )}
 
       <div className="px-4 md:px-6 pt-5">
         <ProductSummaryCard

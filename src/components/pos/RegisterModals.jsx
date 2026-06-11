@@ -1,10 +1,6 @@
 import React, { useState, useMemo } from "react";
-import { createPortal } from "react-dom";
-import toast from "react-hot-toast";
+import html2canvas from "html2canvas";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { printElementById } from "../../lib/printTicket";
-
-const REGISTER_PRINT_AREA_ID = "register-summary-print-only";
 
 function ModalShell({ open, onClose, children, wide }) {
   if (!open) return null;
@@ -375,6 +371,54 @@ function RegisterSummaryTicket({
   );
 }
 
+async function printRegisterTicketById(id = "register-summary-print-area") {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  const canvas = await html2canvas(el, {
+    scale: 2,
+    backgroundColor: "#ffffff",
+    useCORS: true,
+    height: el.scrollHeight,
+    windowHeight: el.scrollHeight,
+  });
+
+  const imgData = canvas.toDataURL("image/png");
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "absolute";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "none";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(`
+    <html>
+      <head>
+        <style>
+          @page { size: 80mm auto; margin: 6mm; }
+          body { margin: 0; }
+          img { width: 80mm; display: block; }
+        </style>
+      </head>
+      <body>
+        <img src="${imgData}" />
+      </body>
+    </html>
+  `);
+  doc.close();
+
+  iframe.onload = () => {
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      setTimeout(() => document.body.removeChild(iframe), 1000);
+    }, 250);
+  };
+}
+
 export function RegisterSummaryModal({
   open,
   onClose,
@@ -398,7 +442,6 @@ export function RegisterSummaryModal({
   const [expandedSaleId, setExpandedSaleId] = useState(null);
   const [soldItemsExpanded, setSoldItemsExpanded] = useState(false);
   const [salesHistoryExpanded, setSalesHistoryExpanded] = useState(false);
-  const [printing, setPrinting] = useState(false);
   const toggleExpand = (id) => {
     setExpandedSaleId((prev) => (prev === id ? null : id));
   };
@@ -434,19 +477,8 @@ export function RegisterSummaryModal({
   if (!open || !data) return null;
   const { session, summary, totals, sales } = data || {};
 
-  const handlePrint = async () => {
-    setPrinting(true);
-    try {
-      await new Promise((r) => setTimeout(r, 120));
-      await printElementById(REGISTER_PRINT_AREA_ID);
-    } catch (e) {
-      toast.error(
-        e?.message ||
-          "Gagal mencetak struk. Izinkan pop-up di Chrome jika diminta."
-      );
-    } finally {
-      setPrinting(false);
-    }
+  const handlePrint = () => {
+    printRegisterTicketById();
   };
 
   const handleCloseRegister = () => {
@@ -457,25 +489,6 @@ export function RegisterSummaryModal({
   };
 
   return (
-    <>
-      {createPortal(
-        <div
-          id={REGISTER_PRINT_AREA_ID}
-          aria-hidden="true"
-          className="fixed top-0 pointer-events-none box-border bg-white border border-gray-200 rounded-2xl px-4 py-3 text-xs text-gray-800"
-          style={{ left: -10000, width: 302 }}
-        >
-          <RegisterSummaryTicket
-            session={session}
-            summary={summary}
-            totals={totals}
-            soldItems={soldItems}
-            forPrint
-          />
-        </div>,
-        document.body
-      )}
-
     <ModalShell open={open} onClose={onClose} wide>
       <div className="p-6 space-y-4">
         {/* Header */}
@@ -605,6 +618,21 @@ export function RegisterSummaryModal({
             soldItemsExpanded={soldItemsExpanded}
             onToggleSoldItems={() => setSoldItemsExpanded((v) => !v)}
             className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-xs text-gray-800 shadow-sm"
+          />
+        </div>
+
+        {/* Full receipt for print — always shows every item, no See more */}
+        <div
+          id="register-summary-print-area"
+          aria-hidden="true"
+          className="fixed left-[-10000px] top-0 w-[302px] bg-white border border-gray-200 rounded-2xl px-4 py-3 text-xs text-gray-800 pointer-events-none box-border"
+        >
+          <RegisterSummaryTicket
+            session={session}
+            summary={summary}
+            totals={totals}
+            soldItems={soldItems}
+            forPrint
           />
         </div>
 
@@ -792,10 +820,9 @@ export function RegisterSummaryModal({
                 <button
                   type="button"
                   onClick={handlePrint}
-                  disabled={printing}
-                  className="h-10 px-4 rounded-full border border-blue-600 text-blue-600 text-xs font-semibold hover:bg-blue-50 disabled:opacity-60"
+                  className="h-10 px-4 rounded-full border border-blue-600 text-blue-600 text-xs font-semibold hover:bg-blue-50"
                 >
-                  {printing ? "Menyiapkan…" : "Print Struk"}
+                  Print Struk
                 </button>
               )}
             </>
@@ -821,7 +848,6 @@ export function RegisterSummaryModal({
         </div>
       </div>
     </ModalShell>
-    </>
   );
 }
 

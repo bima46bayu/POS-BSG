@@ -28,10 +28,12 @@ export async function getProductSummary(productId, params = {}, signal) {
   return data || { revenue: 0, cogs: 0, stock_in: 0, stock_out: 0, stock_ending: 0, cogs: 0, gross_profit: 0,};
 }
 
-/** LOGS: GET /inventory/products/:id/logs?page&per_page */
-export async function getProductLogs(productId, { page = 1, per_page = 10 } = {}) {
+/** LOGS: GET /inventory/products/:id/logs?page&per_page&store_id */
+export async function getProductLogs(productId, params = {}, signal) {
+  const { page = 1, per_page = 10, ...rest } = params || {};
   const { data } = await api.get(`api/inventory/products/${productId}/logs`, {
-    params: { page, per_page },
+    params: { page, per_page, ...rest },
+    signal,
   });
   return data || { items: [], meta: { current_page: page, per_page, total: 0, last_page: 1 } };
 }

@@ -1,10 +1,8 @@
 // src/components/sales/SaleDetailModal.jsx
-import React, { useCallback, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
-import toast from "react-hot-toast";
+import React, { useCallback, useMemo } from "react";
 import ReceiptTicket from "../ReceiptTicket";
 import { X } from "lucide-react";
-import { printElementById } from "../../lib/printTicket";
+import html2canvas from "html2canvas";
 
 const fmtIDR = (v) =>
   Number(v ?? 0).toLocaleString("id-ID", {
@@ -29,35 +27,70 @@ const getAdditionalAmount = (sale, type) => {
 };
 
 export default function SaleDetailModal({ open, onClose, sale }) {
-  const [printing, setPrinting] = useState(false);
+  if (!open || !sale) return null;
 
-  const printAreaId = useMemo(
-    () => `receipt-print-only-${sale?.id ?? "unknown"}`,
+  const areaId = useMemo(
+    () => `receipt-print-area-${sale?.id ?? "unknown"}`,
     [sale?.id]
-  );
-
-  const previewAreaId = useMemo(
-    () => `${printAreaId}-preview`,
-    [printAreaId]
   );
 
   /* ================= Print ================= */
   const printTicket = useCallback(async () => {
-    setPrinting(true);
-    try {
-      // Small delay so off-screen ticket finishes layout (logo, fonts).
-      await new Promise((r) => setTimeout(r, 120));
-      await printElementById(printAreaId);
-    } catch (e) {
-      toast.error(
-        e?.message || "Gagal mencetak struk. Izinkan pop-up jika diminta."
-      );
-    } finally {
-      setPrinting(false);
-    }
-  }, [printAreaId]);
+    const el = document.getElementById(areaId);
+    if (!el) return;
 
-  if (!open || !sale) return null;
+    const canvas = await html2canvas(el, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      ignoreElements: (node) =>
+        node.classList?.contains("no-print"),
+    });
+
+    const imgData = canvas.toDataURL("image/png");
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "absolute";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "none";
+    document.body.appendChild(iframe);
+
+    const win = iframe.contentWindow;
+    if (!win) return;
+
+    win.document.open();
+    win.document.write(`
+      <html>
+        <head>
+          <style>
+            @page { size: 80mm auto; margin: 6mm; }
+            body { margin: 0 }
+            img { width: 80mm; display: block }
+          </style>
+        </head>
+        <body>
+          <img src="${imgData}" />
+        </body>
+      </html>
+    `);
+    win.document.close();
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        try {
+          win.focus();
+          win.print();
+          setTimeout(
+            () => document.body.removeChild(iframe),
+            800
+          );
+        } catch {
+          document.body.removeChild(iframe);
+        }
+      }, 250);
+    };
+  }, [areaId]);
 
   /* ================= Ringkasan (SINGLE SOURCE) ================= */
   const subtotal = Number(sale.subtotal ?? 0);
@@ -73,38 +106,10 @@ export default function SaleDetailModal({ open, onClose, sale }) {
   const items = Array.isArray(sale.items) ? sale.items : [];
 
   return (
-    <>
-      {/* Off-screen receipt — only this node is captured for print (not the modal). */}
-      {createPortal(
-        <div
-          aria-hidden="true"
-          className="fixed top-0 pointer-events-none box-border bg-white border border-gray-200 rounded-2xl"
-          style={{ left: -10000, width: 302 }}
-        >
-          <ReceiptTicket saleId={sale.id} printableId={printAreaId} />
-        </div>,
-        document.body
-      )}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      <div className="fixed inset-0 z-[100] flex items-center justify-center sale-detail-modal">
-      <div className="absolute inset-0 bg-black/50 no-print" onClick={onClose} />
-
-      <div className="relative z-[101] w-full max-w-6xl bg-white rounded-2xl shadow-xl max-h-[90vh] flex flex-col no-print-modal">
-        <style>{`
-          @media print {
-            body * { visibility: hidden !important; }
-            #${printAreaId},
-            #${printAreaId} * {
-              visibility: visible !important;
-            }
-            #${printAreaId} {
-              position: fixed !important;
-              left: 0 !important;
-              top: 0 !important;
-              width: 80mm !important;
-            }
-          }
-        `}</style>
+      <div className="relative z-[101] w-full max-w-6xl bg-white rounded-2xl shadow-xl max-h-[90vh] flex flex-col">
         {/* ===== Header ===== */}
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">
@@ -258,18 +263,17 @@ export default function SaleDetailModal({ open, onClose, sale }) {
 
           {/* ===== Kanan ===== */}
           <div className="md:col-span-4 border rounded-xl p-3 bg-gray-50">
-            <ReceiptTicket saleId={sale.id} printableId={previewAreaId} />
+            <ReceiptTicket saleId={sale.id} printableId={areaId} />
           </div>
         </div>
 
         {/* ===== Footer ===== */}
-        <div className="px-6 py-4 border-t flex justify-end gap-3 no-print">
+        <div className="px-6 py-4 border-t flex justify-end gap-3">
           <button
             onClick={printTicket}
-            disabled={printing}
-            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
           >
-            {printing ? "Menyiapkan…" : "Print Struk"}
+            Print Struk
           </button>
           <button
             onClick={onClose}
@@ -280,7 +284,6 @@ export default function SaleDetailModal({ open, onClose, sale }) {
         </div>
       </div>
     </div>
-    </>
   );
 }
 

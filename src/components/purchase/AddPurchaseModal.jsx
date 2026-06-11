@@ -14,7 +14,7 @@ import { getMyProfile } from "../../api/users";
 
 const toNum = (v) => Number(v || 0);
 
-export default function AddPurchaseModal({ open, onClose }) {
+export default function AddPurchaseModal({ open, onClose, storeLocationId: storeLocationIdProp = null }) {
   const qc = useQueryClient();
 
   // --- header form state
@@ -89,6 +89,7 @@ export default function AddPurchaseModal({ open, onClose }) {
   });
 
   const storeId =
+    storeLocationIdProp ??
     me?.store_location_id ??
     me?.storeLocation?.id ??
     me?.store_location?.id ??
@@ -280,8 +281,13 @@ export default function AddPurchaseModal({ open, onClose }) {
     const err = validate();
     if (err) return toast.error(err);
 
+    if (!storeId) {
+      return toast.error("Pilih cabang terlebih dahulu untuk membuat PO.");
+    }
+
     const payload = {
       supplier_id: Number(supplierId),
+      store_location_id: Number(storeId),
       order_date: orderDate,
       expected_date: expectedDate || null,
       notes,

@@ -32,7 +32,7 @@ import {
   OpenRegisterModal,
   RegisterSummaryModal,
 } from "../components/pos/RegisterModals";
-import html2canvas from "html2canvas";
+import { canSwitchStores, isHqAdmin } from "../utils/roles";
 
 const PER_PAGE = 30;
 const TAX_RATE = 0;
@@ -123,9 +123,6 @@ export default function POSPage() {
   const cartSaveTimerRef = React.useRef(null);
   const hydratedSessionIdRef = React.useRef(null);
   const [sheetOpen, setSheetOpen] = React.useState(false);
-  // ===== Discount master (NEW) =====
-  const [itemDiscounts, setItemDiscounts] = React.useState([]);
-  const [globalDiscounts, setGlobalDiscounts] = React.useState([]);
 
   /* ===== /api/me (role & store) ===== */
   const meQ = useQuery({
@@ -136,7 +133,8 @@ export default function POSPage() {
     refetchOnWindowFocus: false,
   });
   const role = (meQ.data?.role || "").toLowerCase();
-  const isAdmin = role === "admin";
+  const isHqAdminUser = isHqAdmin(role);
+  const showStoreSelector = canSwitchStores(role, meQ.data);
   const myStoreIdFromMe = meQ.isSuccess
     ? meQ.data?.store_location?.id ?? meQ.data?.store_location_id ?? null
     : null;
@@ -147,7 +145,7 @@ export default function POSPage() {
     queryFn: ({ signal }) => listStoreLocations({ per_page: 200 }, signal),
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
-    enabled: isAdmin || meQ.isError,
+    enabled: showStoreSelector || meQ.isError,
   });
   const stores = storesQ.data?.items ?? [];
 
@@ -157,7 +155,7 @@ export default function POSPage() {
   // default dari /api/me
   useEffect(() => {
     if (meQ.isSuccess && selectedStoreId === undefined) {
-      if (isAdmin) {
+      if (isHqAdminUser) {
         setSelectedStoreId(
           myStoreIdFromMe != null ? String(myStoreIdFromMe) : "ALL"
         );
@@ -167,7 +165,7 @@ export default function POSPage() {
         );
       }
     }
-  }, [meQ.isSuccess, isAdmin, myStoreIdFromMe, selectedStoreId]);
+  }, [meQ.isSuccess, isHqAdminUser, myStoreIdFromMe, selectedStoreId]);
 
   // fallback jika /api/me error → admin-like dengan ALL
   useEffect(() => {
@@ -176,39 +174,108 @@ export default function POSPage() {
     }
   }, [meQ.isError, selectedStoreId]);
 
-  /* ===== FETCH DISCOUNT MASTER (NEW) ===== */
-  useEffect(() => {
-    if (!selectedStoreId) return;
-
-    const storeId =
-      selectedStoreId !== "ALL" ? Number(selectedStoreId) : undefined;
-
-    listDiscounts({
-      scope: "ITEM",
-      active: 1,
-      store_location_id: storeId,
-    }).then((res) => setItemDiscounts(res.items || []));
-
-    listDiscounts({
-      scope: "GLOBAL",
-      active: 1,
-      store_location_id: storeId,
-    }).then((res) => setGlobalDiscounts(res.items || []));
+  const discountStoreParam = useMemo(() => {
+    if (!selectedStoreId || selectedStoreId === "ALL" || selectedStoreId === "") {
+      return undefined;
+    }
+    const n = Number(selectedStoreId);
+    return Number.isFinite(n) ? n : undefined;
   }, [selectedStoreId]);
 
-  /* ===== Categories ===== */
+  const posDiscountsQ = useQuery({
+    queryKey: ["pos", "discounts", discountStoreParam ?? "ALL"],
+    enabled: meQ.isSuccess && selectedStoreId !== undefined && selectedStoreId !== "",
+    queryFn: async ({ signal }) => {
+      const base = {
+        active: 1,
+        per_page: 50,
+        ...(discountStoreParam != null
+          ? { store_location_id: discountStoreParam }
+          : {}),
+      };
+      try {
+        const [itemRes, globalRes] = await Promise.all([
+          listDiscounts({ ...base, scope: "ITEM" }, signal),
+          listDiscounts({ ...base, scope: "GLOBAL" }, signal),
+        ]);
+        return {
+          item: itemRes.items ?? [],
+          global: globalRes.items ?? [],
+        };
+      } catch {
+        return { item: [], global: [] };
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
+  const itemDiscounts = posDiscountsQ.data?.item ?? [];
+  const globalDiscounts = posDiscountsQ.data?.global ?? [];
+
+  const additionalChargesQ = useQuery({
+    queryKey: ["pos", "additional-charges"],
+    enabled: meQ.isSuccess && selectedStoreId !== undefined && selectedStoreId !== "",
+    queryFn: async ({ signal }) => {
+      try {
+        const res = await listAdditionalCharges({}, signal);
+        const payload = res?.data;
+        if (Array.isArray(payload?.data)) return payload.data;
+        if (Array.isArray(payload)) return payload;
+        return [];
+      } catch {
+        return [];
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
+  const additionalCharges = additionalChargesQ.data ?? [];
+
+  const categoryStoreParam = discountStoreParam;
+
+  /* ===== Categories (scoped to selected cabang) ===== */
   const { data: categories = [] } = useQuery({
-    queryKey: ["categories"],
-    queryFn: getCategories,
+    queryKey: ["categories", categoryStoreParam ?? "ALL"],
+    enabled: meQ.isSuccess && selectedStoreId !== undefined && selectedStoreId !== "",
+    queryFn: ({ signal }) =>
+      getCategories(
+        {
+          per_page: 200,
+          ...(categoryStoreParam != null
+            ? { store_location_id: categoryStoreParam }
+            : {}),
+        },
+        signal
+      ),
     staleTime: 30 * 60 * 1000,
   });
 
   const { data: subCategories = [] } = useQuery({
-    queryKey: ["subCategories", pickedCategory || null],
-    queryFn: () => getSubCategories(pickedCategory),
-    enabled: !!pickedCategory,
+    queryKey: ["subCategories", pickedCategory || null, categoryStoreParam ?? "ALL"],
+    queryFn: ({ signal }) =>
+      getSubCategories(pickedCategory, signal, {
+        ...(categoryStoreParam != null
+          ? { store_location_id: categoryStoreParam }
+          : {}),
+      }),
+    enabled: !!pickedCategory && meQ.isSuccess,
     staleTime: 30 * 60 * 1000,
   });
+
+  // Reset product filter when cabang changes
+  useEffect(() => {
+    if (selectedStoreId === undefined) return;
+    setFilters({
+      category_id: undefined,
+      sub_category_id: undefined,
+      stock_status: "any",
+    });
+    setPickedCategory(undefined);
+  }, [selectedStoreId]);
 
   const mainScrollRef = React.useRef(null);
 
@@ -233,8 +300,17 @@ export default function POSPage() {
 
   const registerQ = useQuery({
     queryKey: ["register", "current"],
-    queryFn: ({ signal }) => getCurrentRegister(signal),
+    enabled: meQ.isSuccess,
+    queryFn: async ({ signal }) => {
+      try {
+        return await getCurrentRegister(signal);
+      } catch {
+        return null;
+      }
+    },
     staleTime: 5 * 60 * 1000,
+    retry: 1,
+    refetchOnWindowFocus: false,
   });
 
   // normalisasi bentuk data register
@@ -373,7 +449,7 @@ export default function POSPage() {
       };
       return getProducts(params, signal);
     },
-    enabled: selectedStoreId !== undefined && (isAdmin || !!selectedStoreId),
+    enabled: selectedStoreId !== undefined && (showStoreSelector || !!selectedStoreId),
     getNextPageParam: (lastPage) => {
       const m = lastPage?.meta;
       return m && m.current_page < m.last_page ? m.current_page + 1 : undefined;
@@ -418,12 +494,12 @@ export default function POSPage() {
     (productsQuery.isFetching && !productsQuery.isFetchingNextPage) ||
     meQ.isLoading ||
     registerQ.isLoading ||
-    (isAdmin && storesQ.isLoading && selectedStoreId === undefined);
+    (isHqAdminUser && storesQ.isLoading && selectedStoreId === undefined);
   const loadingMore = productsQuery.isFetchingNextPage;
   const err =
     productsQuery.isError
       ? "Gagal memuat produk"
-      : storesQ.isError && isAdmin
+      : storesQ.isError && showStoreSelector
       ? "Gagal memuat daftar cabang"
       : meQ.isError
       ? "Gagal memuat data user"
@@ -545,35 +621,6 @@ export default function POSPage() {
   );
   const total = subtotalItems + tax;
 
-  // ===== Additional Charges (PB1 / Service) =====
-  const [additionalCharges, setAdditionalCharges] = React.useState([]);
-
-  useEffect(() => {
-    if (!selectedStoreId) return;
-
-    const storeId =
-      selectedStoreId !== "ALL" ? Number(selectedStoreId) : undefined;
-
-    // ITEM DISCOUNT
-    listDiscounts({
-      scope: "ITEM",
-      active: 1,
-      store_location_id: storeId,
-    }).then((res) => setItemDiscounts(res.items || []));
-
-    // GLOBAL DISCOUNT
-    listDiscounts({
-      scope: "GLOBAL",
-      active: 1,
-      store_location_id: storeId,
-    }).then((res) => setGlobalDiscounts(res.items || []));
-
-    // 🔥 ADDITIONAL CHARGE (PB1 & SERVICE)
-    listAdditionalCharges().then((res) =>
-      setAdditionalCharges(res.data || [])
-    );
-  }, [selectedStoreId]);
-
   /* ===== Infinite scroll trigger ===== */
   useEffect(() => {
     const el = mainScrollRef.current;
@@ -602,13 +649,14 @@ export default function POSPage() {
         <div className="sticky top-0 z-30 bg-gray-50">
           <div className="max-w-6xl mx-auto px-3 sm:px-5 md:px-6 py-2 sm:py-3">
             <SearchBar
+              key={selectedStoreId ?? "none"}
               onSearch={handleSearch}
               onScan={handleScan}
               onFilterChange={handleFilterChange}
               categories={categories}
               subCategories={subCategories}
               onPickCategory={setPickedCategory}
-              showStoreSelector={isAdmin}
+              showStoreSelector={showStoreSelector}
               storeOptions={[
                 { value: "ALL", label: "Semua" },
                 ...stores.map((s) => ({
@@ -667,7 +715,7 @@ export default function POSPage() {
 
             {!loading && !err && filteredProducts.length === 0 && (
               <div className="text-gray-500 mb-3">
-                {isAdmin && selectedStoreId === "ALL"
+                {isHqAdminUser && selectedStoreId === "ALL"
                   ? "Tidak ada produk (semua cabang)."
                   : "Tidak ada produk di cabang ini."}
               </div>

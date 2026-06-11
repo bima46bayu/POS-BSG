@@ -29,6 +29,8 @@ import {
 } from "../api/products";
 import { getCategories, listSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
+import { listStoreLocations } from "../api/storeLocations";
+import { canSwitchStores } from "../utils/roles";
 
 import AddProduct from "../components/products/AddProduct";
 import UpdateProduct from "../components/products/UpdateProduct";
@@ -37,6 +39,7 @@ import DataTable from "../components/data-table/DataTable";
 import ImportExcelModal from "../components/products/ImportExcelModal";
 
 const PER_PAGE = 10;
+const STORAGE_KEY = "product_store_id";
 const CACHE_KEY = "POS_CATEGORIES_CACHE_V1";
 const CACHE_DIRTY_KEY = "POS_CATS_DIRTY";
 const CAT_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -140,31 +143,88 @@ function useDebouncedValue(value, delay = 300) {
 export default function ProductPage() {
   const [, startTransition] = useTransition();
 
-  /* ====== User store ====== */
-  const [myStoreId, setMyStoreId] = useState(undefined);
-  const [storeName, setStoreName] = useState("-");
+  /* ====== User & store scope ====== */
+  const [me, setMe] = useState(null);
+  const [stores, setStores] = useState([]);
+  const [storeFilterId, setStoreFilterId] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      return window.localStorage.getItem(STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  });
+
+  const canPickStore = useMemo(
+    () => canSwitchStores(me?.role, me),
+    [me]
+  );
+
+  const myStoreId = useMemo(
+    () => me?.store_location_id ?? me?.store_location?.id ?? null,
+    [me]
+  );
+
+  const effectiveStoreId = useMemo(() => {
+    if (!canPickStore) {
+      return myStoreId != null ? Number(myStoreId) : null;
+    }
+    if (storeFilterId) return Number(storeFilterId);
+    return null;
+  }, [canPickStore, myStoreId, storeFilterId]);
+
+  const activeStoreLabel = useMemo(() => {
+    if (canPickStore && !storeFilterId) return "Semua cabang";
+    const sid = effectiveStoreId;
+    if (sid == null) return "-";
+    const found = stores.find((s) => String(s.id) === String(sid));
+    return found?.name ?? me?.store_location?.name ?? "-";
+  }, [canPickStore, storeFilterId, effectiveStoreId, stores, me]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const me = await getMe();
-        const sid = me?.store_location?.id ?? me?.store_location_id ?? null;
-        if (!cancelled) {
-          setMyStoreId(sid);
-          setStoreName(me?.store_location?.name ?? "-");
+        const profile = await getMe();
+        if (cancelled) return;
+        setMe(profile);
+        if (!canSwitchStores(profile?.role, profile)) {
+          const sid = profile?.store_location?.id ?? profile?.store_location_id ?? null;
+          if (sid != null) setStoreFilterId(String(sid));
         }
       } catch {
-        if (!cancelled) {
-          setMyStoreId(null);
-          setStoreName("-");
-        }
+        if (!cancelled) setMe(null);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!canPickStore) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listStoreLocations({ page: 1, per_page: 100 });
+        if (!cancelled) setStores(res?.items || []);
+      } catch {
+        if (!cancelled) setStores([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canPickStore]);
+
+  useEffect(() => {
+    if (!canPickStore || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, storeFilterId || "");
+    } catch {
+      // ignore
+    }
+  }, [canPickStore, storeFilterId]);
 
   /* ====== Filters ====== */
   const [currentPage, setCurrentPage] = useState(1);
@@ -186,6 +246,7 @@ export default function ProductPage() {
     min: "",
     max: "",
   });
+  const [draftStoreFilterId, setDraftStoreFilterId] = useState("");
 
   /* ====== Data ====== */
   const [rows, setRows] = useState([]);
@@ -224,7 +285,7 @@ export default function ProductPage() {
   const [deleting, setDeleting] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
-  /* ====== Load Categories ====== */
+  /* ====== Load Categories (scoped by store) ====== */
   useEffect(() => {
     let cancel = false;
 
@@ -233,20 +294,34 @@ export default function ProductPage() {
       return Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
     };
 
-    const useCacheFirst = () => {
-      const cached = readCache();
-      if (cached?.categories?.length) {
-        setCategories(cached.categories);
-        setSubCategories(cached.subCategories || []);
+    const catParams =
+      effectiveStoreId != null ? { store_location_id: effectiveStoreId } : {};
+    const cacheSuffix = effectiveStoreId != null ? String(effectiveStoreId) : "all";
+    const scopedCacheKey = `${CACHE_KEY}_${cacheSuffix}`;
+
+    const readScopedCache = () => {
+      try {
+        const raw = localStorage.getItem(scopedCacheKey);
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
       }
-      return cached;
+    };
+
+    const writeScopedCache = (payload) => {
+      try {
+        localStorage.setItem(
+          scopedCacheKey,
+          JSON.stringify({ ...payload, ts: Date.now() })
+        );
+      } catch {}
     };
 
     const fetchFresh = async () => {
       try {
         const [catRes, subRes] = await Promise.all([
-          getCategories(),
-          listSubCategories({ per_page: 1000 }),
+          getCategories(catParams),
+          listSubCategories({ per_page: 1000, ...catParams }),
         ]);
 
         if (cancel) return;
@@ -260,14 +335,18 @@ export default function ProductPage() {
 
         setCategories(catList);
         setSubCategories(subs);
-        writeCache({ categories: catList, subCategories: subs });
+        writeScopedCache({ categories: catList, subCategories: subs });
         clearDirty();
       } catch {
         if (!cancel) toast.error("Gagal memuat kategori");
       }
     };
 
-    const cached = useCacheFirst();
+    const cached = readScopedCache();
+    if (cached?.categories?.length) {
+      setCategories(cached.categories);
+      setSubCategories(cached.subCategories || []);
+    }
     if (!cached || isCacheStale(cached.ts) || isDirty()) fetchFresh();
 
     const onStorage = (e) => {
@@ -278,7 +357,7 @@ export default function ProductPage() {
       cancel = true;
       window.removeEventListener("storage", onStorage);
     };
-  }, []);
+  }, [effectiveStoreId]);
 
   /* ====== Query Builder ====== */
   const queryParams = useMemo(() => {
@@ -288,6 +367,7 @@ export default function ProductPage() {
     if (subCategoryId) p.sub_category_id = subCategoryId;
     if (priceRange.min) p.min_price = priceRange.min;
     if (priceRange.max) p.max_price = priceRange.max;
+    if (effectiveStoreId != null) p.store_location_id = effectiveStoreId;
     return p;
   }, [
     currentPage,
@@ -296,6 +376,7 @@ export default function ProductPage() {
     subCategoryId,
     priceRange.min,
     priceRange.max,
+    effectiveStoreId,
   ]);
 
   const queryKey = useMemo(() => stableKey(queryParams), [queryParams]);
@@ -329,7 +410,7 @@ export default function ProductPage() {
   );
 
   const refetch = useCallback(async () => {
-    if (myStoreId === undefined) return;
+    if (!me) return;
 
     if (abortRef.current) {
       try {
@@ -389,10 +470,10 @@ export default function ProductPage() {
       setLoading(false);
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, [fetchList, myStoreId, queryKey, queryParams, startTransition]);
+  }, [fetchList, me, queryKey, queryParams, startTransition]);
 
   useEffect(() => {
-    if (myStoreId !== undefined) refetch();
+    if (me) refetch();
     return () => {
       if (abortRef.current) {
         try {
@@ -400,7 +481,7 @@ export default function ProductPage() {
         } catch {}
       }
     };
-  }, [refetch, myStoreId]);
+  }, [refetch, me]);
 
   /* ====== Filter Stock (Front-end) ====== */
   const filteredRows = useMemo(() => {
@@ -422,6 +503,7 @@ export default function ProductPage() {
       setDraftSubCategoryId(subCategoryId);
       setDraftStockStatus(stockStatus);
       setDraftPriceRange(priceRange);
+      setDraftStoreFilterId(storeFilterId);
 
       const el = btnRef.current;
       if (el) {
@@ -436,20 +518,31 @@ export default function ProductPage() {
       }
     }
     setShowFilters((s) => !s);
-  }, [showFilters, categoryId, subCategoryId, stockStatus, priceRange]);
+  }, [showFilters, categoryId, subCategoryId, stockStatus, priceRange, storeFilterId]);
 
   const applyFilters = useCallback(() => {
-    setCategoryId(draftCategoryId);
-    setSubCategoryId(draftSubCategoryId);
+    const storeChanged = canPickStore && draftStoreFilterId !== storeFilterId;
+    if (storeChanged) {
+      setCategoryId("");
+      setSubCategoryId("");
+    } else {
+      setCategoryId(draftCategoryId);
+      setSubCategoryId(draftSubCategoryId);
+    }
     setStockStatus(draftStockStatus);
     setPriceRange(draftPriceRange);
+    if (canPickStore) setStoreFilterId(draftStoreFilterId);
     setCurrentPage(1);
     setShowFilters(false);
+    if (storeChanged) listCache.clear();
   }, [
     draftCategoryId,
     draftSubCategoryId,
     draftStockStatus,
     draftPriceRange,
+    draftStoreFilterId,
+    storeFilterId,
+    canPickStore,
   ]);
 
   const clearAllFilters = useCallback(() => {
@@ -457,12 +550,14 @@ export default function ProductPage() {
     setDraftSubCategoryId("");
     setDraftStockStatus("");
     setDraftPriceRange({ min: "", max: "" });
+    setDraftStoreFilterId(canPickStore ? "" : String(myStoreId || ""));
     setCategoryId("");
     setSubCategoryId("");
     setStockStatus("");
     setPriceRange({ min: "", max: "" });
+    if (canPickStore) setStoreFilterId("");
     setCurrentPage(1);
-  }, []);
+  }, [canPickStore, myStoreId]);
 
   /* ====== CRUD Handlers ====== */
   const handleEdit = useCallback((row) => {
@@ -499,12 +594,12 @@ export default function ProductPage() {
   const handleCreate = useCallback(
     async (payload) => {
       try {
-        if (myStoreId == null) {
-          toast.error("Akun ini belum memiliki store. Hubungi admin.");
+        if (effectiveStoreId == null) {
+          toast.error("Pilih cabang terlebih dahulu sebelum menambah produk.");
           return;
         }
 
-        const body = { ...payload, store_location_id: myStoreId };
+        const body = { ...payload, store_location_id: effectiveStoreId };
         if (!body.image && Array.isArray(body.images) && body.images[0]) {
           body.image = body.images[0];
         }
@@ -521,17 +616,17 @@ export default function ProductPage() {
         toast.error(err?.response?.data?.message || "Gagal membuat produk");
       }
     },
-    [myStoreId, refetch]
+    [effectiveStoreId, refetch]
   );
 
   const handleUpdate = useCallback(
     async (payload) => {
       try {
-        if (myStoreId == null) {
-          toast.error("Akun ini belum memiliki store. Hubungi admin.");
+        if (effectiveStoreId == null) {
+          toast.error("Pilih cabang terlebih dahulu.");
           return;
         }
-        const body = { ...payload, store_location_id: myStoreId };
+        const body = { ...payload, store_location_id: effectiveStoreId };
         await updateProductWithImages(payload.id, body);
         toast.success("Produk berhasil diperbarui");
         setShowEdit(false);
@@ -546,7 +641,7 @@ export default function ProductPage() {
         );
       }
     },
-    [myStoreId, refetch]
+    [effectiveStoreId, refetch]
   );
 
   const handleExportExcel = useCallback(async () => {
@@ -771,7 +866,7 @@ export default function ProductPage() {
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-800">Products</h2>
         <p className="text-xs text-gray-500">
-          Store aktif: <span className="font-medium">{storeName}</span>
+          Store aktif: <span className="font-medium">{activeStoreLabel}</span>
         </p>
       </div>
 
@@ -880,6 +975,27 @@ export default function ProductPage() {
             </div>
 
             <div className="p-4 space-y-4">
+              {canPickStore && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">
+                    Cabang
+                  </label>
+                  <select
+                    value={draftStoreFilterId}
+                    onChange={(e) => setDraftStoreFilterId(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg"
+                  >
+                    <option value="">Semua cabang</option>
+                    {stores.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.code ? `${s.code} — ` : ""}
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium mb-1">
                   Category

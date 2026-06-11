@@ -146,16 +146,23 @@ const SALES_PAGE_SIZE = 200;
 const SALES_MAX_PAGES = 500;
 
 /** Fetch every page of /api/sales for the given filters (from, to, status, code, …). */
-export async function listAllSales(params = {}, signal) {
+export async function listAllSales(params = {}, signal, options = {}) {
+  const { includeItems = false } = options;
   const all = [];
   let page = 1;
   let lastPage = 1;
 
   do {
-    const { items, meta } = await getSales(
-      { ...params, page, per_page: SALES_PAGE_SIZE },
-      signal
-    );
+    const pageParams = {
+      ...params,
+      page,
+      per_page: SALES_PAGE_SIZE,
+    };
+    if (!includeItems) {
+      pageParams.without_items = 1;
+    }
+
+    const { items, meta } = await getSales(pageParams, signal);
     all.push(...items);
     lastPage = meta?.last_page ?? 1;
     page += 1;
@@ -165,5 +172,5 @@ export async function listAllSales(params = {}, signal) {
 }
 
 export async function listSalesForDashboard(params = {}, signal) {
-  return listAllSales(params, signal);
+  return listAllSales(params, signal, { includeItems: true });
 }

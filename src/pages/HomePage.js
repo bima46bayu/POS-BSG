@@ -30,6 +30,7 @@ import {
 } from "../lib/fmt";
 import { aggregateForRange } from "../lib/aggregate";
 import { exportToPDF } from "../lib/exportPdf";
+import { isHqAdmin, isKasir } from "../utils/roles";
 
 /* ========== Master data ringan ========== */
 async function fetchStores(signal) {
@@ -38,17 +39,36 @@ async function fetchStores(signal) {
     return Array.isArray(data?.data) ? data.data : data;
   } catch { return []; }
 }
-async function fetchCategories(signal) {
+async function fetchCategories(signal, storeId = "") {
   try {
-    const { data } = await api.get("/api/categories", { params: { per_page: 100 }, signal });
+    const params = { per_page: 500 };
+    if (storeId) params.store_location_id = storeId;
+    const { data } = await api.get("/api/categories", { params, signal });
     return Array.isArray(data?.data) ? data.data : data;
   } catch { return []; }
 }
-async function fetchSubCategories(signal) {
+async function fetchSubCategories(signal, storeId = "") {
   try {
-    const { data } = await api.get("/api/sub-categories", { params: { per_page: 100 }, signal });
+    const params = { per_page: 500 };
+    if (storeId) params.store_location_id = storeId;
+    const { data } = await api.get("/api/sub-categories", { params, signal });
     return Array.isArray(data?.data) ? data.data : data;
   } catch { return []; }
+}
+
+function resolveSaleStore(sale, storeNameById) {
+  const sl =
+    sale?.store_location ??
+    sale?.storeLocation ??
+    sale?.cashier?.store_location ??
+    sale?.cashier?.storeLocation;
+  const rawId = sl?.id ?? sale?.store_location_id ?? null;
+  const name =
+    sl?.name ??
+    (rawId != null ? storeNameById.get(String(rawId)) : null) ??
+    "Unknown";
+  const id = rawId != null ? String(rawId) : `n_${name.replace(/\s+/g, "_")}`;
+  return { id, name };
 }
 
 /* ========== Util aman untuk shape /api/users/me ========== */
@@ -134,15 +154,15 @@ export default function HomePage() {
     staleTime: 5 * 60_000,
   });
   const me = meQ.data;
-  const isCashier = (me?.role || "") === "kasir";
+  const isCashier = isKasir(me?.role);
+  const isHqAdminUser = isHqAdmin(me?.role);
 
-  // Kunci filter saat kasir (1 hari + cabang user) + set default store untuk admin
+  // Kasir: locked to today + their store. HQ admin defaults to Semua cabang.
   React.useEffect(() => {
     if (!me) return;
     const today = new Date().toISOString().slice(0, 10);
-    
+
     if (isCashier) {
-      // Kasir: terkunci ke store_location_id mereka
       setFilters((prev) => ({
         ...prev,
         from: today,
@@ -151,21 +171,35 @@ export default function HomePage() {
         search: "",
         onlyDiscount: false,
       }));
-    } else {
-      // Admin: default ke store_location_id, tapi bisa diubah
+    } else if (isHqAdminUser) {
       setFilters((prev) => ({
         ...prev,
-        from: today,
-        to: today,
+        from: prev.from || today,
+        to: prev.to || today,
+        storeId: prev.storeId ?? "",
+      }));
+    } else {
+      setFilters((prev) => ({
+        ...prev,
+        from: prev.from || today,
+        to: prev.to || today,
         storeId: prev.storeId || (me.store_location_id ? String(me.store_location_id) : ""),
       }));
     }
-  }, [isCashier, me]);
+  }, [isCashier, isHqAdminUser, me]);
 
   // Master data
   const storesQ = useQuery({ queryKey: ["stores"], queryFn: ({ signal }) => fetchStores(signal), staleTime: 5 * 60_000 });
-  const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: ({ signal }) => fetchCategories(signal), staleTime: 5 * 60_000 });
-  const subCategoriesQ = useQuery({ queryKey: ["subCategories"], queryFn: ({ signal }) => fetchSubCategories(signal), staleTime: 5 * 60_000 });
+  const categoriesQ = useQuery({
+    queryKey: ["categories", { storeId: filters.storeId || "all" }],
+    queryFn: ({ signal }) => fetchCategories(signal, filters.storeId),
+    staleTime: 5 * 60_000,
+  });
+  const subCategoriesQ = useQuery({
+    queryKey: ["subCategories", { storeId: filters.storeId || "all" }],
+    queryFn: ({ signal }) => fetchSubCategories(signal, filters.storeId),
+    staleTime: 5 * 60_000,
+  });
 
   // SALES untuk dashboard
   const salesQ = useQuery({
@@ -373,6 +407,65 @@ export default function HomePage() {
     return map;
   }, [rangeSales, dateList]);
 
+  const storeNameById = React.useMemo(() => {
+    const m = new Map();
+    for (const st of storesQ.data || []) {
+      if (st?.id != null) m.set(String(st.id), st.name || `Store ${st.id}`);
+    }
+    return m;
+  }, [storesQ.data]);
+
+  const revenueChart = React.useMemo(() => {
+    const single = {
+      mode: "single",
+      data: aggRange.trendTotal,
+      series: [{ key: "total", name: "Total Pendapatan", color: "#2563EB" }],
+    };
+
+    if (filters.storeId) return single;
+
+    const storeMeta = new Map();
+    for (const s of rangeSales) {
+      if (String(s?.status || "").toLowerCase() === "void") continue;
+      const { id, name } = resolveSaleStore(s, storeNameById);
+      if (!storeMeta.has(id)) storeMeta.set(id, { name });
+    }
+
+    const series = Array.from(storeMeta.entries())
+      .sort((a, b) => a[1].name.localeCompare(b[1].name, "id"))
+      .map(([id, { name }], i) => ({
+        key: `store_${id}`,
+        name,
+        color: PIE_COLORS[i % PIE_COLORS.length],
+      }));
+
+    if (series.length === 0) return single;
+
+    const byDate = {};
+    dateList.forEach((d) => {
+      byDate[d] = { date: d };
+    });
+
+    for (const s of rangeSales) {
+      if (String(s?.status || "").toLowerCase() === "void") continue;
+      const { id } = resolveSaleStore(s, storeNameById);
+      const dKey = dayKey(s?.created_at || s?.createdAt || Date.now());
+      const key = `store_${id}`;
+      if (!byDate[dKey]) byDate[dKey] = { date: dKey };
+      byDate[dKey][key] = (byDate[dKey][key] || 0) + N(s.total);
+    }
+
+    const data = dateList.map((d) => {
+      const row = { date: d, ...byDate[d] };
+      for (const ser of series) {
+        if (row[ser.key] == null) row[ser.key] = 0;
+      }
+      return row;
+    });
+
+    return { mode: "multi", data, series };
+  }, [filters.storeId, aggRange.trendTotal, rangeSales, storeNameById, dateList]);
+
   /* ===== UI ===== */
 
   const Section = ({ title, right, className = "", children }) => (
@@ -480,25 +573,51 @@ export default function HomePage() {
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
           <Section
             title="Pendapatan"
-            right={<span className="text-xs text-slate-500">Trend harian</span>}
+            right={
+              <span className="text-xs text-slate-500">
+                {revenueChart.mode === "multi" ? "Per cabang" : "Trend harian"}
+              </span>
+            }
             className="xl:col-span-8"
           >
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={aggRange.trendTotal} margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
-                  <defs>
-                    <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563EB" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#2563EB" stopOpacity={0.05} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 12 }} stroke="#64748b" />
-                  <YAxis tickFormatter={shortIDR} tick={{ fontSize: 12 }} stroke="#64748b" />
-                  <Tooltip formatter={(v) => IDR(v)} contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }} />
-                  <Legend wrapperStyle={{ fontSize: "13px" }} />
-                  <Area type="monotone" dataKey="total" name="Total Pendapatan" stroke="#2563EB" fill="url(#colorTotal)" strokeWidth={2} />
-                </AreaChart>
+                {revenueChart.mode === "single" ? (
+                  <AreaChart data={revenueChart.data} margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
+                    <defs>
+                      <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563EB" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#2563EB" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 12 }} stroke="#64748b" />
+                    <YAxis tickFormatter={shortIDR} tick={{ fontSize: 12 }} stroke="#64748b" />
+                    <Tooltip formatter={(v) => IDR(v)} contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }} />
+                    <Legend wrapperStyle={{ fontSize: "13px" }} />
+                    <Area type="monotone" dataKey="total" name="Total Pendapatan" stroke="#2563EB" fill="url(#colorTotal)" strokeWidth={2} />
+                  </AreaChart>
+                ) : (
+                  <LineChart data={revenueChart.data} margin={{ top: 10, right: 10, bottom: 20, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 12 }} stroke="#64748b" />
+                    <YAxis tickFormatter={shortIDR} tick={{ fontSize: 12 }} stroke="#64748b" />
+                    <Tooltip formatter={(v) => IDR(v)} contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }} />
+                    <Legend wrapperStyle={{ fontSize: "13px" }} />
+                    {revenueChart.series.map((ser) => (
+                      <Line
+                        key={ser.key}
+                        type="monotone"
+                        dataKey={ser.key}
+                        name={ser.name}
+                        stroke={ser.color}
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        activeDot={{ r: 5 }}
+                      />
+                    ))}
+                  </LineChart>
+                )}
               </ResponsiveContainer>
             </div>
           </Section>

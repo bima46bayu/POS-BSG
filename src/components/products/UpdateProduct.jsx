@@ -186,10 +186,6 @@ export default function UpdateProduct({
         id: product.id,
         name: form.name,
         price: form.price ? Number(form.price) : 0,
-
-        // non_stock -> stock harus 0
-        stock: trackInventory ? (form.stock ? Number(form.stock) : 0) : 0,
-
         sku: form.sku,
         description: form.description || null,
         category_id: form.category_id || null,
@@ -317,16 +313,19 @@ export default function UpdateProduct({
 
           {/* Stock & Unit */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Field label="Stock">
+            <Field label="Stock (baca saja)">
               <Input
                 type="number"
                 inputMode="numeric"
-                placeholder="10"
+                placeholder="0"
                 value={form.stock}
-                onChange={onChange("stock")}
                 min="0"
-                disabled={!trackInventory}
+                disabled
+                title="Stok diubah via GR, stock opname, atau import — bukan edit produk"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Stok per cabang dikelola di Inventory / GR / opname.
+              </p>
             </Field>
             <Field label="Unit">
               <UnitDropdown

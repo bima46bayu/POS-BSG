@@ -50,6 +50,7 @@ import {
 } from "react-router-dom";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { getAllowedPages } from "./utils/roles";
 
 /* ===== REACT QUERY ===== */
 const queryClient = new QueryClient({
@@ -64,21 +65,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-
-/* ===== ROLE & PAGE CONFIG ===== */
-const DEFAULT_ALLOWED = {
-  admin: [
-    "home",
-    "pos",
-    "products",
-    "inventory",
-    "purchase",
-    "gr",
-    "history",
-    "master",
-  ],
-  kasir: ["home", "pos", "history"],
-};
 
 const PAGE_PATH = {
   home: "/home",
@@ -122,7 +108,7 @@ function AppShell() {
   const [role, setRole] = useState(() => getRoleFromStorage());
 
   const allowedPages = useMemo(
-    () => DEFAULT_ALLOWED[role] || DEFAULT_ALLOWED.kasir,
+    () => getAllowedPages(role),
     [role]
   );
 
@@ -176,7 +162,7 @@ function AppShell() {
           setRole(r);
 
           const first =
-            (DEFAULT_ALLOWED[r] || DEFAULT_ALLOWED.kasir)[0] || "pos";
+            (getAllowedPages(r)[0]) || "pos";
           navigate(PAGE_PATH[first] || "/pos", { replace: true });
         }}
       />
