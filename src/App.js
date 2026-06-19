@@ -30,6 +30,7 @@ import MasterCategoryPage from "./pages/master/MasterCategoryPage";
 import MasterSubCategoryPage from "./pages/master/MasterSubCategoryPage";
 import MasterSupplierPage from "./pages/master/MasterSupplierPage";
 import MasterStoreLocationPage from "./pages/master/MasterStoreLocationPage";
+import MasterRecipePage from "./pages/master/MasterRecipePage";
 import MasterDiscountPage from "./pages/master/MasterDiscountPage";
 import AdditionalChargePage from "./pages/master/AdditionalChargePage";
 
@@ -357,6 +358,14 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterDiscountPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/recipe"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterRecipePage />
               </ProtectedRoute>
             }
           />

@@ -21,6 +21,7 @@ import {
   Scale,
   BadgePercent,
   BadgeDollarSign,
+  ChefHat,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -153,7 +154,7 @@ export default function Sidebar({
   const menuItems = [
     { id: "home", label: "Home", icon: Home },
     { id: "pos", label: "POS", icon: CreditCard },
-    { id: "products", label: "Product", icon: Package },
+    { id: "products", label: "Catalog", icon: Package },
     { id: "inventory", label: "Inventory", icon: Archive },
     { id: "reconciliation", label: "Rekonsiliasi", icon: Scale },
     // Purchase & GR DIKELUARKAN dari menu utama → akan masuk submenu
@@ -166,6 +167,7 @@ export default function Sidebar({
     { label: "User", path: "/master/user", icon: User },
     { label: "Category", path: "/master/category", icon: Folder },
     { label: "Sub-Category", path: "/master/sub-category", icon: GitBranch },
+    { label: "Product Recipe", path: "/master/recipe", icon: ChefHat },
     { label: "Additional Charge", path: "/master/additional-charge", icon: BadgeDollarSign },
     { label: "Discount", path: "/master/discount", icon: BadgePercent },
     { label: "Supplier", path: "/master/supplier", icon: Truck },

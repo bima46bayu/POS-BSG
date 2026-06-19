@@ -1,7 +1,6 @@
 // src/components/products/AddProduct.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
-import { getMe } from "../../api/users";
 import UnitDropdown from "./UnitDropdown";
 
 /**
@@ -9,6 +8,8 @@ import UnitDropdown from "./UnitDropdown";
  *  - open: boolean
  *  - onClose: () => void
  *  - onSubmit: (payload) => Promise<void> | void
+ *  - storeLocationId: number | null (selected branch from catalog filter)
+ *  - storeLabel: string
  *  - categories: [{id, name}]
  *  - subCategories: [{id, name, category_id}]
  */
@@ -16,6 +17,8 @@ export default function AddProduct({
   open,
   onClose,
   onSubmit,
+  storeLocationId = null,
+  storeLabel = "",
   categories = [],
   subCategories = [],
 }) {
@@ -36,43 +39,11 @@ export default function AddProduct({
   const [isDragOver, setIsDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // === store user dari /api/me (auto) ===
-  const [storeLocationId, setStoreLocationId] = useState(null);
-  const [meLoading, setMeLoading] = useState(true);
-  const [meError, setMeError] = useState("");
-
+  // Reset category picks when the selected branch changes
   useEffect(() => {
-    if (!open) return; // cuma load saat modal dibuka
-
-    let cancelled = false;
-
-    (async () => {
-      setMeLoading(true);
-      setMeError("");
-      try {
-        const me = await getMe();
-        // sesuaikan dengan bentuk response getMe-mu
-        const user = me?.data ?? me; // kalau axios wrapper biasa: res.data
-        const sid =
-          user?.store_location?.id ?? user?.store_location_id ?? null;
-
-        if (!cancelled) {
-          setStoreLocationId(sid);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setStoreLocationId(null);
-          setMeError("Gagal mengambil lokasi store user.");
-        }
-      } finally {
-        if (!cancelled) setMeLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
+    if (!open) return;
+    setForm((f) => ({ ...f, category_id: "", sub_category_id: "" }));
+  }, [open, storeLocationId]);
 
   // Filter subcategory berdasarkan category
   const filteredSubs = useMemo(() => {
@@ -106,7 +77,6 @@ export default function AddProduct({
         return [];
       });
       setSubmitting(false);
-      setMeError("");
     }
   }, [open]);
 
@@ -168,9 +138,7 @@ export default function AddProduct({
     if (submitting) return;
 
     if (storeLocationId == null) {
-      alert(
-        "Lokasi store user tidak ditemukan. Silakan relogin atau hubungi admin."
-      );
+      alert("Pilih cabang terlebih dahulu sebelum menambah produk.");
       return;
     }
 
@@ -214,13 +182,11 @@ export default function AddProduct({
           <h2 className="text-xl leading-6 font-semibold text-gray-900">
             Tambah Produk
           </h2>
-          {meLoading && (
-            <p className="text-xs text-gray-500 mt-1">Memuat store user…</p>
-          )}
-          {!meLoading && storeLocationId == null && (
+          {storeLocationId != null && storeLabel ? (
+            <p className="text-xs text-gray-500 mt-1">Cabang: {storeLabel}</p>
+          ) : (
             <p className="text-xs text-red-600 mt-1">
-              {meError ||
-                "Store user tidak ditemukan. Produk tidak bisa disimpan."}
+              Pilih cabang di filter atas sebelum menambah produk.
             </p>
           )}
         </div>
@@ -436,9 +402,9 @@ export default function AddProduct({
           <button
             type="submit"
             className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-            disabled={submitting || meLoading || storeLocationId == null}
+            disabled={submitting || storeLocationId == null}
             title={
-              storeLocationId == null ? "Store user tidak ditemukan" : undefined
+              storeLocationId == null ? "Pilih cabang terlebih dahulu" : undefined
             }
           >
             {submitting ? "Saving..." : "Save Product"}

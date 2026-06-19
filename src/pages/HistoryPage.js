@@ -8,8 +8,14 @@ import {
   HistoryByRegister,
 } from "../components/history";
 import { getMe } from "../api/users";
+import { listStoreLocations } from "../api/storeLocations";
+import StoreScopeFilter from "../components/common/StoreScopeFilter";
+import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
+import { canSwitchStores } from "../utils/roles";
 
 const TAB_KEY = "history_active_tab";
+const STORAGE_KEY = "history_store_id";
+const PARENT_STORAGE_KEY = "history_parent_store_id";
 
 const TABS = [
   { id: "tx", label: "Transactions", icon: CalendarClock },
@@ -21,17 +27,54 @@ const TABS = [
 export default function HistoryPage() {
   const [sp, setSp] = useSearchParams();
   const [me, setMe] = useState(null);
+  const [stores, setStores] = useState([]);
+
+  const {
+    parentFilterId,
+    storeFilterId,
+    effectiveStoreId,
+    canPickStore,
+    needsStoreSelection,
+    activeStoreLabel,
+    handleParentChange,
+    handleBranchChange,
+  } = useStoreScopeFilter({
+    branchStorageKey: STORAGE_KEY,
+    parentStorageKey: PARENT_STORAGE_KEY,
+    me,
+    stores,
+  });
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const meRes = await getMe();
-        setMe(meRes);
+        if (!cancelled) setMe(meRes);
       } catch {
-        // ignore
+        if (!cancelled) setMe(null);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!me || !canSwitchStores(me?.role, me)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listStoreLocations({ page: 1, per_page: 200 });
+        if (!cancelled) setStores(res?.items || []);
+      } catch {
+        if (!cancelled) setStores([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [me]);
 
   const active = sp.get("tab") || localStorage.getItem(TAB_KEY) || "tx";
 
@@ -61,27 +104,34 @@ export default function HistoryPage() {
   const ActiveIcon =
     TABS.find((t) => t.id === current)?.icon ?? CalendarClock;
 
+  const lockedLabel =
+    me?.store_location?.name || activeStoreLabel || "Global";
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       {/* Header */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-        <div className="flex items-start justify-between">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           {/* Kiri: title dan store */}
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-3 min-w-0">
             <div className="flex items-center gap-2">
-              <ActiveIcon className="w-5 h-5 text-blue-600" />
+              <ActiveIcon className="w-5 h-5 text-blue-600 shrink-0" />
               <h2 className="text-lg font-semibold text-gray-800">History</h2>
             </div>
-            <p className="text-xs text-gray-500">
-              Store aktif:{" "}
-              <span className="font-medium">
-                {me?.store_location?.name || "Global"}
-              </span>
-            </p>
+            <StoreScopeFilter
+              stores={stores}
+              me={me}
+              parentId={parentFilterId}
+              branchId={storeFilterId}
+              onParentChange={handleParentChange}
+              onBranchChange={handleBranchChange}
+              canPickStore={canPickStore}
+              lockedLabel={lockedLabel}
+            />
           </div>
 
           {/* Kanan: segmented tabs */}
-          <div>
+          <div className="shrink-0">
             <div className="inline-flex bg-white border border-gray-200 rounded-lg p-1 shadow-sm gap-1.5">
               {TABS.map((t) => {
                 const Icon = t.icon;
@@ -113,12 +163,38 @@ export default function HistoryPage() {
         </div>
       </div>
 
+      {needsStoreSelection && (
+        <div className="mt-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+          Pilih parent dan cabang untuk melihat history cabang tersebut.
+        </div>
+      )}
+
       {/* Body per tab */}
       <div className="mt-4">
-        {current === "tx" && <HistoryByTransaction />}
-        {current === "item" && <HistoryByItem />}
-        {current === "subcat_month" && <HistoryBySubcategoryMonth />}
-        {current === "register" && <HistoryByRegister />}
+        {current === "tx" && (
+          <HistoryByTransaction
+            storeId={effectiveStoreId}
+            needsStoreSelection={needsStoreSelection}
+          />
+        )}
+        {current === "item" && (
+          <HistoryByItem
+            storeId={effectiveStoreId}
+            needsStoreSelection={needsStoreSelection}
+          />
+        )}
+        {current === "subcat_month" && (
+          <HistoryBySubcategoryMonth
+            storeId={effectiveStoreId}
+            needsStoreSelection={needsStoreSelection}
+          />
+        )}
+        {current === "register" && (
+          <HistoryByRegister
+            storeId={effectiveStoreId}
+            needsStoreSelection={needsStoreSelection}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { computeAdditionalCharges } from "../../utils/additionalCharges";
 
 const money = (n) => `Rp${Number(n || 0).toLocaleString("id-ID")}`;
 
@@ -46,29 +47,11 @@ export default function OrderSummary({
     );
   }, [subtotal, discount]);
 
-  /* ================= ADDITIONAL CHARGES ================= */
-  const computedCharges = useMemo(() => {
-    return additionalCharges
-      .filter((c) => c.is_active)
-      .map((c) => {
-        const amount =
-          c.calc_type === "PERCENT"
-            ? (chargeBase * Number(c.value || 0)) / 100
-            : Number(c.value || 0);
-
-        return {
-          ...c,
-          amount: Math.max(0, amount),
-        };
-      });
-  }, [additionalCharges, chargeBase]);
-
-  const totalAdditionalCharge = useMemo(() => {
-    return computedCharges.reduce(
-      (sum, c) => sum + Number(c.amount || 0),
-      0
-    );
-  }, [computedCharges]);
+  /* ================= ADDITIONAL CHARGES (Service → PB1) ================= */
+  const { computed: computedCharges, total: totalAdditionalCharge } = useMemo(
+    () => computeAdditionalCharges(chargeBase, additionalCharges),
+    [additionalCharges, chargeBase]
+  );
 
   /* ================= GRAND TOTAL ================= */
   const shownTotal = useMemo(() => {

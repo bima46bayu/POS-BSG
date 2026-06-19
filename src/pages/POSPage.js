@@ -182,6 +182,9 @@ export default function POSPage() {
     return Number.isFinite(n) ? n : undefined;
   }, [selectedStoreId]);
 
+  /** Branch used for register + checkout (must match product list). */
+  const posStoreId = discountStoreParam;
+
   const posDiscountsQ = useQuery({
     queryKey: ["pos", "discounts", discountStoreParam ?? "ALL"],
     enabled: meQ.isSuccess && selectedStoreId !== undefined && selectedStoreId !== "",
@@ -215,11 +218,18 @@ export default function POSPage() {
   const globalDiscounts = posDiscountsQ.data?.global ?? [];
 
   const additionalChargesQ = useQuery({
-    queryKey: ["pos", "additional-charges"],
-    enabled: meQ.isSuccess && selectedStoreId !== undefined && selectedStoreId !== "",
+    queryKey: ["pos", "additional-charges", discountStoreParam ?? "ALL"],
+    enabled:
+      meQ.isSuccess &&
+      selectedStoreId !== undefined &&
+      selectedStoreId !== "" &&
+      discountStoreParam != null,
     queryFn: async ({ signal }) => {
       try {
-        const res = await listAdditionalCharges({}, signal);
+        const res = await listAdditionalCharges(
+          { store_location_id: discountStoreParam },
+          signal
+        );
         const payload = res?.data;
         if (Array.isArray(payload?.data)) return payload.data;
         if (Array.isArray(payload)) return payload;
@@ -299,11 +309,13 @@ export default function POSPage() {
   };
 
   const registerQ = useQuery({
-    queryKey: ["register", "current"],
+    queryKey: ["register", "current", posStoreId ?? "user-default"],
     enabled: meQ.isSuccess,
     queryFn: async ({ signal }) => {
       try {
-        return await getCurrentRegister(signal);
+        const params =
+          posStoreId != null ? { store_location_id: posStoreId } : {};
+        return await getCurrentRegister(signal, params);
       } catch {
         return null;
       }
@@ -316,6 +328,30 @@ export default function POSPage() {
   // normalisasi bentuk data register
   const currentRegister = pickCurrentRegister(registerQ.data);
   const registerReady = !!currentRegister;
+
+  const saleStoreId = useMemo(() => {
+    const fromRegister = currentRegister?.store_location_id;
+    if (fromRegister != null && fromRegister !== "") {
+      return Number(fromRegister);
+    }
+    return posStoreId ?? null;
+  }, [currentRegister?.store_location_id, posStoreId]);
+
+  const saleExtraPayload = useMemo(
+    () =>
+      saleStoreId != null ? { store_location_id: saleStoreId } : {},
+    [saleStoreId]
+  );
+
+  // Keep branch picker aligned with open register session
+  useEffect(() => {
+    const sid = currentRegister?.store_location_id;
+    if (sid == null || sid === "") return;
+    setSelectedStoreId((prev) => {
+      const next = String(sid);
+      return prev === next ? prev : next;
+    });
+  }, [currentRegister?.store_location_id]);
 
   const clearCartState = useCallback(() => {
     setCartItems([]);
@@ -446,6 +482,7 @@ export default function POSPage() {
         out_of_stock: filters.stock_status === "out" ? 1 : undefined,
         store_id: !isAll && selectedStoreId ? Number(selectedStoreId) : undefined,
         only_store: !isAll && selectedStoreId ? 1 : undefined,
+        exclude_recipe_ingredients: !isAll && selectedStoreId ? 1 : undefined,
       };
       return getProducts(params, signal);
     },
@@ -665,8 +702,14 @@ export default function POSPage() {
                 })),
               ]}
               selectedStoreId={selectedStoreId || "ALL"}
-              onChangeStore={(val) => setSelectedStoreId(val || "ALL")}
-              storeDisabled={storesQ.isLoading}
+              onChangeStore={(val) => {
+                if (currentRegister) {
+                  toast.error("Tutup register dulu sebelum ganti cabang.");
+                  return;
+                }
+                setSelectedStoreId(val || "ALL");
+              }}
+              storeDisabled={storesQ.isLoading || !!currentRegister}
               registerState={
                 currentRegister
                   ? { status: "open", session: currentRegister }
@@ -688,6 +731,10 @@ export default function POSPage() {
                       );
                     });
                 } else {
+                  if (posStoreId == null) {
+                    toast.error("Pilih cabang terlebih dahulu sebelum buka register.");
+                    return;
+                  }
                   setOpenRegisterModal(true);
                 }
               }}
@@ -778,13 +825,8 @@ export default function POSPage() {
           }}
           onCancel={handleClearCart}
           showSummary={true}
-          extraPayload={{
-            store_location_id:
-              selectedStoreId && selectedStoreId !== "ALL"
-                ? Number(selectedStoreId)
-                : undefined,
-          }}
           registerOpen={!!currentRegister}
+          extraPayload={saleExtraPayload}
         />
       </aside>
 
@@ -827,6 +869,7 @@ export default function POSPage() {
         checkout={cartCheckout}
         onCheckoutChange={setCartCheckout}
         registerOpen={!!currentRegister}
+        extraPayload={saleExtraPayload}
         onClearCart={handleClearCart}
       />
 
@@ -834,8 +877,20 @@ export default function POSPage() {
       <OpenRegisterModal
         open={openRegisterModal}
         onClose={() => setOpenRegisterModal(false)}
-        onSubmit={(values) => openRegisterMutation.mutate(values)}
+        onSubmit={(values) => {
+          if (posStoreId == null) {
+            toast.error("Pilih cabang terlebih dahulu.");
+            return;
+          }
+          openRegisterMutation.mutate({
+            ...values,
+            store_location_id: posStoreId,
+          });
+        }}
         loading={openRegisterMutation.isPending}
+        storeLabel={
+          stores.find((s) => String(s.id) === String(posStoreId))?.name ?? ""
+        }
       />
 
       {/* Register summary modal (preview & after close) */}

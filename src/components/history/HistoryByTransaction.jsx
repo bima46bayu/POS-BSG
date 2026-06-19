@@ -6,6 +6,7 @@ import DataTable from "../data-table/DataTable";
 import DateRangePicker from "../DateRangePicker";
 import { getSales, listAllSales, getSale, voidSale } from "../../api/sales";
 import { getMe } from "../../api/users";
+import { canSwitchStores } from "../../utils/roles";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import ConfirmDialog from "../common/ConfirmDialog";
 import SaleDetailModal from "../sales/SaleDetailModal";
@@ -69,10 +70,21 @@ const isWithinDateRange = (iso, start, end) => {
   return true;
 };
 
-export default function HistoryByTransaction() {
-  // ===== me / role & stores =====
+export default function HistoryByTransaction({
+  storeId = null,
+  needsStoreSelection = false,
+}) {
+  // ===== me / role =====
   const [me, setMe] = useState(null);
-  const isAdmin = useMemo(() => String(me?.role || "").toLowerCase() === "admin", [me]);
+  const canSwitch = useMemo(
+    () => canSwitchStores(me?.role, me),
+    [me]
+  );
+
+  const storeParams = useMemo(() => {
+    if (storeId == null) return {};
+    return { store_id: storeId, store_location_id: storeId };
+  }, [storeId]);
 
   // ===== server data & meta =====
   const [rawRows, setRawRows] = useState([]);
@@ -94,16 +106,13 @@ export default function HistoryByTransaction() {
 
   // popovers
   const generalBtnRef = useRef(null);
-  const storeBtnRef = useRef(null);
   const dateRangeBtnRef = useRef(null);
   const general = useAnchoredPopover();
-  const store = useAnchoredPopover();
   const dateRangePopover = useAnchoredPopover();
   useEffect(() => { 
     general.setAnchor(generalBtnRef.current); 
-    store.setAnchor(storeBtnRef.current); 
     dateRangePopover.setAnchor(dateRangeBtnRef.current);
-  }, [general, store, dateRangePopover]);
+  }, [general, dateRangePopover]);
 
   // ===== init: me & stores, set default store =====
   useEffect(() => {
@@ -130,26 +139,31 @@ export default function HistoryByTransaction() {
 
   // ===== IMPORTANT: cashier must always filter on client =====
   const clientFilterActive = useMemo(() => {
-    if (!isAdmin) return true; // kasir selalu client-filter
+    if (!canSwitch) return true;
     return Boolean(paymentMethod || dateRange.start || dateRange.end || statusFilter);
-  }, [isAdmin, paymentMethod, dateRange.start, dateRange.end, statusFilter]);
+  }, [canSwitch, paymentMethod, dateRange.start, dateRange.end, statusFilter]);
 
   // ===== FETCH LIST =====
   useEffect(() => {
+    if (needsStoreSelection) {
+      setRawRows([]);
+      setServerMeta({
+        current_page: 1, last_page: 1, per_page: PER_PAGE, total: 0,
+      });
+      setLoading(false);
+      return;
+    }
+
     const controller = new AbortController();
     setLoading(true);
 
-    // admin boleh kirim store_id ke backend (kalau backend support)
-    // cashier: tidak kirim apa-apa (kita filter client-side)
     const baseParams = {
       code: searchTerm.trim() || undefined,
       sort: sortKey || undefined,
       dir: sortKey ? sortDir : undefined,
+      ...storeParams,
     };
 
-    // Push server-supported filters (from/to/status) even in client-filter mode
-    // so we don't pull the entire history for a JS filter.
-    // payment method is still client-only (server doesn't support it yet).
     const serverFilterParams = {
       ...baseParams,
       from: dateRange.start || undefined,
@@ -193,7 +207,9 @@ export default function HistoryByTransaction() {
     paymentMethod,
     statusFilter,
     refreshTick,
-    isAdmin,
+    canSwitch,
+    storeParams,
+    needsStoreSelection,
   ]);
 
   // ===== client-side filter/sort =====

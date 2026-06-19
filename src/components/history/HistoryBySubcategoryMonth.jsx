@@ -25,7 +25,10 @@ function calcTotal(rows) {
   );
 }
 
-export default function HistoryBySubcategoryMonth() {
+export default function HistoryBySubcategoryMonth({
+  storeId = null,
+  needsStoreSelection = false,
+}) {
   const [openMonths, setOpenMonths] = useState([]);
 
   const [availableYears, setAvailableYears] = useState([]);
@@ -40,10 +43,23 @@ export default function HistoryBySubcategoryMonth() {
     let ignore = false;
 
     async function load() {
+      if (needsStoreSelection) {
+        setGrouped({});
+        setAvailableYears([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
 
-        const res = await getSubcategoryMonthlyReport(year ? { year } : {});
+        const query = {
+          ...(year ? { year } : {}),
+          ...(storeId != null
+            ? { store_location_id: storeId, store_id: storeId }
+            : {}),
+        };
+        const res = await getSubcategoryMonthlyReport(query);
         if (ignore) return;
 
         const reportYear = res?.year ?? null;
@@ -88,7 +104,7 @@ export default function HistoryBySubcategoryMonth() {
     return () => {
       ignore = true;
     };
-  }, [year]);
+  }, [year, storeId, needsStoreSelection]);
 
   const overallTotal = useMemo(() => {
     return MONTHS.reduce(

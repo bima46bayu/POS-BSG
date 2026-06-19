@@ -118,7 +118,8 @@ export default function Payment({
   const submit = () => {
     onPayment?.({
       payment_method: method,
-      paid_amount: Number(paid || 0),
+      paid_amount:
+        method === "cash" ? Number(paid || 0) : finalTotal,
       reference: reference?.trim() || null,
       customer_name: customer || null,
       note,
@@ -199,7 +200,16 @@ export default function Payment({
         <div className="relative">
           <select
             value={method}
-            onChange={(e) => patchCheckout({ payment_method: e.target.value })}
+            onChange={(e) => {
+              const newMethod = e.target.value;
+              patchCheckout({
+                payment_method: newMethod,
+                paid:
+                  newMethod === "cash"
+                    ? paid
+                    : String(finalTotal || 0),
+              });
+            }}
             className="w-full h-11 appearance-none rounded-full border px-4 pr-9
                        text-sm bg-white border-gray-300
                        focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -227,11 +237,16 @@ export default function Payment({
         <input
           type="number"
           inputMode="numeric"
-          value={paid}
-          onChange={(e) => patchCheckout({ paid: e.target.value })}
-          className="w-full h-11 rounded-full border px-4 text-sm
+          value={method === "cash" ? paid : String(finalTotal || 0)}
+          onChange={(e) => {
+            if (method === "cash") patchCheckout({ paid: e.target.value });
+          }}
+          readOnly={method !== "cash"}
+          disabled={method !== "cash"}
+          className={`w-full h-11 rounded-full border px-4 text-sm
                      border-gray-300 focus:outline-none
-                     focus:ring-2 focus:ring-blue-500"
+                     focus:ring-2 focus:ring-blue-500
+                     ${method !== "cash" ? "bg-gray-100 cursor-not-allowed" : ""}`}
           placeholder="Enter amount"
         />
 

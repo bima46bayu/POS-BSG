@@ -32,7 +32,10 @@ const todayStr = () => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-export default function HistoryByItem() {
+export default function HistoryByItem({
+  storeId = null,
+  needsStoreSelection = false,
+}) {
   // me & role
   const [me, setMe] = useState(null);
   const isAdmin = useMemo(() => String(me?.role || "").toLowerCase() === "admin", [me]);
@@ -220,6 +223,13 @@ export default function HistoryByItem() {
   }, []);
 
   const fetchList = useCallback(() => {
+    if (needsStoreSelection) {
+      setRows([]);
+      setMeta({ current_page: 1, last_page: 1, per_page: PER_PAGE, total: 0 });
+      setLoading(false);
+      return () => {};
+    }
+
     const controller = new AbortController();
     setLoading(true);
 
@@ -230,6 +240,9 @@ export default function HistoryByItem() {
       date_to: dateRange.end || undefined,
       q: q || undefined,
       payment_method: paymentMethod || undefined,
+      ...(storeId != null
+        ? { store_id: storeId, store_location_id: storeId }
+        : {}),
     };
 
     listSaleItems(params, controller.signal)
@@ -250,7 +263,7 @@ export default function HistoryByItem() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [page, dateRange, q, paymentMethod]);
+  }, [page, dateRange, q, paymentMethod, storeId, needsStoreSelection]);
 
   useEffect(() => {
     fetchList();

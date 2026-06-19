@@ -13,8 +13,15 @@ import {
   updateSubCategory,
   deleteSubCategory,
 } from "../../api/categories";
+import StoreScopeFilter from "../../components/common/StoreScopeFilter";
+import { useStoreScopeFilter } from "../../hooks/useStoreScopeFilter";
+import { getMe } from "../../api/users";
+import { listStoreLocations } from "../../api/storeLocations";
+import { markCategoriesCacheDirty } from "../../utils/categoryCache";
 
 const PER_PAGE = 10;
+const BRANCH_STORAGE_KEY = "master_subcategory_store_id";
+const PARENT_STORAGE_KEY = "master_subcategory_parent_store_id";
 
 /* Utils */
 const fmtDateTime = (s) => {
@@ -186,10 +193,65 @@ function EditSubModal({ open, loading, onClose, onSubmit, categories, initial })
 export default function MasterSubCategoryPage() {
   const qc = useQueryClient();
 
+  const [me, setMe] = useState(null);
+  const [stores, setStores] = useState([]);
+
+  const {
+    parentFilterId,
+    storeFilterId,
+    effectiveStoreId,
+    canPickStore,
+    needsStoreSelection,
+    activeStoreLabel,
+    handleParentChange,
+    handleBranchChange,
+  } = useStoreScopeFilter({
+    branchStorageKey: BRANCH_STORAGE_KEY,
+    parentStorageKey: PARENT_STORAGE_KEY,
+    me,
+    stores,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getMe();
+        if (!cancelled) setMe(profile);
+      } catch {
+        if (!cancelled) setMe(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canPickStore) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listStoreLocations({ page: 1, per_page: 200 });
+        if (!cancelled) setStores(res?.items || []);
+      } catch {
+        if (!cancelled) setStores([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canPickStore]);
+
   // query state
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+
+  useEffect(() => {
+    setCategoryFilter("");
+    setCurrentPage(1);
+  }, [effectiveStoreId]);
 
   // popover (placeholder)
   const [showFilters, setShowFilters] = useState(false);
@@ -201,10 +263,12 @@ export default function MasterSubCategoryPage() {
   const [editTarget, setEditTarget] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
 
-  // categories for options
+  // categories for options (scoped to selected store)
   const { data: rawCats = [] } = useQuery({
-    queryKey: ["subcat-parent-categories"],
-    queryFn: ({ signal }) => getCategories({}, signal),
+    queryKey: ["subcat-parent-categories", effectiveStoreId],
+    enabled: effectiveStoreId != null,
+    queryFn: ({ signal }) =>
+      getCategories({ per_page: 200, store_location_id: effectiveStoreId }, signal),
     staleTime: 5 * 60_000,
   });
   const categories = useMemo(() => {
@@ -221,9 +285,28 @@ export default function MasterSubCategoryPage() {
 
   // fetch subcategories
   const { data: res, isLoading } = useQuery({
-    queryKey: ["sub-categories-master", { page: currentPage, per_page: PER_PAGE, search: debouncedSearch, category_id: categoryFilter || undefined }],
+    queryKey: [
+      "sub-categories-master",
+      {
+        page: currentPage,
+        per_page: PER_PAGE,
+        search: debouncedSearch,
+        category_id: categoryFilter || undefined,
+        store: effectiveStoreId,
+      },
+    ],
+    enabled: effectiveStoreId != null,
     queryFn: ({ signal }) =>
-      listSubCategories({ page: currentPage, per_page: PER_PAGE, search: debouncedSearch, category_id: categoryFilter || undefined }, signal),
+      listSubCategories(
+        {
+          page: currentPage,
+          per_page: PER_PAGE,
+          search: debouncedSearch,
+          category_id: categoryFilter || undefined,
+          store_location_id: effectiveStoreId,
+        },
+        signal
+      ),
     keepPreviousData: true,
     placeholderData: (prev) => prev,
   });
@@ -233,10 +316,15 @@ export default function MasterSubCategoryPage() {
 
   // mutations
   const mCreate = useMutation({
-    mutationFn: ({ payload, signal }) => createSubCategory(payload, signal),
+    mutationFn: ({ payload, signal }) =>
+      createSubCategory(
+        { ...payload, store_location_id: effectiveStoreId },
+        signal
+      ),
     onSuccess: () => {
       toast.success("Subcategory created");
       setShowAdd(false);
+      markCategoriesCacheDirty(effectiveStoreId);
       qc.invalidateQueries({ queryKey: ["sub-categories-master"] });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to create"),
@@ -247,6 +335,7 @@ export default function MasterSubCategoryPage() {
     onSuccess: () => {
       toast.success("Subcategory updated");
       setEditTarget(null);
+      markCategoriesCacheDirty(effectiveStoreId);
       qc.invalidateQueries({ queryKey: ["sub-categories-master"] });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to update"),
@@ -257,6 +346,7 @@ export default function MasterSubCategoryPage() {
     onSuccess: () => {
       toast.success("Subcategory deleted");
       setConfirmDel(null);
+      markCategoriesCacheDirty(effectiveStoreId);
       qc.invalidateQueries({ queryKey: ["sub-categories-master"] });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to delete"),
@@ -314,8 +404,26 @@ export default function MasterSubCategoryPage() {
       {/* Title */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <h2 className="text-lg font-semibold text-gray-800">Subcategories</h2>
-        <p className="text-sm text-gray-500">Kelola sub-kategori & relasinya dengan kategori.</p>
+        <p className="text-sm text-gray-500">Kelola sub-kategori per cabang.</p>
+        <div className="mt-3">
+          <StoreScopeFilter
+            stores={stores}
+            me={me}
+            parentId={parentFilterId}
+            branchId={storeFilterId}
+            onParentChange={handleParentChange}
+            onBranchChange={handleBranchChange}
+            canPickStore={canPickStore}
+            lockedLabel={activeStoreLabel}
+          />
+        </div>
       </div>
+
+      {needsStoreSelection && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
+          Pilih parent store dan cabang untuk melihat atau mengatur sub-kategori.
+        </div>
+      )}
 
       {/* Controls */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -334,7 +442,8 @@ export default function MasterSubCategoryPage() {
           <select
             value={categoryFilter}
             onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
-            className="px-3 py-2 border rounded-lg text-sm"
+            disabled={effectiveStoreId == null}
+            className="px-3 py-2 border rounded-lg text-sm disabled:opacity-50"
           >
             <option value="">All Categories</option>
             {categories.map((c) => (
@@ -354,7 +463,8 @@ export default function MasterSubCategoryPage() {
 
             <button
               onClick={() => setShowAdd(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+              disabled={effectiveStoreId == null || categories.length === 0}
+              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               Add Subcategory

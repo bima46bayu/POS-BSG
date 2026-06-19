@@ -11,6 +11,10 @@ import toast from "react-hot-toast";
 
 import DataTable from "../../components/data-table/DataTable";
 import ConfirmDialog from "../../components/common/ConfirmDialog";
+import StoreScopeFilter from "../../components/common/StoreScopeFilter";
+import { useStoreScopeFilter } from "../../hooks/useStoreScopeFilter";
+import { getMe } from "../../api/users";
+import { listStoreLocations } from "../../api/storeLocations";
 
 import {
   listAdditionalCharges,
@@ -18,6 +22,9 @@ import {
   updateAdditionalCharge,
   deleteAdditionalCharge,
 } from "../../api/additionalCharges";
+
+const BRANCH_STORAGE_KEY = "additional_charge_store_id";
+const PARENT_STORAGE_KEY = "additional_charge_parent_store_id";
 
 /* ================= TOGGLE ================= */
 function Toggle({ checked, onChange, disabled }) {
@@ -174,22 +181,79 @@ function ChargeModal({ open, onClose, onSubmit, loading, initial, usedTypes }) {
 export default function AdditionalChargePage() {
   const qc = useQueryClient();
 
+  const [me, setMe] = useState(null);
+  const [stores, setStores] = useState([]);
+
+  const {
+    parentFilterId,
+    storeFilterId,
+    effectiveStoreId,
+    canPickStore,
+    needsStoreSelection,
+    activeStoreLabel,
+    handleParentChange,
+    handleBranchChange,
+  } = useStoreScopeFilter({
+    branchStorageKey: BRANCH_STORAGE_KEY,
+    parentStorageKey: PARENT_STORAGE_KEY,
+    me,
+    stores,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getMe();
+        if (!cancelled) setMe(profile);
+      } catch {
+        if (!cancelled) setMe(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canPickStore) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listStoreLocations({ page: 1, per_page: 200 });
+        if (!cancelled) setStores(res?.items || []);
+      } catch {
+        if (!cancelled) setStores([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canPickStore]);
+
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
 
   /* ===== LIST ===== */
   const { data = [], isLoading } = useQuery({
-    queryKey: ["additional-charges"],
+    queryKey: ["additional-charges", effectiveStoreId],
+    enabled: effectiveStoreId != null,
     queryFn: ({ signal }) =>
-      listAdditionalCharges({}, signal).then((r) => r.data),
+      listAdditionalCharges({ store_location_id: effectiveStoreId }, signal).then(
+        (r) => r.data
+      ),
   });
 
   const usedTypes = useMemo(() => data.map((d) => d.type), [data]);
 
   /* ===== MUTATIONS ===== */
   const mCreate = useMutation({
-    mutationFn: createAdditionalCharge,
+    mutationFn: (payload) =>
+      createAdditionalCharge({
+        ...payload,
+        store_location_id: effectiveStoreId,
+      }),
     onSuccess: () => {
       toast.success("Additional charge created");
       setShowAdd(false);
@@ -302,14 +366,32 @@ export default function AdditionalChargePage() {
       <div className="bg-white p-4 rounded-lg shadow-sm border">
         <h2 className="text-lg font-semibold">Additional Charges</h2>
         <p className="text-sm text-gray-500">
-          Konfigurasi PB1 & Service Charge per store (otomatis mengikuti user)
+          Konfigurasi PB1 & Service Charge per cabang
         </p>
+        <div className="mt-3">
+          <StoreScopeFilter
+            stores={stores}
+            me={me}
+            parentId={parentFilterId}
+            branchId={storeFilterId}
+            onParentChange={handleParentChange}
+            onBranchChange={handleBranchChange}
+            canPickStore={canPickStore}
+            lockedLabel={activeStoreLabel}
+          />
+        </div>
       </div>
+
+      {needsStoreSelection && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
+          Pilih parent store dan cabang untuk melihat atau mengatur additional charge.
+        </div>
+      )}
 
       <div className="bg-white p-4 rounded-lg shadow-sm border flex justify-end">
         <button
           onClick={() => setShowAdd(true)}
-          disabled={usedTypes.length >= 2}
+          disabled={usedTypes.length >= 2 || effectiveStoreId == null}
           className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg disabled:opacity-50"
         >
           <Plus className="w-4 h-4" />

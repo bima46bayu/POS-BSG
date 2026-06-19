@@ -6,6 +6,7 @@ import html2canvas from "html2canvas";
 import toast from "react-hot-toast";
 
 import { createSale } from "../../api/sales";
+import { computeAdditionalCharges } from "../../utils/additionalCharges";
 import OrderSummary from "./OrderSummary";
 import Payment from "./Payment";
 import ReceiptTicket from "../ReceiptTicket";
@@ -73,6 +74,7 @@ export default function SaleSubmitter({
   registerOpen = true,
   checkout,
   onCheckoutChange,
+  extraPayload = {},
 }) {
   /* =====================================================
      NET ITEM SUBTOTAL (IKUT BACKEND)
@@ -122,21 +124,10 @@ export default function SaleSubmitter({
   }, [netItemSubtotal, discountAmount]);
 
   /* =======================
-     ADDITIONAL CHARGES (PB1 / SERVICE)
-     BASE = grandTotalBEStyle
+     ADDITIONAL CHARGES (Service → PB1)
      ======================= */
   const additionalTotal = useMemo(() => {
-    return additionalCharges
-      .filter((c) => c.is_active)
-      .reduce((sum, c) => {
-        const amount =
-          c.calc_type === "PERCENT"
-            ? (grandTotalBEStyle * Number(c.value || 0)) / 100
-            : Number(c.value || 0);
-
-        // backend round 2 decimal
-        return sum + Math.round(amount * 100) / 100;
-      }, 0);
+    return computeAdditionalCharges(grandTotalBEStyle, additionalCharges).total;
   }, [additionalCharges, grandTotalBEStyle]);
 
   /* =======================
@@ -203,10 +194,18 @@ export default function SaleSubmitter({
     submittingRef.current = true;
 
     const p = pendingPayment;
+    const storeLocationId = extraPayload?.store_location_id;
+
+    if (storeLocationId == null) {
+      toast.error("Cabang belum dipilih. Pilih cabang di header POS.");
+      submittingRef.current = false;
+      return;
+    }
 
     const payload = {
       customer_name: p.customer_name || null,
       note: p.note || null,
+      store_location_id: storeLocationId,
       items: items.map((i) => ({
         product_id: i.product_id ?? i.id,
         qty: Number(i.quantity || 0),

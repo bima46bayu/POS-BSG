@@ -20,15 +20,22 @@ function formatDateTime(s) {
   }
 }
 
-export default function HistoryByRegister() {
+export default function HistoryByRegister({
+  storeId = null,
+  needsStoreSelection = false,
+}) {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
 
+  const storeParams =
+    storeId != null ? { store_id: storeId, store_location_id: storeId } : {};
+
   const sessionsQ = useQuery({
-    queryKey: ["register-sessions", { page }],
+    queryKey: ["register-sessions", { page, storeId }],
     queryFn: ({ signal }) =>
-      listRegisterSessions({ page, per_page: 20 }, signal),
+      listRegisterSessions({ page, per_page: 20, ...storeParams }, signal),
     keepPreviousData: true,
+    enabled: !needsStoreSelection,
   });
 
   const summaryQ = useQuery({
@@ -55,6 +62,12 @@ export default function HistoryByRegister() {
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+      {needsStoreSelection ? (
+        <p className="text-sm text-gray-500 py-8 text-center">
+          Pilih cabang untuk melihat register sessions.
+        </p>
+      ) : (
+        <>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <CalendarDays className="w-5 h-5 text-blue-600" />
@@ -169,6 +182,8 @@ export default function HistoryByRegister() {
           closing={false}
           onCloseRegister={() => {}}
         />
+      )}
+        </>
       )}
     </div>
   );

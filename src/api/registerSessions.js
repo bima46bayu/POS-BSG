@@ -1,9 +1,9 @@
 // src/api/registerSessions.js
 import { api } from "./client";
 
-export async function getCurrentRegister(signal) {
+export async function getCurrentRegister(signal, params = {}) {
   try {
-    const res = await api.get("/api/pos/registers/current", { signal });
+    const res = await api.get("/api/pos/registers/current", { signal, params });
     return res.data || null;
   } catch (err) {
     if (err?.response?.status === 404) return null;

@@ -19,11 +19,13 @@ import { getProducts } from "../api/products";
 import { getCategories, getSubCategories, listSubCategories } from "../api/categories";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
-import { canSwitchStores } from "../utils/roles";
 import { useNavigate } from "react-router-dom";
+import StoreScopeFilter from "../components/common/StoreScopeFilter";
+import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
 
 const PER_PAGE = 10;
 const STORAGE_KEY = "inventory_store_id";
+const PARENT_STORAGE_KEY = "inventory_parent_store_id";
 
 const toNum = (v) => Number(v ?? 0).toLocaleString("id-ID");
 const formatIDR = (v) =>
@@ -43,42 +45,22 @@ export default function InventoryProductsPage() {
   // ===== USER / STORE SCOPE =====
   const [me, setMe] = useState(null);
   const [stores, setStores] = useState([]);
-  const [storeFilterId, setStoreFilterId] = useState(() => {
-    if (typeof window === "undefined") return "";
-    try {
-      return window.localStorage.getItem(STORAGE_KEY) || "";
-    } catch {
-      return "";
-    }
+
+  const {
+    parentFilterId,
+    storeFilterId,
+    effectiveStoreId,
+    canPickStore,
+    needsStoreSelection,
+    activeStoreLabel,
+    handleParentChange,
+    handleBranchChange,
+  } = useStoreScopeFilter({
+    branchStorageKey: STORAGE_KEY,
+    parentStorageKey: PARENT_STORAGE_KEY,
+    me,
+    stores,
   });
-
-  const canPickStore = useMemo(
-    () => canSwitchStores(me?.role, me),
-    [me]
-  );
-
-  const myStoreId = useMemo(
-    () => me?.store_location_id ?? me?.store_location?.id ?? null,
-    [me]
-  );
-
-  const effectiveStoreId = useMemo(() => {
-    if (!canPickStore) {
-      return myStoreId != null ? Number(myStoreId) : null;
-    }
-    if (storeFilterId) return Number(storeFilterId);
-    return null;
-  }, [canPickStore, myStoreId, storeFilterId]);
-
-  const activeStoreLabel = useMemo(() => {
-    if (canPickStore && !storeFilterId) return "Pilih cabang";
-    const sid = effectiveStoreId;
-    if (sid == null) return "-";
-    const found = stores.find((s) => String(s.id) === String(sid));
-    return found?.name ?? me?.store_location?.name ?? "-";
-  }, [canPickStore, storeFilterId, effectiveStoreId, stores, me]);
-
-  const needsStoreSelection = canPickStore && !storeFilterId;
 
   useEffect(() => {
     let cancelled = false;
@@ -87,11 +69,6 @@ export default function InventoryProductsPage() {
         const profile = await getMe();
         if (cancelled) return;
         setMe(profile);
-        if (!canSwitchStores(profile?.role, profile)) {
-          const sid =
-            profile?.store_location?.id ?? profile?.store_location_id ?? null;
-          if (sid != null) setStoreFilterId(String(sid));
-        }
       } catch {
         if (!cancelled) setMe(null);
       }
@@ -106,7 +83,7 @@ export default function InventoryProductsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await listStoreLocations({ page: 1, per_page: 100 });
+        const res = await listStoreLocations({ page: 1, per_page: 200 });
         if (!cancelled) setStores(res?.items || []);
       } catch {
         if (!cancelled) setStores([]);
@@ -116,15 +93,6 @@ export default function InventoryProductsPage() {
       cancelled = true;
     };
   }, [canPickStore]);
-
-  useEffect(() => {
-    if (!canPickStore || typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, storeFilterId || "");
-    } catch {
-      // ignore
-    }
-  }, [canPickStore, storeFilterId]);
 
   // ===== server data & meta =====
   const [rawRows, setRawRows] = useState([]);
@@ -141,6 +109,22 @@ export default function InventoryProductsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
+
+  const onParentStoreChange = useCallback(
+    (nextParentId) => {
+      handleParentChange(nextParentId);
+      setCurrentPage(1);
+    },
+    [handleParentChange]
+  );
+
+  const onBranchStoreChange = useCallback(
+    (nextBranchId) => {
+      handleBranchChange(nextBranchId);
+      setCurrentPage(1);
+    },
+    [handleBranchChange]
+  );
 
   const [showFilters, setShowFilters] = useState(false);
   const [categoryId, setCategoryId] = useState("");
@@ -573,42 +557,18 @@ export default function InventoryProductsPage() {
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-gray-800">Inventory Products</h2>
         <div className="flex flex-wrap items-center gap-3">
-          {canPickStore ? (
-            <div className="flex items-center gap-2">
-              <label htmlFor="inv-store" className="text-sm text-gray-600">
-                Cabang
-              </label>
-              <select
-                id="inv-store"
-                value={storeFilterId}
-                onChange={(e) => {
-                  setStoreFilterId(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="px-3 py-2 border border-gray-300 rounded-lg text-sm min-w-[180px]"
-              >
-                <option value="">— Pilih cabang —</option>
-                {stores.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.code ? `${s.code} — ` : ""}
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <p className="text-xs text-gray-500">
-              Cabang: <span className="font-medium">{activeStoreLabel}</span>
-            </p>
-          )}
+          <StoreScopeFilter
+            stores={stores}
+            me={me}
+            parentId={parentFilterId}
+            branchId={storeFilterId}
+            onParentChange={onParentStoreChange}
+            onBranchChange={onBranchStoreChange}
+            canPickStore={canPickStore}
+            lockedLabel={activeStoreLabel}
+          />
         </div>
       </div>
-
-      {needsStoreSelection && (
-        <div className="mt-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
-          Pilih cabang untuk melihat stok per toko.
-        </div>
-      )}
 
       {/* Controls */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mt-4">

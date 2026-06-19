@@ -13,8 +13,15 @@ import {
   updateCategory,      // (id, payload, signal?)
   deleteCategory,      // (id, signal?)
 } from "../../api/categories";
+import StoreScopeFilter from "../../components/common/StoreScopeFilter";
+import { useStoreScopeFilter } from "../../hooks/useStoreScopeFilter";
+import { getMe } from "../../api/users";
+import { listStoreLocations } from "../../api/storeLocations";
+import { markCategoriesCacheDirty } from "../../utils/categoryCache";
 
 const PER_PAGE = 10;
+const BRANCH_STORAGE_KEY = "master_category_store_id";
+const PARENT_STORAGE_KEY = "master_category_parent_store_id";
 
 /* ============== Helpers ============== */
 const fmtDateTime = (s) => {
@@ -164,6 +171,56 @@ function EditCategoryModal({ open, loading, initial, onClose, onSubmit }) {
 export default function MasterCategoryPage() {
   const qc = useQueryClient();
 
+  const [me, setMe] = useState(null);
+  const [stores, setStores] = useState([]);
+
+  const {
+    parentFilterId,
+    storeFilterId,
+    effectiveStoreId,
+    canPickStore,
+    needsStoreSelection,
+    activeStoreLabel,
+    handleParentChange,
+    handleBranchChange,
+  } = useStoreScopeFilter({
+    branchStorageKey: BRANCH_STORAGE_KEY,
+    parentStorageKey: PARENT_STORAGE_KEY,
+    me,
+    stores,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await getMe();
+        if (!cancelled) setMe(profile);
+      } catch {
+        if (!cancelled) setMe(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canPickStore) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listStoreLocations({ page: 1, per_page: 200 });
+        if (!cancelled) setStores(res?.items || []);
+      } catch {
+        if (!cancelled) setStores([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canPickStore]);
+
   // query state
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
@@ -187,9 +244,18 @@ export default function MasterCategoryPage() {
 
   // fetch categories
   const { data: catRes, isLoading } = useQuery({
-    queryKey: ["categories-master", { page: currentPage, per_page: PER_PAGE, search: debouncedSearch }],
+    queryKey: ["categories-master", { page: currentPage, per_page: PER_PAGE, search: debouncedSearch, store: effectiveStoreId }],
+    enabled: effectiveStoreId != null,
     queryFn: ({ signal }) =>
-      getCategories({ page: currentPage, per_page: PER_PAGE, search: debouncedSearch }, signal),
+      getCategories(
+        {
+          page: currentPage,
+          per_page: PER_PAGE,
+          search: debouncedSearch,
+          store_location_id: effectiveStoreId,
+        },
+        signal
+      ),
     keepPreviousData: true,
     placeholderData: (prev) => prev,
   });
@@ -214,11 +280,17 @@ export default function MasterCategoryPage() {
 
   // mutations
   const mCreate = useMutation({
-    mutationFn: ({ payload, signal }) => createCategory(payload, signal), // payload: { name, description? }
+    mutationFn: ({ payload, signal }) =>
+      createCategory(
+        { ...payload, store_location_id: effectiveStoreId },
+        signal
+      ),
     onSuccess: () => {
       toast.success("Category created");
       setShowAdd(false);
+      markCategoriesCacheDirty(effectiveStoreId);
       qc.invalidateQueries({ queryKey: ["categories-master"] });
+      qc.invalidateQueries({ queryKey: ["subcat-parent-categories"] });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to create"),
   });
@@ -228,7 +300,9 @@ export default function MasterCategoryPage() {
     onSuccess: () => {
       toast.success("Category updated");
       setEditTarget(null);
+      markCategoriesCacheDirty(effectiveStoreId);
       qc.invalidateQueries({ queryKey: ["categories-master"] });
+      qc.invalidateQueries({ queryKey: ["subcat-parent-categories"] });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to update"),
   });
@@ -238,7 +312,9 @@ export default function MasterCategoryPage() {
     onSuccess: () => {
       toast.success("Category deleted");
       setConfirmDel(null);
+      markCategoriesCacheDirty(effectiveStoreId);
       qc.invalidateQueries({ queryKey: ["categories-master"] });
+      qc.invalidateQueries({ queryKey: ["subcat-parent-categories"] });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to delete"),
   });
@@ -292,8 +368,26 @@ export default function MasterCategoryPage() {
       {/* Title */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <h2 className="text-lg font-semibold text-gray-800">Categories</h2>
-        <p className="text-sm text-gray-500">Kelola kategori untuk produk.</p>
+        <p className="text-sm text-gray-500">Kelola kategori produk per cabang.</p>
+        <div className="mt-3">
+          <StoreScopeFilter
+            stores={stores}
+            me={me}
+            parentId={parentFilterId}
+            branchId={storeFilterId}
+            onParentChange={handleParentChange}
+            onBranchChange={handleBranchChange}
+            canPickStore={canPickStore}
+            lockedLabel={activeStoreLabel}
+          />
+        </div>
       </div>
+
+      {needsStoreSelection && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
+          Pilih parent store dan cabang untuk melihat atau mengatur kategori.
+        </div>
+      )}
 
       {/* Controls */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -321,7 +415,8 @@ export default function MasterCategoryPage() {
 
             <button
               onClick={() => setShowAdd(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+              disabled={effectiveStoreId == null}
+              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               Add Category

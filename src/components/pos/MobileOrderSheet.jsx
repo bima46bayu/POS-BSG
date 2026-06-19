@@ -34,6 +34,7 @@ export default function MobileOrderSheet({
   checkout,
   onCheckoutChange,
   registerOpen = true,
+  extraPayload = {},
 }) {
   /* Lock body scroll saat sheet terbuka */
   useEffect(() => {
@@ -104,6 +105,7 @@ export default function MobileOrderSheet({
             checkout={checkout}
             onCheckoutChange={onCheckoutChange}
             registerOpen={registerOpen}
+            extraPayload={extraPayload}
             onSuccess={(res) => {
               onClearCart?.();
               onClose?.();

@@ -21,7 +21,7 @@ function ModalShell({ open, onClose, children, wide }) {
   );
 }
 
-export function OpenRegisterModal({ open, onClose, onSubmit, loading }) {
+export function OpenRegisterModal({ open, onClose, onSubmit, loading, storeLabel = "" }) {
   const [openingCash, setOpeningCash] = useState("0");
   const [note, setNote] = useState("");
 
@@ -37,6 +37,11 @@ export function OpenRegisterModal({ open, onClose, onSubmit, loading }) {
     <ModalShell open={open} onClose={onClose}>
       <form onSubmit={handleSubmit} className="p-6 space-y-4">
         <h3 className="text-lg font-semibold text-gray-800">Open Register</h3>
+        {storeLabel ? (
+          <p className="text-sm text-gray-700">
+            Cabang: <span className="font-medium">{storeLabel}</span>
+          </p>
+        ) : null}
         <p className="text-xs text-gray-500">
           Anda harus membuka register sebelum menggunakan POS. Session akan
           tetap aktif sampai Anda menutup register.
