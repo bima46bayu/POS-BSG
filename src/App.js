@@ -23,6 +23,7 @@ import PaymentRequestDetailPage from "./pages/payment-request/PaymentRequestDeta
 import PaymentRequestBankAccountPage from "./pages/payment-request/PaymentRequestBankAccountPage";
 import PaymentRequestCoaPage from "./pages/payment-request/PaymentRequestCoaPage";
 import PaymentRequestPayeePage from "./pages/payment-request/PaymentRequestPayeePage";
+import PaymentRequestSignatoriesPage from "./pages/payment-request/PaymentRequestSignatoriesPage";
 
 /* ===== MASTER PAGES ===== */
 import MasterUserPage from "./pages/master/MasterUserPage";
@@ -251,6 +252,15 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <PaymentRequestPayeePage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/payment-requests/signatories"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <PaymentRequestSignatoriesPage />
               </ProtectedRoute>
             }
           />

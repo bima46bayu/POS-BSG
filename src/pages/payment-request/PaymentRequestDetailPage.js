@@ -9,6 +9,7 @@ import {
   FileText,
   Database,
   Users,
+  PenLine,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -194,6 +195,11 @@ export default function PaymentRequestDetailPage() {
               icon={<Users size={16} />}
               label="Master Payee"
               onClick={() => navigate("/payment-requests/payees")}
+            />
+            <HeaderBtn
+              icon={<PenLine size={16} />}
+              label="Signatories"
+              onClick={() => navigate("/payment-requests/signatories")}
             />
             <HeaderBtn
               icon={<FileText size={16} />}

@@ -10,6 +10,7 @@ import {
   Calendar,
   ArrowLeft,
   Search,
+  PenLine,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -345,6 +346,14 @@ const mDelete = useMutation({
             >
               <Landmark className="w-4 h-4" />
               Master Rekening
+            </button>
+
+            <button
+              onClick={() => navigate("/payment-requests/signatories")}
+              className="flex items-center gap-2 px-4 py-2 border rounded-lg hover:bg-gray-100"
+            >
+              <PenLine className="w-4 h-4" />
+              Signatories
             </button>
 
             <button
