@@ -31,6 +31,8 @@ import {
 import { aggregateForRange } from "../lib/aggregate";
 import { exportToPDF } from "../lib/exportPdf";
 import { isHqAdmin, isKasir } from "../utils/roles";
+import { parentIdForStore, storeLabel } from "../utils/storeScope";
+import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
 
 /* ========== Master data ringan ========== */
 async function fetchStores(signal) {
@@ -69,6 +71,18 @@ function resolveSaleStore(sale, storeNameById) {
     "Unknown";
   const id = rawId != null ? String(rawId) : `n_${name.replace(/\s+/g, "_")}`;
   return { id, name };
+}
+
+function formatStoreFullLabel(store, allStores = []) {
+  if (!store) return "Unknown";
+  const parent =
+    store.parent_id != null
+      ? allStores.find((s) => String(s.id) === String(store.parent_id))
+      : null;
+  const parentName = parent?.name || store.name || "Unknown";
+  const code = store.code || "-";
+  const branchName = store.name || "Unknown";
+  return `${parentName} - ${code} - ${branchName}`;
 }
 
 /* ========== Util aman untuk shape /api/users/me ========== */
@@ -190,6 +204,22 @@ export default function HomePage() {
 
   // Master data
   const storesQ = useQuery({ queryKey: ["stores"], queryFn: ({ signal }) => fetchStores(signal), staleTime: 5 * 60_000 });
+  const storeScope = useStoreScopeFilter({
+    branchStorageKey: "dashboard_branch_store_id",
+    parentStorageKey: "dashboard_parent_store_id",
+    me,
+    stores: storesQ.data || [],
+  });
+
+  React.useEffect(() => {
+    setFilters((prev) => ({
+      ...prev,
+      storeId:
+        storeScope.effectiveStoreId != null
+          ? String(storeScope.effectiveStoreId)
+          : "",
+    }));
+  }, [storeScope.effectiveStoreId]);
   const categoriesQ = useQuery({
     queryKey: ["categories", { storeId: filters.storeId || "all" }],
     queryFn: ({ signal }) => fetchCategories(signal, filters.storeId),
@@ -378,7 +408,23 @@ export default function HomePage() {
     [aggRange.topDiscountedProducts, discountProductSortOrder]
   );
 
-  const handleExport = () => exportToPDF(rangeSales, filters, aggRange);
+  const storeLabelById = React.useMemo(() => {
+    const map = new Map();
+    for (const s of storesQ.data || []) {
+      map.set(String(s.id), formatStoreFullLabel(s, storesQ.data || []));
+    }
+    return map;
+  }, [storesQ.data]);
+
+  const handleExport = () =>
+    exportToPDF(rangeSales, filters, aggRange, {
+      selectedStoreLabel:
+        filters.storeId
+          ? storeLabelById.get(String(filters.storeId)) ||
+            storeLabel(storesQ.data || [], filters.storeId, "Cabang")
+          : "Semua cabang",
+      storeLabelById,
+    });
 
   // Matriks harian
   const dateList = React.useMemo(() => generateDateRange(filters.from, filters.to), [filters.from, filters.to]);
@@ -538,6 +584,13 @@ export default function HomePage() {
                 filters={filters}
                 setFilters={setFilters}
                 stores={storesQ.data || []}
+                me={me}
+                parentStoreId={storeScope.parentFilterId}
+                branchStoreId={storeScope.storeFilterId}
+                onParentStoreChange={storeScope.handleParentChange}
+                onBranchStoreChange={storeScope.handleBranchChange}
+                canPickStore={storeScope.canPickStore}
+                activeStoreLabel={storeScope.activeStoreLabel}
                 onExport={handleExport}
                 isLoading={salesQ.isFetching || allSummariesQ.isFetching}
                 locked={isCashier}

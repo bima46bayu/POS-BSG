@@ -3,11 +3,22 @@ import React, { useRef, useState, useEffect } from "react";
 import { Search, Calendar, Store, Tag, Download, ChevronDown } from "lucide-react";
 import DateRangePicker from "../DateRangePicker";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
+import {
+  branchStoresForParent,
+  visibleParentStores,
+} from "../../utils/storeScope";
 
 export default function FilterBar({
   filters,
   setFilters,
   stores = [],
+  me,
+  parentStoreId = "",
+  branchStoreId = "",
+  onParentStoreChange,
+  onBranchStoreChange,
+  canPickStore = false,
+  activeStoreLabel = "",
   onExport,
   isLoading,
   locked = false,
@@ -15,6 +26,8 @@ export default function FilterBar({
   const dateRangeBtnRef = useRef(null);
   const dateRangePopover = useAnchoredPopover();
   useEffect(() => { dateRangePopover.setAnchor(dateRangeBtnRef.current); }, [dateRangePopover]);
+  const parentOptions = visibleParentStores(stores, me);
+  const branchOptions = branchStoresForParent(stores, parentStoreId, me);
 
   const onChange = (patch) => {
     if (locked) return; // cegah perubahan di mode terkunci, kecuali yang kita izinkan di bawah
@@ -99,7 +112,7 @@ export default function FilterBar({
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
-        <div className="lg:col-span-7">
+        <div className="lg:col-span-5">
           <label className="block text-sm font-medium text-slate-700 mb-2">Pencarian</label>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -146,18 +159,43 @@ export default function FilterBar({
         </div>
 
         <div className="lg:col-span-2">
-          <label className="block text-sm font-medium text-slate-700 mb-2">Cabang</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Parent Store</label>
           <div className="relative">
             <Store className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none z-10" />
             <select
-              value={filters.storeId}
-              onChange={(e) => onChange({ storeId: e.target.value })}
-              className="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white"
+              value={parentStoreId}
+              onChange={(e) => onParentStoreChange?.(e.target.value)}
+              disabled={!canPickStore}
+              className="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white disabled:bg-slate-50"
             >
-              <option value="">Semua</option>
-              {stores.map((s) => (
+              <option value="">Semua parent</option>
+              {parentOptions.map((s) => (
                 <option key={s.id} value={s.id}>
+                  {s.code ? `${s.code} - ` : ""}
                   {s.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+          </div>
+        </div>
+
+        <div className="lg:col-span-2">
+          <label className="block text-sm font-medium text-slate-700 mb-2">Branch Store</label>
+          <div className="relative">
+            <Store className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none z-10" />
+            <select
+              value={branchStoreId}
+              onChange={(e) => onBranchStoreChange?.(e.target.value)}
+              disabled={!canPickStore || !parentStoreId}
+              className="w-full pl-10 pr-10 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none appearance-none bg-white disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <option value="">Semua cabang</option>
+              {branchOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.code ? `${s.code} - ` : ""}
+                  {s.name}
+                  {s._isParentOption ? " (Parent)" : ""}
                 </option>
               ))}
             </select>
