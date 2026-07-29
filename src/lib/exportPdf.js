@@ -60,6 +60,16 @@ const fmtDateTime = (d) => {
   });
 };
 
+const fmtTime = (d) => {
+  if (!d) return "-";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d);
+  return dt.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const paymentMethodLabel = (method) => {
   const raw = String(method || "").trim();
   if (!raw) return "Cash";
@@ -251,19 +261,86 @@ function saleItemsQty(sale) {
   return items.reduce((sum, it) => sum + N(it?.qty ?? it?.quantity ?? 1), 0);
 }
 
+function txTotal(tx) {
+  if (
+    tx?.final_total === null ||
+    tx?.final_total === 0 ||
+    tx?.final_total === undefined
+  ) {
+    return N(tx?.total);
+  }
+  return N(tx?.final_total);
+}
+
+function txItemsRevenue(tx) {
+  const items = Array.isArray(tx?.items) ? tx.items : [];
+  return items.reduce((sum, item) => {
+    const qty = N(item?.qty ?? item?.quantity ?? 1);
+    return (
+      sum +
+      N(
+        item?.line_total ??
+          item?.subtotal ??
+          item?.total ??
+          N(item?.price ?? item?.unit_price) * qty
+      )
+    );
+  }, 0);
+}
+
+/** Prefer stored backend total; fall back to snapshot sum or total - items. */
+function txAdditionalCharge(tx) {
+  if (tx?.additional_charge_total != null && tx.additional_charge_total !== "") {
+    return Math.max(0, N(tx.additional_charge_total));
+  }
+
+  const snapshot = Array.isArray(tx?.additional_charges_snapshot)
+    ? tx.additional_charges_snapshot
+    : [];
+  if (snapshot.length > 0) {
+    return Math.max(
+      0,
+      snapshot.reduce((sum, c) => sum + N(c?.amount), 0)
+    );
+  }
+
+  if (tx?.grand_total != null && tx.grand_total !== "") {
+    return Math.max(0, txTotal(tx) - N(tx.grand_total));
+  }
+
+  const legacy =
+    N(tx?.service_charge) + N(tx?.tax) + N(tx?.pb1) + N(tx?.pb1_amount);
+  if (legacy > 0) return legacy;
+
+  // total = (items - discount) + additional → additional = total - items + discount
+  return Math.max(0, txTotal(tx) - txItemsRevenue(tx) + N(tx?.discount));
+}
+
+function txPaymentLabels(tx) {
+  const payments = Array.isArray(tx?.payments) ? tx.payments : [];
+  if (payments.length > 0) {
+    return [...new Set(payments.map((p) => paymentMethodLabel(p?.method)))];
+  }
+  return [paymentMethodLabel(tx?.payment_method || tx?.method)];
+}
+
 function summarize(sales) {
   let revenue = 0;
   let tx = 0;
   let discounts = 0;
   let itemsQty = 0;
+  let itemsRevenue = 0;
+  let additionalCharge = 0;
   const payMix = {};
 
   for (const sale of sales) {
-    const total = N(sale?.total);
+    const total = N(sale?.final_total ?? sale?.total);
     revenue += total;
     tx += 1;
     discounts += N(sale?.discount);
     itemsQty += saleItemsQty(sale);
+    itemsRevenue += txItemsRevenue(sale);
+    additionalCharge += txAdditionalCharge(sale);
 
     const payments = Array.isArray(sale?.payments) ? sale.payments : [];
     if (payments.length === 0) {
@@ -281,6 +358,8 @@ function summarize(sales) {
     tx,
     discounts,
     itemsQty,
+    itemsRevenue,
+    additionalCharge,
     aov: tx ? revenue / tx : 0,
     paymentMix: Object.entries(payMix)
       .map(([method, amount]) => ({ method, amount }))
@@ -705,7 +784,15 @@ function drawConclusion(doc, ctx, totals, branchRows, productRows) {
     doc,
     tableOptions(doc, ctx, {
       startY: y,
-      head: [["#", "Cabang", "Transaksi", "Item", "Pendapatan", "Kontribusi"]],
+      head: [[
+        "#",
+        "Cabang",
+        "Transaksi",
+        "Item",
+        "Pendapatan",
+        "Add. Charge",
+        "Kontribusi",
+      ]],
       body: branchRows.length
         ? branchRows.map((row, idx) => [
             idx + 1,
@@ -713,23 +800,26 @@ function drawConclusion(doc, ctx, totals, branchRows, productRows) {
             fmtNum(row.tx),
             fmtNum(row.itemsQty),
             IDR(row.revenue),
+            IDR(row.additionalCharge),
             fmtPct(row.share),
           ])
-        : [["-", "Tidak ada data", "0", "0", IDR(0), fmtPct(0)]],
+        : [["-", "Tidak ada data", "0", "0", IDR(0), IDR(0), fmtPct(0)]],
       foot: [[
         "",
         "TOTAL KESELURUHAN",
         fmtNum(totals.tx),
         fmtNum(totals.itemsQty),
         IDR(totals.revenue),
+        IDR(totals.additionalCharge),
         fmtPct(branchRows.length ? 100 : 0),
       ]],
       columnStyles: {
-        0: { halign: "center", cellWidth: 24 },
-        2: { halign: "right", cellWidth: 62 },
-        3: { halign: "right", cellWidth: 50 },
-        4: { halign: "right", cellWidth: 104 },
-        5: { halign: "right", cellWidth: 66 },
+        0: { halign: "center", cellWidth: 22 },
+        2: { halign: "right", cellWidth: 54 },
+        3: { halign: "right", cellWidth: 42 },
+        4: { halign: "right", cellWidth: 88 },
+        5: { halign: "right", cellWidth: 78 },
+        6: { halign: "right", cellWidth: 58 },
       },
     })
   );
@@ -746,25 +836,48 @@ function drawConclusion(doc, ctx, totals, branchRows, productRows) {
     doc,
     tableOptions(doc, ctx, {
       startY: y,
-      head: [["#", "Produk", "Qty Terjual", "Pendapatan"]],
+      head: [["#", "Produk", "Qty Terjual", "Pendapatan", "Add. Charge"]],
       body: productRows.length
         ? productRows.map((row, idx) => [
             idx + 1,
             row.name,
             fmtNum(row.qty),
             IDR(row.revenue),
+            "-",
           ])
-        : [["-", "Tidak ada item terjual", "0", IDR(0)]],
+        : [["-", "Tidak ada item terjual", "0", IDR(0), IDR(0)]],
       foot: [[
         "",
         "TOTAL ITEM TERJUAL",
         fmtNum(totals.itemsQty),
         IDR(productRows.reduce((s, r) => s + r.revenue, 0)),
+        IDR(totals.additionalCharge),
       ]],
       columnStyles: {
         0: { halign: "center", cellWidth: 24 },
-        2: { halign: "right", cellWidth: 84 },
-        3: { halign: "right", cellWidth: 116 },
+        2: { halign: "right", cellWidth: 72 },
+        3: { halign: "right", cellWidth: 100 },
+        4: { halign: "right", cellWidth: 90 },
+      },
+    })
+  );
+  y = doc.lastAutoTable.finalY + 10;
+
+  const itemsRevenue = productRows.reduce((s, r) => s + r.revenue, 0);
+  const additionalCharge = N(totals.additionalCharge);
+  autoTable(
+    doc,
+    tableOptions(doc, ctx, {
+      startY: y,
+      head: [["Komponen", "Nominal"]],
+      body: [
+        ["Total Item Terjual", IDR(itemsRevenue)],
+        ["Additional Charge", IDR(additionalCharge)],
+        ["Diskon", IDR(totals.discounts)],
+      ],
+      foot: [["TOTAL PENJUALAN", IDR(totals.revenue)]],
+      columnStyles: {
+        1: { halign: "right", cellWidth: 140, fontStyle: "bold" },
       },
     })
   );
@@ -868,6 +981,7 @@ export function exportToPDF(data, filters, aggRange, options = {}) {
         tx: s.tx,
         revenue: s.revenue,
         itemsQty: s.itemsQty,
+        additionalCharge: s.additionalCharge,
         share: totals.revenue ? (s.revenue / totals.revenue) * 100 : 0,
       };
     })
@@ -996,4 +1110,350 @@ export function exportToPDF(data, filters, aggRange, options = {}) {
   const from = filters?.from || "start";
   const to = filters?.to || "end";
   doc.save(`laporan-penjualan_${from}_${to}.pdf`);
+}
+
+function buildTransactionDailyBreakdown(sales) {
+  const byDay = new Map();
+
+  for (const sale of sales) {
+    const key = new Date(sale?.created_at || sale?.createdAt || Date.now())
+      .toISOString()
+      .slice(0, 10);
+
+    if (!byDay.has(key)) {
+      byDay.set(key, {
+        date: key,
+        tx: 0,
+        revenue: 0,
+        itemsQty: 0,
+        itemsRevenue: 0,
+        additionalCharge: 0,
+        methods: {},
+        transactions: [],
+      });
+    }
+
+    const row = byDay.get(key);
+    const total = txTotal(sale);
+    const additionalCharge = txAdditionalCharge(sale);
+    const productPrice = txItemsRevenue(sale);
+    row.tx += 1;
+    row.revenue += total;
+    row.itemsQty += saleItemsQty(sale);
+    row.itemsRevenue += productPrice;
+    row.additionalCharge += additionalCharge;
+
+    const labels = txPaymentLabels(sale);
+    const payments = Array.isArray(sale?.payments) ? sale.payments : [];
+    if (payments.length > 0) {
+      for (const p of payments) {
+        const method = paymentMethodLabel(p?.method);
+        row.methods[method] = (row.methods[method] || 0) + N(p?.amount);
+      }
+    } else {
+      const fallback = labels[0] || "Cash";
+      row.methods[fallback] = (row.methods[fallback] || 0) + total;
+    }
+
+    row.transactions.push({
+      code: sale?.code || sale?.number || "-",
+      time: fmtTime(sale?.created_at || sale?.createdAt),
+      itemsQty: saleItemsQty(sale),
+      itemsDetail: (Array.isArray(sale?.items) ? sale.items : []).length
+        ? (sale.items || [])
+            .map((item, idx) => {
+              const productName =
+                item?.product?.name ||
+                item?.product_name ||
+                item?.name ||
+                `Produk #${item?.product_id ?? idx + 1}`;
+              const qty = N(item?.qty ?? item?.quantity ?? 1);
+              const sku = item?.product?.sku || item?.product_sku;
+              return `${productName}${sku ? ` (${sku})` : ""} x${fmtNum(qty)}`;
+            })
+            .join("\n")
+        : "-",
+      productPrice,
+      additionalCharge,
+      methods: labels.join(" | "),
+      total,
+    });
+  }
+
+  return Array.from(byDay.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((row) => ({
+      ...row,
+      methods: Object.entries(row.methods)
+        .map(([method, amount]) => ({ method, amount }))
+        .sort((a, b) => b.amount - a.amount),
+      transactions: row.transactions.sort((a, b) =>
+        String(a.time).localeCompare(String(b.time))
+      ),
+    }));
+}
+
+function drawTransactionDailyDetail(doc, ctx, y, sales) {
+  const daily = buildTransactionDailyBreakdown(sales);
+
+  if (daily.length === 0) {
+    autoTable(
+      doc,
+      tableOptions(doc, ctx, {
+        startY: y,
+        head: [["Tanggal", "Transaksi", "Item", "Pendapatan"]],
+        body: [["-", "0", "0", IDR(0)]],
+      })
+    );
+    return doc.lastAutoTable.finalY + 18;
+  }
+
+  for (const day of daily) {
+    y = ensureSpace(doc, ctx, y, 180);
+    y = drawDayBanner(doc, day, y);
+
+    setText(doc, COLOR.slate, 8.6, "bold");
+    doc.text("1. BREAKDOWN TRANSAKSI", MARGIN, y);
+    autoTable(
+      doc,
+      tableOptions(doc, ctx, {
+        startY: y + 6,
+        styles: {
+          font: "helvetica",
+          fontSize: 7.8,
+          cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
+          lineColor: COLOR.border,
+          lineWidth: 0.5,
+          textColor: COLOR.ink,
+          overflow: "linebreak",
+          valign: "middle",
+        },
+        headStyles: {
+          fillColor: COLOR.navy,
+          textColor: COLOR.white,
+          fontStyle: "bold",
+          fontSize: 7.6,
+          cellPadding: { top: 5, right: 4, bottom: 5, left: 4 },
+        },
+        head: [[
+          "Kode",
+          "Waktu",
+          "Item Sold",
+          "Metode",
+          "Harga Produk",
+          "Add. Charge",
+          "Total",
+        ]],
+        body: day.transactions.map((row) => [
+          row.code,
+          row.time,
+          row.itemsDetail,
+          row.methods,
+          IDR(row.productPrice),
+          IDR(row.additionalCharge),
+          IDR(row.total),
+        ]),
+        foot: [[
+          "",
+          "TOTAL",
+          `${fmtNum(day.itemsQty)} item / ${fmtNum(day.tx)} trx`,
+          "",
+          IDR(day.itemsRevenue),
+          IDR(day.additionalCharge),
+          IDR(day.revenue),
+        ]],
+        columnStyles: {
+          0: { cellWidth: 86 },
+          1: { cellWidth: 42 },
+          2: { cellWidth: 150 },
+          3: { cellWidth: 48, halign: "center" },
+          4: { halign: "right", cellWidth: 70 },
+          5: { halign: "right", cellWidth: 62 },
+          6: { halign: "right", cellWidth: 68 },
+        },
+      })
+    );
+    y = doc.lastAutoTable.finalY + 12;
+
+    y = ensureSpace(doc, ctx, y, 90);
+    setText(doc, COLOR.slate, 8.6, "bold");
+    doc.text("2. METODE PEMBAYARAN", MARGIN, y);
+    autoTable(
+      doc,
+      tableOptions(doc, ctx, {
+        startY: y + 6,
+        head: [["Metode", "Nominal", "Porsi"]],
+        body: day.methods.length
+          ? day.methods.map((row) => {
+              const total = day.methods.reduce((sum, it) => sum + it.amount, 0);
+              return [
+                row.method,
+                IDR(row.amount),
+                fmtPct(total ? (row.amount / total) * 100 : 0),
+              ];
+            })
+          : [["-", IDR(0), fmtPct(0)]],
+        foot: day.methods.length
+          ? [[
+              "Total",
+              IDR(day.methods.reduce((sum, it) => sum + it.amount, 0)),
+              fmtPct(100),
+            ]]
+          : undefined,
+        columnStyles: {
+          1: { halign: "right", cellWidth: 110 },
+          2: { halign: "right", cellWidth: 62 },
+        },
+      })
+    );
+    y = doc.lastAutoTable.finalY + 20;
+  }
+
+  return y;
+}
+
+export function exportTransactionHistoryPDF(data, filters = {}, options = {}) {
+  const sales = (Array.isArray(data) ? data : []).filter(
+    (s) => String(s?.status || "").toLowerCase() !== "void"
+  );
+  const doc = new jsPDF({ unit: "pt", format: "a4", compress: true });
+  const reportPeriod = `${fmtDate(filters?.from)} - ${fmtDate(filters?.to)}`;
+  const ctx = { reportPeriod, headeredPages: new Set([1]) };
+  const scopeLabel =
+    options.selectedStoreLabel ||
+    (filters?.storeId ? `Cabang ${filters.storeId}` : "Semua cabang");
+  const totals = summarize(sales);
+  const groups = groupByStore(sales, options);
+  const branchRows = groups
+    .map((group) => {
+      const summary = summarize(group.sales);
+      return {
+        name: group.name,
+        tx: summary.tx,
+        itemsQty: summary.itemsQty,
+        revenue: summary.revenue,
+        additionalCharge: summary.additionalCharge,
+        share: totals.revenue ? (summary.revenue / totals.revenue) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+
+  let y = MARGIN;
+  y = drawCover(doc, ctx, y, {
+    period: reportPeriod,
+    scope: scopeLabel,
+    txCount: fmtNum(totals.tx),
+    printedAt: fmtDateTime(new Date()),
+  });
+
+  y = sectionHeading(doc, "Ringkasan History Transaksi", y, scopeLabel);
+  y = drawKpiCards(doc, y, [
+    {
+      label: "Total Pendapatan",
+      value: IDR(totals.revenue),
+      hint: "Akumulasi transaksi selesai",
+      accent: COLOR.primary,
+    },
+    {
+      label: "Total Transaksi",
+      value: fmtNum(totals.tx),
+      hint: "Jumlah transaksi tercatat",
+      accent: COLOR.green,
+    },
+    {
+      label: "Total Item Terjual",
+      value: fmtNum(totals.itemsQty),
+      hint: "Akumulasi qty item",
+      accent: COLOR.primary,
+    },
+    {
+      label: "Rata-rata / Transaksi",
+      value: IDR(totals.aov),
+      hint: "Average order value",
+      accent: COLOR.green,
+    },
+    {
+      label: "Total Diskon",
+      value: IDR(totals.discounts),
+      hint: "Potongan transaksi",
+      accent: COLOR.amber,
+    },
+    {
+      label: "Jumlah Cabang",
+      value: fmtNum(groups.length),
+      hint: "Cabang dengan transaksi",
+      accent: COLOR.primary,
+    },
+  ]);
+
+  y = ensureSpace(doc, ctx, y, 130);
+  y = sectionHeading(doc, "Ringkasan Metode Pembayaran", y);
+  autoTable(
+    doc,
+    tableOptions(doc, ctx, {
+      startY: y,
+      head: [["Metode Pembayaran", "Nominal", "Porsi"]],
+      body: totals.paymentMix.length
+        ? totals.paymentMix.map((row) => {
+            const sum = totals.paymentMix.reduce((s, r) => s + r.amount, 0);
+            return [
+              row.method,
+              IDR(row.amount),
+              fmtPct(sum ? (row.amount / sum) * 100 : 0),
+            ];
+          })
+        : [["-", IDR(0), fmtPct(0)]],
+      foot: [[
+        "Total",
+        IDR(totals.paymentMix.reduce((s, r) => s + r.amount, 0)),
+        fmtPct(totals.paymentMix.length ? 100 : 0),
+      ]],
+      columnStyles: {
+        1: { halign: "right", cellWidth: 140 },
+        2: { halign: "right", cellWidth: 70 },
+      },
+    })
+  );
+
+  for (const group of groups) {
+    const summary = summarize(group.sales);
+    y = startPage(doc, ctx);
+    y = drawBranchBanner(doc, group.name, y);
+    y = drawKpiCards(
+      doc,
+      y,
+      [
+        {
+          label: "Pendapatan Cabang",
+          value: IDR(summary.revenue),
+          accent: COLOR.primary,
+        },
+        {
+          label: "Transaksi",
+          value: fmtNum(summary.tx),
+          accent: COLOR.green,
+        },
+        {
+          label: "Item Terjual",
+          value: fmtNum(summary.itemsQty),
+          accent: COLOR.primary,
+        },
+      ],
+      3
+    );
+
+    y = sectionHeading(doc, "Breakdown Harian Transaksi", y, group.name);
+    y = drawTransactionDailyDetail(doc, ctx, y, group.sales);
+
+    y = ensureSpace(doc, ctx, y, 200);
+    y = sectionHeading(doc, "Akumulasi Cabang", y, group.name);
+    drawSummaryTables(doc, ctx, y, summary);
+  }
+
+  drawConclusion(doc, ctx, totals, branchRows, buildProductTotals(sales));
+  paintFooters(doc, ctx);
+
+  const from = filters?.from || "start";
+  const to = filters?.to || "end";
+  doc.save(`history-transactions_${from}_${to}.pdf`);
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Calendar, X, Search, Filter, Download, XCircle, Eye } from "lucide-react";
+import { Calendar, X, Search, Filter, Download, XCircle, Eye, ChevronRight, ChevronDown } from "lucide-react";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
 import DataTable from "../data-table/DataTable";
@@ -10,6 +10,7 @@ import { canSwitchStores } from "../../utils/roles";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import ConfirmDialog from "../common/ConfirmDialog";
 import SaleDetailModal from "../sales/SaleDetailModal";
+import { exportTransactionHistoryPDF } from "../../lib/exportPdf";
 
 const PER_PAGE = 10;
 
@@ -73,6 +74,7 @@ const isWithinDateRange = (iso, start, end) => {
 export default function HistoryByTransaction({
   storeId = null,
   needsStoreSelection = false,
+  activeStoreLabel = "",
 }) {
   // ===== me / role =====
   const [me, setMe] = useState(null);
@@ -129,6 +131,7 @@ export default function HistoryByTransaction({
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedSale, setSelectedSale] = useState(null);
   const [saleDetail, setSaleDetail] = useState(null);
+  const [expandedSaleId, setExpandedSaleId] = useState(null);
 
   const [refreshTick, setRefreshTick] = useState(0);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -172,7 +175,7 @@ export default function HistoryByTransaction({
     };
 
     const fetchList = clientFilterActive
-      ? listAllSales(serverFilterParams, controller.signal).then((items) => ({
+      ? listAllSales(serverFilterParams, controller.signal, { includeItems: true }).then((items) => ({
           items,
           meta: { current_page: 1, last_page: 1, per_page: PER_PAGE, total: items.length },
         }))
@@ -431,7 +434,44 @@ export default function HistoryByTransaction({
     );
   };
 
+  const saleItems = (row) => (Array.isArray(row?.items) ? row.items : []);
+  const saleItemsQty = (row) =>
+    saleItems(row).reduce(
+      (sum, item) => sum + toNumber(item.qty ?? item.quantity ?? 1),
+      0
+    );
+
+  const toggleExpandedSale = useCallback((saleId) => {
+    setExpandedSaleId((prev) => (prev === saleId ? null : saleId));
+  }, []);
+
   const columns = [
+    {
+      key: "__expand",
+      header: "",
+      width: "52px",
+      cell: (row) => {
+        const items = saleItems(row);
+        const expanded = expandedSaleId === row.id;
+        if (items.length === 0) return <span className="inline-block w-4 h-4" />;
+
+        return (
+          <button
+            type="button"
+            onClick={() => toggleExpandedSale(row.id)}
+            className="inline-flex items-center justify-center p-1.5 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            aria-expanded={expanded}
+            title={expanded ? "Hide sold items" : "Show sold items"}
+          >
+            {expanded ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </button>
+        );
+      },
+    },
     { key: "code", header: "Transaction", sticky: "left", cell: (row) => <CodeCell row={row} />, className: "font-medium" },
     { key: "created_at", header: "Tanggal", cell: (row) => <DateCell row={row} /> },
     { key: "customer_name", header: "Customer", cell: (row) => <TextCell title={row.customer_name || "General"}>{row.customer_name || "General"}</TextCell> },
@@ -530,6 +570,37 @@ export default function HistoryByTransaction({
       toast.success("Excel berhasil diunduh", { id: "exp" });
     } catch {
       toast.error("Gagal mengekspor Excel", { id: "exp" });
+    }
+  };
+
+  const exportPdf = async () => {
+    try {
+      toast.loading("Menyiapkan PDF...", { id: "exp-pdf" });
+      const params = {
+        code: searchTerm.trim() || undefined,
+        sort: sortKey || undefined,
+        dir: sortKey ? sortDir : undefined,
+        from: dateRange.start || undefined,
+        to: dateRange.end || undefined,
+        status: statusFilter || undefined,
+        ...storeParams,
+      };
+
+      const allRows = clientFilterActive
+        ? filteredSorted
+        : await listAllSales(params, undefined, { includeItems: true });
+
+      exportTransactionHistoryPDF(allRows, {
+        from: dateRange.start,
+        to: dateRange.end,
+        storeId,
+      }, {
+        selectedStoreLabel: activeStoreLabel,
+      });
+
+      toast.success("PDF berhasil diunduh", { id: "exp-pdf" });
+    } catch {
+      toast.error("Gagal mengekspor PDF", { id: "exp-pdf" });
     }
   };
 
@@ -648,6 +719,15 @@ export default function HistoryByTransaction({
           </div>
 
           <button
+            onClick={exportPdf}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+            title="Export PDF"
+          >
+            <Download className="w-4 h-4" />
+            Export PDF
+          </button>
+
+          <button
             onClick={exportExcel}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
             title="Export Excel"
@@ -709,6 +789,86 @@ export default function HistoryByTransaction({
               meta={meta}
               currentPage={meta.current_page}
               onPageChange={(p) => setCurrentPage(p)}
+              isRowExpanded={(row) => expandedSaleId === row.id && saleItems(row).length > 0}
+              renderExpandedRow={(row) => (
+                <div className="pl-10 pr-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">Items sold</div>
+                      <div className="text-xs text-slate-500">
+                        {saleItemsQty(row).toLocaleString("id-ID")} item dalam transaksi {row.code || row.number || "-"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-100 text-slate-600">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Produk</th>
+                          <th className="px-3 py-2 text-right font-medium w-24">Qty</th>
+                          <th className="px-3 py-2 text-right font-medium w-36">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {saleItems(row).map((item, idx) => {
+                          const productName =
+                            item?.product?.name ||
+                            item?.product_name ||
+                            item?.name ||
+                            `Produk #${item?.product_id ?? idx + 1}`;
+                          const qty = toNumber(item.qty ?? item.quantity ?? 1);
+                          const total = toNumber(
+                            item.line_total ?? item.subtotal ?? item.total ?? toNumber(item.price) * qty
+                          );
+
+                          return (
+                            <tr key={`${row.id}-${idx}`} className="border-t border-slate-100">
+                              <td className="px-3 py-2">
+                                <div className="font-medium text-slate-800">{productName}</div>
+                                {item?.product?.sku || item?.product_sku ? (
+                                  <div className="text-xs text-slate-500">
+                                    SKU: {item?.product?.sku || item?.product_sku}
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-700">
+                                {qty.toLocaleString("id-ID")}
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium text-slate-800">
+                                {formatIDR(total)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-slate-50 border-t border-slate-200">
+                        <tr>
+                          <td className="px-3 py-2 font-semibold text-slate-700">Total Item</td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800">
+                            {saleItemsQty(row).toLocaleString("id-ID")}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-slate-800">
+                            {formatIDR(
+                              saleItems(row).reduce(
+                                (sum, item) =>
+                                  sum +
+                                  toNumber(
+                                    item.line_total ??
+                                      item.subtotal ??
+                                      item.total ??
+                                      toNumber(item.price) * toNumber(item.qty ?? item.quantity ?? 1)
+                                  ),
+                                0
+                              )
+                            )}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
               stickyHeader
               getRowKey={(row, i) => row.id ?? row.code ?? i}
               className="border-0 shadow-none"
