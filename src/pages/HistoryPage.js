@@ -175,6 +175,7 @@ export default function HistoryPage() {
           <HistoryByTransaction
             storeId={effectiveStoreId}
             needsStoreSelection={needsStoreSelection}
+            activeStoreLabel={activeStoreLabel}
           />
         )}
         {current === "item" && (

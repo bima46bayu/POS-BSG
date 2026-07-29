@@ -49,6 +49,8 @@ export default function DataTable({
   onPageChange,
 
   renderActions,
+  renderExpandedRow,
+  isRowExpanded,
   getRowKey,
 
   stickyHeader = true,
@@ -158,43 +160,57 @@ export default function DataTable({
             {!loading &&
               data?.map((row, i) => {
                 const rowKey = getRowKey ? getRowKey(row, i) : row.id ?? i;
+                const expanded = typeof isRowExpanded === "function" ? isRowExpanded(row, i) : false;
                 return (
-                  <tr key={rowKey} className="hover:bg-gray-50 transition-colors">
-                    {columns.map((col, ci) => {
-                      const style = col.width ? { width: col.width, minWidth: col.width } : undefined;
-                      const value = col.accessor ? col.accessor(row) : row[col.key];
-                      const content = col.cell ? col.cell(row) : value;
+                  <React.Fragment key={rowKey}>
+                    <tr className="hover:bg-gray-50 transition-colors">
+                      {columns.map((col, ci) => {
+                        const style = col.width ? { width: col.width, minWidth: col.width } : undefined;
+                        const value = col.accessor ? col.accessor(row) : row[col.key];
+                        const content = col.cell ? col.cell(row) : value;
 
-                      return (
+                        return (
+                          <td
+                            key={`${rowKey}-${ci}`}
+                            className={`${tdBase} ${alignClass(col.align)} ${col.className || ""} ${
+                              col.sticky
+                                ? `${stickyClass(col.sticky)} ${
+                                    col.sticky === "left"
+                                      ? hasStickyLeft ? "border-r border-gray-200" : ""
+                                      : hasStickyRight ? "border-l border-gray-200" : ""
+                                  }`
+                                : ""
+                            }`}
+                            style={style}
+                          >
+                            {content}
+                          </td>
+                        );
+                      })}
+
+                      {renderActions && (
                         <td
-                          key={`${rowKey}-${ci}`}
-                          className={`${tdBase} ${alignClass(col.align)} ${col.className || ""} ${
-                            col.sticky
-                              ? `${stickyClass(col.sticky)} ${
-                                  col.sticky === "left"
-                                    ? hasStickyLeft ? "border-r border-gray-200" : ""
-                                    : hasStickyRight ? "border-l border-gray-200" : ""
-                                }`
-                              : ""
+                          className={`${tdBase} text-center ${stickyClass("right")} ${
+                            hasStickyRight ? "border-l border-gray-200" : ""
                           }`}
-                          style={style}
+                          style={{ minWidth: "120px" }}
                         >
-                          {content}
+                          {renderActions(row)}
                         </td>
-                      );
-                    })}
+                      )}
+                    </tr>
 
-                    {renderActions && (
-                      <td
-                        className={`${tdBase} text-center ${stickyClass("right")} ${
-                          hasStickyRight ? "border-l border-gray-200" : ""
-                        }`}
-                        style={{ minWidth: "120px" }}
-                      >
-                        {renderActions(row)}
-                      </td>
+                    {expanded && typeof renderExpandedRow === "function" && (
+                      <tr className="bg-slate-50/80">
+                        <td
+                          colSpan={columns.length + (renderActions ? 1 : 0)}
+                          className="px-4 py-3 text-sm text-gray-900 border-b border-gray-100"
+                        >
+                          {renderExpandedRow(row, i)}
+                        </td>
+                      </tr>
                     )}
-                  </tr>
+                  </React.Fragment>
                 );
               })}
           </tbody>
