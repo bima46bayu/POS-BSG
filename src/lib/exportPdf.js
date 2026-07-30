@@ -261,6 +261,33 @@ function saleItemsQty(sale) {
   return items.reduce((sum, it) => sum + N(it?.qty ?? it?.quantity ?? 1), 0);
 }
 
+/** Line-level item discount (same rules as dashboard aggregate). */
+function getItemDiscount(it) {
+  if (N(it?.discount_nominal) > 0) return N(it.discount_nominal);
+
+  const qty = N(it?.qty ?? it?.quantity ?? 1);
+  const unit = N(it?.unit_price ?? it?.price ?? 0);
+  const net = N(it?.net_unit_price ?? unit);
+
+  if (unit > net) return (unit - net) * qty;
+
+  const subtotal = N(it?.subtotal ?? it?.line_total ?? qty * unit);
+  const normal = qty * unit;
+  if (normal > subtotal) return normal - subtotal;
+
+  return 0;
+}
+
+function txItemDiscounts(tx) {
+  const items = Array.isArray(tx?.items) ? tx.items : [];
+  return items.reduce((sum, it) => sum + getItemDiscount(it), 0);
+}
+
+/** Header (global) + item discounts for one sale. */
+function txTotalDiscount(tx) {
+  return N(tx?.discount) + txItemDiscounts(tx);
+}
+
 function txTotal(tx) {
   if (
     tx?.final_total === null ||
@@ -337,7 +364,7 @@ function summarize(sales) {
     const total = N(sale?.final_total ?? sale?.total);
     revenue += total;
     tx += 1;
-    discounts += N(sale?.discount);
+    discounts += txTotalDiscount(sale);
     itemsQty += saleItemsQty(sale);
     itemsRevenue += txItemsRevenue(sale);
     additionalCharge += txAdditionalCharge(sale);
@@ -390,7 +417,7 @@ function buildDailyBreakdown(sales) {
     const row = byDay.get(key);
     row.tx += 1;
     row.revenue += N(sale?.total);
-    row.discounts += N(sale?.discount);
+    row.discounts += txTotalDiscount(sale);
 
     const items = Array.isArray(sale?.items) ? sale.items : [];
     for (const it of items) {
@@ -1127,6 +1154,7 @@ function buildTransactionDailyBreakdown(sales) {
         revenue: 0,
         itemsQty: 0,
         itemsRevenue: 0,
+        discounts: 0,
         additionalCharge: 0,
         methods: {},
         transactions: [],
@@ -1137,10 +1165,12 @@ function buildTransactionDailyBreakdown(sales) {
     const total = txTotal(sale);
     const additionalCharge = txAdditionalCharge(sale);
     const productPrice = txItemsRevenue(sale);
+    const discount = txTotalDiscount(sale);
     row.tx += 1;
     row.revenue += total;
     row.itemsQty += saleItemsQty(sale);
     row.itemsRevenue += productPrice;
+    row.discounts += discount;
     row.additionalCharge += additionalCharge;
 
     const labels = txPaymentLabels(sale);
@@ -1174,6 +1204,7 @@ function buildTransactionDailyBreakdown(sales) {
             .join("\n")
         : "-",
       productPrice,
+      discount,
       additionalCharge,
       methods: labels.join(" | "),
       total,
@@ -1237,38 +1268,38 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
         },
         head: [[
           "Kode",
-          "Waktu",
           "Item Sold",
           "Metode",
           "Harga Produk",
+          "Diskon",
           "Add. Charge",
           "Total",
         ]],
         body: day.transactions.map((row) => [
           row.code,
-          row.time,
           row.itemsDetail,
           row.methods,
           IDR(row.productPrice),
+          row.discount > 0 ? IDR(row.discount) : "-",
           IDR(row.additionalCharge),
           IDR(row.total),
         ]),
         foot: [[
-          "",
           "TOTAL",
           `${fmtNum(day.itemsQty)} item / ${fmtNum(day.tx)} trx`,
           "",
           IDR(day.itemsRevenue),
+          IDR(day.discounts),
           IDR(day.additionalCharge),
           IDR(day.revenue),
         ]],
         columnStyles: {
-          0: { cellWidth: 86 },
-          1: { cellWidth: 42 },
-          2: { cellWidth: 150 },
-          3: { cellWidth: 48, halign: "center" },
-          4: { halign: "right", cellWidth: 70 },
-          5: { halign: "right", cellWidth: 62 },
+          0: { cellWidth: 90 },
+          1: { cellWidth: 145 },
+          2: { cellWidth: 48, halign: "center" },
+          3: { halign: "right", cellWidth: 68 },
+          4: { halign: "right", cellWidth: 58 },
+          5: { halign: "right", cellWidth: 58 },
           6: { halign: "right", cellWidth: 68 },
         },
       })
