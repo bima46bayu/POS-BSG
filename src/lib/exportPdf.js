@@ -1491,3 +1491,7 @@ export function exportTransactionHistoryPDF(data, filters = {}, options = {}) {
 
 
 ////// Wayoloh wayoloh ////
+
+
+
+///// Patch is ended here pwease /////
