@@ -1488,3 +1488,6 @@ export function exportTransactionHistoryPDF(data, filters = {}, options = {}) {
   const to = filters?.to || "end";
   doc.save(`history-transactions_${from}_${to}.pdf`);
 }
+
+
+////// Wayoloh wayoloh ////
