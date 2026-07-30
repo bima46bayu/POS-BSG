@@ -315,6 +315,16 @@ function txItemsRevenue(tx) {
   }, 0);
 }
 
+/** Gross item total before discounts (unit price × qty). */
+function txItemsGross(tx) {
+  const items = Array.isArray(tx?.items) ? tx.items : [];
+  return items.reduce((sum, item) => {
+    const qty = N(item?.qty ?? item?.quantity ?? 1);
+    const unit = N(item?.unit_price ?? item?.price ?? 0);
+    return sum + unit * qty;
+  }, 0);
+}
+
 /** Prefer stored backend total; fall back to snapshot sum or total - items. */
 function txAdditionalCharge(tx) {
   if (tx?.additional_charge_total != null && tx.additional_charge_total !== "") {
@@ -357,6 +367,7 @@ function summarize(sales) {
   let discounts = 0;
   let itemsQty = 0;
   let itemsRevenue = 0;
+  let itemsGross = 0;
   let additionalCharge = 0;
   const payMix = {};
 
@@ -367,6 +378,7 @@ function summarize(sales) {
     discounts += txTotalDiscount(sale);
     itemsQty += saleItemsQty(sale);
     itemsRevenue += txItemsRevenue(sale);
+    itemsGross += txItemsGross(sale);
     additionalCharge += txAdditionalCharge(sale);
 
     const payments = Array.isArray(sale?.payments) ? sale.payments : [];
@@ -386,6 +398,7 @@ function summarize(sales) {
     discounts,
     itemsQty,
     itemsRevenue,
+    itemsGross,
     additionalCharge,
     aov: tx ? revenue / tx : 0,
     paymentMix: Object.entries(payMix)
@@ -891,6 +904,7 @@ function drawConclusion(doc, ctx, totals, branchRows, productRows) {
   y = doc.lastAutoTable.finalY + 10;
 
   const itemsRevenue = productRows.reduce((s, r) => s + r.revenue, 0);
+  const itemsGross = N(totals.itemsGross) || itemsRevenue + N(totals.discounts);
   const additionalCharge = N(totals.additionalCharge);
   autoTable(
     doc,
@@ -898,9 +912,9 @@ function drawConclusion(doc, ctx, totals, branchRows, productRows) {
       startY: y,
       head: [["Komponen", "Nominal"]],
       body: [
-        ["Total Item Terjual", IDR(itemsRevenue)],
-        ["Additional Charge", IDR(additionalCharge)],
+        ["Harga Produk", IDR(itemsGross)],
         ["Diskon", IDR(totals.discounts)],
+        ["Additional Charge", IDR(additionalCharge)],
       ],
       foot: [["TOTAL PENJUALAN", IDR(totals.revenue)]],
       columnStyles: {
@@ -1153,7 +1167,7 @@ function buildTransactionDailyBreakdown(sales) {
         tx: 0,
         revenue: 0,
         itemsQty: 0,
-        itemsRevenue: 0,
+        itemsGross: 0,
         discounts: 0,
         additionalCharge: 0,
         methods: {},
@@ -1164,12 +1178,12 @@ function buildTransactionDailyBreakdown(sales) {
     const row = byDay.get(key);
     const total = txTotal(sale);
     const additionalCharge = txAdditionalCharge(sale);
-    const productPrice = txItemsRevenue(sale);
+    const productPrice = txItemsGross(sale);
     const discount = txTotalDiscount(sale);
     row.tx += 1;
     row.revenue += total;
     row.itemsQty += saleItemsQty(sale);
-    row.itemsRevenue += productPrice;
+    row.itemsGross += productPrice;
     row.discounts += discount;
     row.additionalCharge += additionalCharge;
 
@@ -1288,7 +1302,7 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
           "TOTAL",
           `${fmtNum(day.itemsQty)} item / ${fmtNum(day.tx)} trx`,
           "",
-          IDR(day.itemsRevenue),
+          IDR(day.itemsGross),
           IDR(day.discounts),
           IDR(day.additionalCharge),
           IDR(day.revenue),
