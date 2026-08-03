@@ -3,6 +3,7 @@ import { canSwitchStores } from "../utils/roles";
 import {
   branchStoresForParent,
   parentIdForStore,
+  storeIdsUnderParent,
   storeLabel,
 } from "../utils/storeScope";
 
@@ -26,6 +27,9 @@ const writeKey = (key, val) => {
 
 /**
  * Parent Store + Branch Store selection for HQ / multi-store users.
+ *
+ * Parent=A + Branch="Semua cabang" → scope = A + children (e.g. A,B,C).
+ * Not every store in the company.
  */
 export function useStoreScopeFilter({
   branchStorageKey,
@@ -50,6 +54,7 @@ export function useStoreScopeFilter({
     [me]
   );
 
+  /** Single branch id, or null when viewing parent-wide / all stores. */
   const effectiveStoreId = useMemo(() => {
     if (!canPickStore) {
       return myStoreId != null ? Number(myStoreId) : null;
@@ -58,15 +63,45 @@ export function useStoreScopeFilter({
     return null;
   }, [canPickStore, myStoreId, storeFilterId]);
 
+  /**
+   * null  = no restriction (Semua parent)
+   * [ids] = concrete store ids (one branch, or parent + all its cabang)
+   */
+  const effectiveStoreIds = useMemo(() => {
+    if (!canPickStore) {
+      return myStoreId != null ? [Number(myStoreId)] : [];
+    }
+    if (storeFilterId) return [Number(storeFilterId)];
+    if (parentFilterId) {
+      return storeIdsUnderParent(stores, parentFilterId, me);
+    }
+    return null;
+  }, [canPickStore, myStoreId, storeFilterId, parentFilterId, stores, me]);
+
   const needsStoreSelection =
     canPickStore && (!parentFilterId || !storeFilterId);
 
   const activeStoreLabel = useMemo(() => {
-    if (canPickStore && !storeFilterId) return "Pilih cabang";
-    const sid = effectiveStoreId;
-    if (sid == null) return "-";
-    return storeLabel(stores, sid, me?.store_location?.name ?? "-");
-  }, [canPickStore, storeFilterId, effectiveStoreId, stores, me]);
+    if (!canPickStore) {
+      const sid = effectiveStoreId;
+      if (sid == null) return "-";
+      return storeLabel(stores, sid, me?.store_location?.name ?? "-");
+    }
+    if (storeFilterId) {
+      return storeLabel(stores, storeFilterId, me?.store_location?.name ?? "-");
+    }
+    if (parentFilterId) {
+      return `Semua cabang · ${storeLabel(stores, parentFilterId, "Parent")}`;
+    }
+    return "Semua parent";
+  }, [
+    canPickStore,
+    storeFilterId,
+    parentFilterId,
+    effectiveStoreId,
+    stores,
+    me,
+  ]);
 
   useEffect(() => {
     if (!me || canPickStore) return;
@@ -82,6 +117,16 @@ export function useStoreScopeFilter({
     const pid = parentIdForStore(stores, storeFilterId);
     if (pid) setParentFilterId(pid);
   }, [stores, storeFilterId, parentFilterId]);
+
+  // Clear branch if it no longer belongs under the selected parent.
+  useEffect(() => {
+    if (!canPickStore || !parentFilterId || !storeFilterId || !stores.length) {
+      return;
+    }
+    const branches = branchStoresForParent(stores, parentFilterId, me);
+    const ok = branches.some((b) => String(b.id) === String(storeFilterId));
+    if (!ok) setStoreFilterId("");
+  }, [canPickStore, parentFilterId, storeFilterId, stores, me]);
 
   useEffect(() => {
     if (!canPickStore) return;
@@ -112,6 +157,7 @@ export function useStoreScopeFilter({
     parentFilterId,
     storeFilterId,
     effectiveStoreId,
+    effectiveStoreIds,
     canPickStore,
     needsStoreSelection,
     activeStoreLabel,

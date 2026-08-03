@@ -137,8 +137,14 @@ export default function HistoryByTransaction({
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectRow, setRejectRow] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [rejectSecurityCode, setRejectSecurityCode] = useState("");
   const [rejectLoading, setRejectLoading] = useState(false);
   const [rejectError, setRejectError] = useState("");
+
+  const needsVoidSecurityCode = useMemo(
+    () => String(me?.role || "").toLowerCase() === "kasir",
+    [me]
+  );
 
   // ===== IMPORTANT: cashier must always filter on client =====
   const clientFilterActive = useMemo(() => {
@@ -329,20 +335,31 @@ export default function HistoryByTransaction({
   const openReject = useCallback((row) => {
     setRejectRow(row);
     setRejectReason("");
+    setRejectSecurityCode("");
     setRejectError("");
     setRejectOpen(true);
   }, []);
 
   const confirmReject = useCallback(async () => {
     if (!rejectRow?.id) return;
+    if (needsVoidSecurityCode && !String(rejectSecurityCode || "").trim()) {
+      setRejectError("Kode keamanan wajib diisi.");
+      return;
+    }
     setRejectLoading(true);
     setRejectError("");
     try {
-      await voidSale(rejectRow.id, { reason: rejectReason });
+      await voidSale(rejectRow.id, {
+        reason: rejectReason,
+        ...(needsVoidSecurityCode
+          ? { security_code: String(rejectSecurityCode).trim() }
+          : {}),
+      });
       toast.success("Transaksi berhasil di-void");
       setRejectOpen(false);
       setRejectRow(null);
       setRejectReason("");
+      setRejectSecurityCode("");
       if (showDetail && (selectedSale?.id === rejectRow.id || saleDetail?.id === rejectRow.id)) {
         setShowDetail(false); setSelectedSale(null); setSaleDetail(null);
       }
@@ -369,7 +386,15 @@ export default function HistoryByTransaction({
     } finally {
       setRejectLoading(false);
     }
-  }, [rejectRow, rejectReason, showDetail, selectedSale, saleDetail]);
+  }, [
+    rejectRow,
+    rejectReason,
+    rejectSecurityCode,
+    needsVoidSecurityCode,
+    showDetail,
+    selectedSale,
+    saleDetail,
+  ]);
 
   const PaymentBadge = ({ row }) => {
     const methods =
@@ -904,6 +929,22 @@ export default function HistoryByTransaction({
               Anda akan me-<b>void</b> transaksi{" "}
               <span className="font-semibold">{rejectRow?.code || rejectRow?.id}</span>. Tindakan ini tidak dapat dibatalkan.
             </p>
+            {needsVoidSecurityCode && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Kode keamanan <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  placeholder="Masukkan kode void"
+                  value={rejectSecurityCode}
+                  onChange={(e) => setRejectSecurityCode(e.target.value)}
+                  disabled={rejectLoading}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Alasan (opsional)</label>
               <textarea

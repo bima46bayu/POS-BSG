@@ -14,6 +14,19 @@ import { getMyProfile } from "../../api/users";
 
 const toNum = (v) => Number(v || 0);
 
+/** Satuan from product master (same source as Add Product). */
+function productUnitLabel(p) {
+  if (!p) return "—";
+  return (
+    p.unit_name ||
+    p.unit?.name ||
+    p.unit?.label ||
+    p.uom ||
+    (typeof p.unit === "string" ? p.unit : null) ||
+    "—"
+  );
+}
+
 export default function AddPurchaseModal({ open, onClose, storeLocationId: storeLocationIdProp = null }) {
   const qc = useQueryClient();
 
@@ -481,6 +494,7 @@ export default function AddPurchaseModal({ open, onClose, storeLocationId: store
                   <tr>
                     <th className="p-2 text-left min-w-[260px]">Product</th>
                     <th className="p-2 text-right min-w-[100px]">Qty Order</th>
+                    <th className="p-2 text-left min-w-[90px]">Satuan</th>
                     <th className="p-2 text-right min-w-[120px]">
                       Unit Price
                     </th>
@@ -544,6 +558,16 @@ export default function AddPurchaseModal({ open, onClose, storeLocationId: store
                             }
                             className="w-24 px-2 py-1.5 border rounded-lg text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/70"
                           />
+                        </td>
+
+                        {/* Satuan (from product master) */}
+                        <td className="p-2 align-top">
+                          <div
+                            className="px-2 py-1.5 text-sm text-slate-700"
+                            title="Satuan mengikuti master produk"
+                          >
+                            {productUnitLabel(selectedProduct)}
+                          </div>
                         </td>
 
                         {/* Unit Price */}

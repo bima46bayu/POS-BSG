@@ -22,6 +22,7 @@ import {
   BadgePercent,
   BadgeDollarSign,
   ChefHat,
+  KeyRound,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -172,6 +173,7 @@ export default function Sidebar({
     { label: "Discount", path: "/master/discount", icon: BadgePercent },
     { label: "Supplier", path: "/master/supplier", icon: Truck },
     { label: "Store Location", path: "/master/store-location", icon: MapPin },
+    { label: "Kode Void", path: "/master/void-security-code", icon: KeyRound },
   ];
 
   // NEW: submenu untuk Purchase / GR

@@ -34,6 +34,7 @@ import MasterStoreLocationPage from "./pages/master/MasterStoreLocationPage";
 import MasterRecipePage from "./pages/master/MasterRecipePage";
 import MasterDiscountPage from "./pages/master/MasterDiscountPage";
 import AdditionalChargePage from "./pages/master/AdditionalChargePage";
+import VoidSecurityCodePage from "./pages/master/VoidSecurityCodePage";
 
 /* ===== AUTH / API ===== */
 import { isLoggedIn, logoutRequest } from "./api/auth";
@@ -400,6 +401,14 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterStoreLocationPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/void-security-code"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <VoidSecurityCodePage />
               </ProtectedRoute>
             }
           />

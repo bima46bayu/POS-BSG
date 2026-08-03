@@ -6,7 +6,6 @@ import React, {
   useEffect,
 } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import WizardTabs from "../components/purchase/WizardTabs";
@@ -19,22 +18,22 @@ import PurchaseDetailDrawer from "../components/purchase/PurchaseDetailDrawer";
 import GRModal from "../components/purchase/GRModal";
 import AddPurchaseModal from "../components/purchase/AddPurchaseModal";
 import SupplierBreakdownDrawer from "../components/purchase/SupplierBreakdownDrawer";
+import StoreScopeFilter from "../components/common/StoreScopeFilter";
 
 import { approvePurchase, cancelPurchase } from "../api/purchases";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
-import { canSwitchStores } from "../utils/roles";
+import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
 
 const STORAGE_KEY = "purchase_store_id";
+const PARENT_STORAGE_KEY = "purchase_parent_store_id";
 
 export default function PurchasePage() {
   const qc = useQueryClient();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
 
-  // ===== user & role =====
   const [me, setMe] = useState(null);
   const [meLoading, setMeLoading] = useState(true);
+  const [stores, setStores] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,37 +52,9 @@ export default function PurchasePage() {
     };
   }, []);
 
-  const canPickStore = useMemo(() => canSwitchStores(me?.role, me), [me]);
-  const myStoreId = useMemo(
-    () => me?.store_location_id ?? me?.store_location?.id ?? null,
-    [me]
-  );
-
-  // ===== store list + storeId yang dipilih (disimpan di storage) =====
-  const [stores, setStores] = useState([]);
-  const [storeId, setStoreId] = useState(() => {
-    if (typeof window === "undefined") return "";
-    try {
-      return window.localStorage.getItem(STORAGE_KEY) || "";
-    } catch {
-      return "";
-    }
-  });
-
-  // sync ke localStorage setiap kali storeId berubah
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, storeId || "");
-    } catch {
-      // abaikan error storage
-    }
-  }, [storeId]);
-
-  // ambil daftar store (untuk admin dropdown)
   useEffect(() => {
     let cancel = false;
-    listStoreLocations({ per_page: 100 })
+    listStoreLocations({ per_page: 200 })
       .then(({ items }) => {
         if (cancel) return;
         setStores(Array.isArray(items) ? items : []);
@@ -96,41 +67,37 @@ export default function PurchasePage() {
     };
   }, []);
 
-  // default & lock store berdasarkan role
-  useEffect(() => {
-    if (!myStoreId) return;
+  const {
+    parentFilterId,
+    storeFilterId,
+    effectiveStoreId,
+    canPickStore,
+    needsStoreSelection,
+    activeStoreLabel,
+    handleParentChange,
+    handleBranchChange,
+  } = useStoreScopeFilter({
+    branchStorageKey: STORAGE_KEY,
+    parentStorageKey: PARENT_STORAGE_KEY,
+    me,
+    stores,
+  });
 
-    if (!canPickStore) {
-      // kasir: selalu pakai store dia, abaikan storage
-      setStoreId(String(myStoreId));
-      return;
-    }
-
-    // admin:
-    // - kalau storeId masih kosong (nggak ada di storage / belum pernah pilih) → default ke store dia
-    // - kalau sudah ada value → pakai yang lama (termasuk kasus "Semua Store" = "")
-    setStoreId((prev) => (prev ? prev : String(myStoreId)));
-  }, [myStoreId, canPickStore]);
-
-  const handleChangeStore = useCallback((val) => {
-    // kosongkan = semua store (hanya bisa admin)
-    setStoreId(val || "");
-  }, []);
-
-  // ===== UI states =====
   const [step, setStep] = useState(0);
   const [filters, setFilters] = useState({});
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
-  // ===== debounce search biar fetch nggak tiap ketik =====
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
     const id = setTimeout(() => setDebouncedSearch(search), 400);
     return () => clearTimeout(id);
   }, [search]);
 
-  // ===== Drawer states =====
+  useEffect(() => {
+    setPage(1);
+  }, [effectiveStoreId, parentFilterId, storeFilterId]);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerPurchaseId, setDrawerPurchaseId] = useState(null);
 
@@ -143,7 +110,6 @@ export default function PurchasePage() {
   const [addOpen, setAddOpen] = useState(false);
   const [actingId, setActingId] = useState(null);
 
-  // ===== Helper =====
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
   const getRemainCount = useCallback((row) => {
@@ -174,7 +140,6 @@ export default function PurchasePage() {
     [getRemainCount]
   );
 
-  // ===== Mutations =====
   const approveMut = useMutation({
     mutationFn: (id) => approvePurchase(id),
     onMutate: (id) => setActingId(id),
@@ -199,7 +164,6 @@ export default function PurchasePage() {
     onSettled: () => setActingId(null),
   });
 
-  // ===== Actions ke tabel =====
   const onDetail = useCallback((row) => {
     setDrawerPurchaseId(row.id);
     setDrawerOpen(true);
@@ -241,28 +205,16 @@ export default function PurchasePage() {
     [onDetail, onGR, onApprove, onCancel, actingId]
   );
 
-  // ====== Filters yang benar2 dikirim ke API ======
   const effectiveFilters = useMemo(() => {
-    const base = filters || {};
-    const out = { ...base };
-
-    // PRIORITAS:
-    // - Admin: pakai storeId dari dropdown ('' = semua store → hapus store_location_id)
-    // - Non-admin: paksa ke store miliknya
-    if (canPickStore) {
-      if (storeId) {
-        out.store_location_id = String(storeId);
-      } else {
-        delete out.store_location_id;
-      }
-    } else if (myStoreId) {
-      out.store_location_id = String(myStoreId);
+    const out = { ...(filters || {}) };
+    if (effectiveStoreId != null) {
+      out.store_location_id = String(effectiveStoreId);
+    } else {
+      delete out.store_location_id;
     }
-
     return out;
-  }, [filters, storeId, canPickStore, myStoreId]);
+  }, [filters, effectiveStoreId]);
 
-  // ======= Supplier Breakdown =======
   const handleOpenSupplierBreakdown = (row) => {
     setSupplierDrawerData(row);
     setSupplierDrawerOpen(true);
@@ -273,7 +225,14 @@ export default function PurchasePage() {
     setDrawerOpen(true);
   };
 
-  // Opsional: jangan render tabel dulu kalau user belum kebaca
+  const handleAdd = () => {
+    if (needsStoreSelection || effectiveStoreId == null) {
+      toast.error("Pilih parent store dan cabang dulu");
+      return;
+    }
+    setAddOpen(true);
+  };
+
   if (meLoading) {
     return (
       <div className="p-6 bg-gray-50 min-h-screen">
@@ -287,7 +246,6 @@ export default function PurchasePage() {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      {/* Header + Tabs container */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -309,7 +267,6 @@ export default function PurchasePage() {
         </div>
       </div>
 
-      {/* FilterBar */}
       <div className="mb-6">
         <FilterBar
           value={search}
@@ -319,23 +276,32 @@ export default function PurchasePage() {
           }}
           filters={filters}
           setFilters={setFilters}
-          stores={stores}
-          // admin: pakai state storeId (boleh kosong = semua store)
-          // non-admin: lock ke myStoreId
-          storeId={canPickStore ? storeId : myStoreId ? String(myStoreId) : ""}
-          onChangeStore={(val) => {
-            if (!canPickStore) return; // guard tambahan (meski di FilterBar juga sudah disable)
-            handleChangeStore(val);
-            setPage(1);
-          }}
-          isAdmin={canPickStore}
           onExport={() => toast("Export CSV")}
-          onAdd={() => setAddOpen(true)}
+          onAdd={handleAdd}
+          addDisabled={needsStoreSelection || effectiveStoreId == null}
+          storeFilter={
+            <StoreScopeFilter
+              stores={stores}
+              me={me}
+              parentId={parentFilterId}
+              branchId={storeFilterId}
+              onParentChange={handleParentChange}
+              onBranchChange={handleBranchChange}
+              canPickStore={canPickStore}
+              lockedLabel={activeStoreLabel}
+            />
+          }
         />
       </div>
 
-      {/* CONTENT */}
-      {step === 0 ? (
+      {needsStoreSelection && (
+        <div className="mb-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+          Pilih parent store dan branch store untuk melihat / membuat purchase
+          order cabang tersebut.
+        </div>
+      )}
+
+      {!needsStoreSelection && step === 0 && (
         <PoBySupplierTable
           search={debouncedSearch}
           filters={effectiveFilters}
@@ -345,7 +311,9 @@ export default function PurchasePage() {
           canGR={canGR}
           getRemainCount={getRemainCount}
         />
-      ) : (
+      )}
+
+      {!needsStoreSelection && step === 1 && (
         <PoByItemTable
           search={debouncedSearch}
           filters={effectiveFilters}
@@ -357,7 +325,6 @@ export default function PurchasePage() {
         />
       )}
 
-      {/* Drawer Supplier Breakdown */}
       <SupplierBreakdownDrawer
         open={supplierDrawerOpen}
         onClose={() => setSupplierDrawerOpen(false)}
@@ -365,7 +332,6 @@ export default function PurchasePage() {
         onOpenPo={handleOpenPoFromSupplierDrawer}
       />
 
-      {/* Drawer Purchase Detail */}
       <PurchaseDetailDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -376,24 +342,16 @@ export default function PurchasePage() {
         }}
       />
 
-      {/* GR Modal */}
       <GRModal
         open={grOpen}
         onClose={() => setGrOpen(false)}
         purchaseId={grPurchaseId}
       />
 
-      {/* Add Purchase Modal */}
       <AddPurchaseModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        storeLocationId={
-          canPickStore
-            ? storeId
-              ? Number(storeId)
-              : null
-            : myStoreId
-        }
+        storeLocationId={effectiveStoreId}
       />
     </div>
   );
