@@ -23,6 +23,47 @@ function getItemDiscount(it) {
   return 0;
 }
 
+const isCashMethod = (method) => {
+  const key = String(method || "").trim().toLowerCase();
+  return key === "" || key === "cash" || key === "tunai";
+};
+
+/**
+ * Amount per payment method, net of change.
+ *
+ * Payment rows store what the customer handed over, not what they owed, so the
+ * change given back has to come off the mix (cash first) to keep it equal to
+ * revenue.
+ */
+function salePaymentMix(sale, total) {
+  const pays = Array.isArray(sale?.payments) ? sale.payments : [];
+  if (pays.length === 0) return { Cash: total };
+
+  const mix = {};
+  const buckets = [];
+  for (const p of pays) {
+    const method = p?.method || "Cash";
+    if (mix[method] == null) {
+      mix[method] = 0;
+      buckets.push({ method, cash: isCashMethod(p?.method) });
+    }
+    mix[method] += N(p?.amount);
+  }
+
+  let change = N(sale?.change);
+  if (change <= 0) return mix;
+
+  buckets.sort((a, b) => Number(b.cash) - Number(a.cash));
+  for (const bucket of buckets) {
+    if (change <= 0) break;
+    const take = Math.min(change, mix[bucket.method]);
+    mix[bucket.method] -= take;
+    change -= take;
+  }
+
+  return mix;
+}
+
 export function aggregateForRange(sales, from, to, categoriesMap, subCategoriesMap) {
   let revenue = 0, tx = 0, discounts = 0;
   const byDate = {};
@@ -72,13 +113,8 @@ export function aggregateForRange(sales, from, to, categoriesMap, subCategoriesM
     /* =========================
        Payment mix
        ========================= */
-    const pays = Array.isArray(s?.payments) ? s.payments : [];
-    if (pays.length === 0) payMix["Cash"] = (payMix["Cash"] || 0) + total;
-    else {
-      for (const p of pays) {
-        const method = p?.method || "Cash";
-        payMix[method] = (payMix[method] || 0) + N(p?.amount);
-      }
+    for (const [method, amount] of Object.entries(salePaymentMix(s, total))) {
+      payMix[method] = (payMix[method] || 0) + amount;
     }
 
     /* =========================

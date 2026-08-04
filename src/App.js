@@ -16,6 +16,7 @@ import GRPage from "./pages/GRPage";
 import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import StockReconciliationPage from "./pages/StockReconciliationPage";
+import StockWriteOffPage from "./pages/StockWriteOffPage";
 
 // Payment Request
 import PaymentRequestPage from "./pages/payment-request/PaymentRequestPage";
@@ -34,6 +35,7 @@ import MasterStoreLocationPage from "./pages/master/MasterStoreLocationPage";
 import MasterRecipePage from "./pages/master/MasterRecipePage";
 import MasterDiscountPage from "./pages/master/MasterDiscountPage";
 import AdditionalChargePage from "./pages/master/AdditionalChargePage";
+import VoidSecurityCodePage from "./pages/master/VoidSecurityCodePage";
 
 /* ===== AUTH / API ===== */
 import { isLoggedIn, logoutRequest } from "./api/auth";
@@ -403,6 +405,14 @@ function AppShell() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/master/void-security-code"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <VoidSecurityCodePage />
+              </ProtectedRoute>
+            }
+          />
 
           {/* ===== RECONCILIATION ===== */}
           <Route
@@ -418,6 +428,16 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
                 <StockReconciliationPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ===== WASTE / WRITE-OFF ===== */}
+          <Route
+            path="/inventory/write-off"
+            element={
+              <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
+                <StockWriteOffPage />
               </ProtectedRoute>
             }
           />

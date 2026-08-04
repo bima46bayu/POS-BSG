@@ -17,6 +17,28 @@ import Pill from "./Pill";
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
+/** Format date-only fields (avoid UTC midnight showing as previous/next day with time). */
+const formatDate = (s) => {
+  if (!s) return "-";
+  const raw = String(s);
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return d.toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  }
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+};
+
 function remainOfItem(it) {
   const r = Number(it?.qty_remaining);
   if (Number.isFinite(r)) return Math.max(0, r);
@@ -98,7 +120,14 @@ export default function PurchaseDetailDrawer({
       product_id: it.product_id,
       product_label: it.product_label ?? it?.product?.name ?? `#${it.product_id}`,
       name: it.product_label ?? it?.product?.name ?? `#${it.product_id}`,
-      unit: it.unit ?? it.uom ?? "Unit",
+      unit:
+        it.unit_name ||
+        it.unit?.name ||
+        it?.product?.unit_name ||
+        it?.product?.unit?.name ||
+        it.uom ||
+        (typeof it.unit === "string" ? it.unit : null) ||
+        "—",
       qty_order: num(it.qty_order),
       qty_received_so_far: num(it.qty_received_so_far ?? it.qty_received),
       qty_remaining: remainOfItem(it),
@@ -205,11 +234,11 @@ export default function PurchaseDetailDrawer({
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
                     <div className="flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-gray-400" />
-                      <span>Order: {purchase.order_date ?? "-"}</span>
+                      <span>Order: {formatDate(purchase.order_date)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-gray-400" />
-                      <span>Expected: {purchase.expected_date ?? "-"}</span>
+                      <span>Expected: {formatDate(purchase.expected_date)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span>Status:</span>
@@ -244,6 +273,7 @@ export default function PurchaseDetailDrawer({
                         <tr>
                           <th className="p-3 text-left whitespace-nowrap">Product</th>
                           <th className="p-3 text-right whitespace-nowrap">Qty Order</th>
+                          <th className="p-3 text-left whitespace-nowrap">Satuan</th>
                           <th className="p-3 text-right whitespace-nowrap">Received</th>
                           <th className="p-3 text-right whitespace-nowrap">Remain</th>
                           <th className="p-3 text-right whitespace-nowrap">Unit Price</th>
@@ -260,6 +290,7 @@ export default function PurchaseDetailDrawer({
                             <tr key={it.key} className="border-t">
                               <td className="p-3">{it.product_label}</td>
                               <td className="p-3 text-right whitespace-nowrap">{it.qty_order}</td>
+                              <td className="p-3 whitespace-nowrap">{it.unit}</td>
                               <td className="p-3 text-right whitespace-nowrap">{it.qty_received_so_far}</td>
                               <td className="p-3 text-right whitespace-nowrap">{remain}</td>
                               <td className="p-3 text-right whitespace-nowrap">{it.unit_price.toLocaleString("id-ID")}</td>
@@ -302,7 +333,7 @@ export default function PurchaseDetailDrawer({
                         })}
                         {items.length === 0 && (
                           <tr>
-                            <td className="p-3 text-center text-gray-500" colSpan={7}>
+                            <td className="p-3 text-center text-gray-500" colSpan={8}>
                               Tidak ada item.
                             </td>
                           </tr>

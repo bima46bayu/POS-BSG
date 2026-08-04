@@ -12,6 +12,7 @@ import {
   Download,
   X,
   ListChecks,
+  Trash,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import DataTable from "../components/data-table/DataTable";
@@ -623,6 +624,16 @@ export default function InventoryProductsPage() {
             >
               <Download className="w-4 h-4" />
               Export
+            </button>
+
+            {/* Waste / write-off */}
+            <button
+              onClick={() => navigate("/inventory/write-off")}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-rose-700 bg-white border border-rose-300 rounded-lg hover:bg-rose-50"
+              title="Waste / Write-off"
+            >
+              <Trash className="w-4 h-4" />
+              Waste
             </button>
 
             {/* Reconciliation */}

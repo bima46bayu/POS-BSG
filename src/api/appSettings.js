@@ -52,3 +52,20 @@ export async function uploadPaymentRequestSignature(file, { signerId, role } = {
   );
   return data;
 }
+
+export async function getVoidSecurityCodeStatus(params = {}, signal) {
+  const { data } = await api.get("/api/settings/void-security-code", {
+    params,
+    signal,
+  });
+  return data;
+}
+
+export async function updateVoidSecurityCode(securityCode, storeLocationId) {
+  const { data } = await api.put("/api/settings/void-security-code", {
+    store_location_id: storeLocationId,
+    security_code: securityCode,
+    security_code_confirmation: securityCode,
+  });
+  return data;
+}

@@ -53,6 +53,16 @@ export function branchStoresForParent(stores, parentId, me) {
   return [...options, ...children];
 }
 
+/**
+ * Ids in parent scope: parent A + branches B,C → [A,B,C].
+ * Used when Branch Store = "Semua cabang".
+ */
+export function storeIdsUnderParent(stores, parentId, me) {
+  return branchStoresForParent(stores, parentId, me)
+    .map((s) => Number(s.id))
+    .filter((id) => Number.isFinite(id));
+}
+
 /** Resolve parent id from a branch or root store id. */
 export function parentIdForStore(stores, storeId) {
   if (!storeId) return "";

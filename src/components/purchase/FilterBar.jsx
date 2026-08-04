@@ -1,6 +1,6 @@
 // src/components/purchase/FilterBar.jsx
 import React, { useMemo, useRef, useState } from "react";
-import { Download, Filter, X, Search, Store as StoreIcon } from "lucide-react";
+import { Download, Filter, X, Search } from "lucide-react";
 
 export default function FilterBar({
   value,
@@ -9,16 +9,13 @@ export default function FilterBar({
   onExport,
   filters = {},
   setFilters,
-  stores = [],
-  storeId,
-  onChangeStore,
-  isAdmin,
+  addDisabled = false,
+  storeFilter = null,
 }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
-  // === HANYA hitung status + date range, BUKAN store ===
   const activeCount = useMemo(() => {
     const keys = ["status", "from", "to"];
     return keys.reduce((num, k) => (filters?.[k] ? num + 1 : num), 0);
@@ -44,11 +41,12 @@ export default function FilterBar({
 
   return (
     <div className="w-full">
-      {/* Card full width */}
-      <div className="w-full bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-        {/* Bar full width: search grow, buttons shrink */}
+      <div className="w-full bg-white border border-gray-200 rounded-lg p-3 shadow-sm space-y-3">
+        {storeFilter ? (
+          <div className="flex flex-wrap items-center gap-2">{storeFilter}</div>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-2 w-full">
-          {/* SEARCH (grow full) */}
           <div className="relative flex-1 min-w-[260px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
@@ -68,35 +66,6 @@ export default function FilterBar({
             ) : null}
           </div>
 
-          {/* STORE FILTER ala ProductPage */}
-          <div className="relative">
-            <select
-              value={storeId || ""}
-              onChange={(e) => {
-                if (!isAdmin) return; // kasir tidak bisa ganti
-                onChangeStore?.(e.target.value);
-              }}
-              disabled={!isAdmin || stores.length === 0}
-              className="pl-9 pr-8 h-10 border border-gray-300 rounded-lg text-sm text-gray-700 appearance-none min-w-[160px] focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400 disabled:border-gray-200"
-            >
-              {isAdmin && <option value="">Semua Store</option>}
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            <StoreIcon className="w-4 h-4 text-gray-500 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <svg
-              className="w-4 h-4 text-gray-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" />
-            </svg>
-          </div>
-
-          {/* FILTER POPUP BUTTON */}
           <button
             ref={btnRef}
             onClick={toggle}
@@ -111,7 +80,6 @@ export default function FilterBar({
             )}
           </button>
 
-          {/* EXPORT */}
           <button
             onClick={onExport}
             className="inline-flex items-center gap-2 h-10 px-3 shrink-0 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -120,10 +88,10 @@ export default function FilterBar({
             <span>Export</span>
           </button>
 
-          {/* ADD (kanan) */}
           <button
             onClick={onAdd}
-            className="inline-flex items-center gap-2 h-10 px-4 shrink-0 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm"
+            disabled={addDisabled}
+            className="inline-flex items-center gap-2 h-10 px-4 shrink-0 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <span className="text-lg leading-none">+</span>
             <span>Add Purchase</span>
@@ -131,10 +99,8 @@ export default function FilterBar({
         </div>
       </div>
 
-      {/* Overlay popover */}
       {open && <div className="fixed inset-0 z-40" onMouseDown={() => setOpen(false)} />}
 
-      {/* Panel popover nempel tombol */}
       {open && (
         <div
           className="fixed z-50 w-[22rem] bg-white rounded-xl shadow-lg border border-gray-200"
@@ -153,7 +119,6 @@ export default function FilterBar({
             </div>
 
             <div className="space-y-3">
-              {/* Status */}
               <div>
                 <label className="block text-xs text-gray-600 mb-1">Status</label>
                 <select
@@ -175,7 +140,6 @@ export default function FilterBar({
                 </select>
               </div>
 
-              {/* Date Range */}
               <div>
                 <label className="block text-xs text-gray-600 mb-1">
                   Date Range

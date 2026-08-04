@@ -361,6 +361,49 @@ function txPaymentLabels(tx) {
   return [paymentMethodLabel(tx?.payment_method || tx?.method)];
 }
 
+const isCashMethod = (method) => {
+  const key = String(method || "").trim().toLowerCase();
+  return key === "" || key === "cash" || key === "tunai";
+};
+
+/**
+ * Amount per payment method, net of change.
+ *
+ * Payment rows store what the customer handed over, not what they owed, so the
+ * change given back has to come off the mix (cash first) to keep it equal to
+ * revenue.
+ */
+function txPaymentMix(tx) {
+  const payments = Array.isArray(tx?.payments) ? tx.payments : [];
+  if (payments.length === 0) {
+    return { [txPaymentLabels(tx)[0] || "Cash"]: txTotal(tx) };
+  }
+
+  const mix = {};
+  const buckets = [];
+  for (const p of payments) {
+    const method = paymentMethodLabel(p?.method);
+    if (mix[method] == null) {
+      mix[method] = 0;
+      buckets.push({ method, cash: isCashMethod(p?.method) });
+    }
+    mix[method] += N(p?.amount);
+  }
+
+  let change = N(tx?.change);
+  if (change <= 0) return mix;
+
+  buckets.sort((a, b) => Number(b.cash) - Number(a.cash));
+  for (const bucket of buckets) {
+    if (change <= 0) break;
+    const take = Math.min(change, mix[bucket.method]);
+    mix[bucket.method] -= take;
+    change -= take;
+  }
+
+  return mix;
+}
+
 function summarize(sales) {
   let revenue = 0;
   let tx = 0;
@@ -381,14 +424,8 @@ function summarize(sales) {
     itemsGross += txItemsGross(sale);
     additionalCharge += txAdditionalCharge(sale);
 
-    const payments = Array.isArray(sale?.payments) ? sale.payments : [];
-    if (payments.length === 0) {
-      payMix.Cash = (payMix.Cash || 0) + total;
-    } else {
-      for (const p of payments) {
-        const method = paymentMethodLabel(p?.method);
-        payMix[method] = (payMix[method] || 0) + N(p?.amount);
-      }
+    for (const [method, amount] of Object.entries(txPaymentMix(sale))) {
+      payMix[method] = (payMix[method] || 0) + amount;
     }
   }
 
@@ -444,14 +481,8 @@ function buildDailyBreakdown(sales) {
       row.products[name].revenue += lineTotal;
     }
 
-    const payments = Array.isArray(sale?.payments) ? sale.payments : [];
-    if (payments.length === 0) {
-      row.methods.Cash = (row.methods.Cash || 0) + N(sale?.total);
-    } else {
-      for (const p of payments) {
-        const method = paymentMethodLabel(p?.method);
-        row.methods[method] = (row.methods[method] || 0) + N(p?.amount);
-      }
+    for (const [method, amount] of Object.entries(txPaymentMix(sale))) {
+      row.methods[method] = (row.methods[method] || 0) + amount;
     }
   }
 
@@ -1188,15 +1219,8 @@ function buildTransactionDailyBreakdown(sales) {
     row.additionalCharge += additionalCharge;
 
     const labels = txPaymentLabels(sale);
-    const payments = Array.isArray(sale?.payments) ? sale.payments : [];
-    if (payments.length > 0) {
-      for (const p of payments) {
-        const method = paymentMethodLabel(p?.method);
-        row.methods[method] = (row.methods[method] || 0) + N(p?.amount);
-      }
-    } else {
-      const fallback = labels[0] || "Cash";
-      row.methods[fallback] = (row.methods[fallback] || 0) + total;
+    for (const [method, amount] of Object.entries(txPaymentMix(sale))) {
+      row.methods[method] = (row.methods[method] || 0) + amount;
     }
 
     row.transactions.push({

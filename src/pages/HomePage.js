@@ -31,7 +31,6 @@ import {
 import { aggregateForRange } from "../lib/aggregate";
 import { exportToPDF } from "../lib/exportPdf";
 import { isHqAdmin, isKasir } from "../utils/roles";
-import { parentIdForStore, storeLabel } from "../utils/storeScope";
 import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
 
 /* ========== Master data ringan ========== */
@@ -220,6 +219,14 @@ export default function HomePage() {
           : "",
     }));
   }, [storeScope.effectiveStoreId]);
+
+  /** null = all stores; otherwise only these ids (parent scope or one branch) */
+  const scopedStoreIdSet = React.useMemo(() => {
+    const ids = storeScope.effectiveStoreIds;
+    if (ids == null) return null;
+    return new Set(ids.map((id) => String(id)));
+  }, [storeScope.effectiveStoreIds]);
+
   const categoriesQ = useQuery({
     queryKey: ["categories", { storeId: filters.storeId || "all" }],
     queryFn: ({ signal }) => fetchCategories(signal, filters.storeId),
@@ -236,9 +243,18 @@ export default function HomePage() {
     queryKey: ["sales-dashboard", {
       from: filters.from,
       to: filters.to,
-      store_location_id: filters.storeId || undefined,
-      only_discount: filters.onlyDiscount ? 1 : undefined, // kirim 1 kalau true
-      is_discount:   filters.onlyDiscount ? 1 : undefined, // mirror untuk kompat
+      store_location_id:
+        storeScope.effectiveStoreId != null
+          ? storeScope.effectiveStoreId
+          : undefined,
+      store_location_ids:
+        storeScope.effectiveStoreId == null &&
+        Array.isArray(storeScope.effectiveStoreIds) &&
+        storeScope.effectiveStoreIds.length > 0
+          ? storeScope.effectiveStoreIds.join(",")
+          : undefined,
+      only_discount: filters.onlyDiscount ? 1 : undefined,
+      is_discount: filters.onlyDiscount ? 1 : undefined,
       code: filters.search || undefined,
     }],
     queryFn: async ({ queryKey, signal }) => {
@@ -260,22 +276,25 @@ export default function HomePage() {
     [subCategoriesQ.data]
   );
 
-  // Filter FE
+  // Filter FE (parent+semua cabang → only A,B,C under that parent)
   const filterNonDate = React.useCallback((s) => {
     if (String(s?.status || "").toLowerCase() === "void") return false;
-    if (filters.storeId) {
-      const sl = s?.cashier?.store_location || s?.cashier?.storeLocation;
+    if (scopedStoreIdSet) {
+      const sl =
+        s?.store_location ||
+        s?.storeLocation ||
+        s?.cashier?.store_location ||
+        s?.cashier?.storeLocation;
       const sid = sl?.id ?? s?.store_location_id ?? null;
-      if (String(sid || "") !== String(filters.storeId)) return false;
+      if (!scopedStoreIdSet.has(String(sid ?? ""))) return false;
     }
-    // pakai deteksi diskon robust
     if (filters.onlyDiscount && !hasDiscount(s)) return false;
     if (filters.search) {
       const hay = `${s?.code || ""} ${s?.customer_name || ""} ${s?.cashier?.name || ""} ${JSON.stringify(s?.items || [])}`.toLowerCase();
       if (!hay.includes(filters.search.toLowerCase())) return false;
     }
     return true;
-  }, [filters]);
+  }, [filters, scopedStoreIdSet]);
 
   const rangeSales = React.useMemo(() => {
     const fromTs = filters.from ? new Date(filters.from + "T00:00:00").getTime() : -Infinity;
@@ -418,11 +437,7 @@ export default function HomePage() {
 
   const handleExport = () =>
     exportToPDF(rangeSales, filters, aggRange, {
-      selectedStoreLabel:
-        filters.storeId
-          ? storeLabelById.get(String(filters.storeId)) ||
-            storeLabel(storesQ.data || [], filters.storeId, "Cabang")
-          : "Semua cabang",
+      selectedStoreLabel: storeScope.activeStoreLabel || "Semua cabang",
       storeLabelById,
     });
 
@@ -468,7 +483,10 @@ export default function HomePage() {
       series: [{ key: "total", name: "Total Pendapatan", color: "#2563EB" }],
     };
 
-    if (filters.storeId) return single;
+    const multiScope =
+      !filters.storeId &&
+      (scopedStoreIdSet == null || scopedStoreIdSet.size !== 1);
+    if (!multiScope) return single;
 
     const storeMeta = new Map();
     for (const s of rangeSales) {
@@ -510,7 +528,7 @@ export default function HomePage() {
     });
 
     return { mode: "multi", data, series };
-  }, [filters.storeId, aggRange.trendTotal, rangeSales, storeNameById, dateList]);
+  }, [filters.storeId, scopedStoreIdSet, aggRange.trendTotal, rangeSales, storeNameById, dateList]);
 
   /* ===== UI ===== */
 
