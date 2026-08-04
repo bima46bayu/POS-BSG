@@ -844,7 +844,8 @@ function drawCashReconciliation(doc, ctx, y, summary, scopeLabel) {
     doc,
     tableOptions(doc, ctx, {
       startY: y + 6,
-      head: [["Transaksi", "Tanggal", "Metode", "Diterima", "Kembalian", "Nilai Transaksi"]],
+      tableWidth: contentWidth(doc),
+      head: [["Transaksi", "Tanggal", "Metode", "Diterima", "Kembalian", "Nilai"]],
       body: rows.map((r) => [
         r.code,
         r.at ? fmtDateTime(r.at) : "-",
@@ -861,11 +862,18 @@ function drawCashReconciliation(doc, ctx, y, summary, scopeLabel) {
         IDR(rows.reduce((s, r) => s + r.change, 0)),
         IDR(rows.reduce((s, r) => s + r.total, 0)),
       ]],
-      columnStyles: {
-        3: { halign: "right", cellWidth: 82 },
-        4: { halign: "right", cellWidth: 82 },
-        5: { halign: "right", cellWidth: 90 },
-      },
+      columnStyles: (() => {
+        const tw = contentWidth(doc);
+        const fixed = 72 + 72 + 72 + 78; // diterima + kembalian + nilai + metode-ish
+        return {
+          0: { cellWidth: Math.max(90, tw - fixed - 110) },
+          1: { cellWidth: 110 },
+          2: { cellWidth: 72 },
+          3: { halign: "right", cellWidth: 72 },
+          4: { halign: "right", cellWidth: 72 },
+          5: { halign: "right", cellWidth: 78 },
+        };
+      })(),
     })
   );
   y = doc.lastAutoTable.finalY + 10;
@@ -952,6 +960,7 @@ function drawSummaryTables(doc, ctx, y, summary) {
       doc,
       tableOptions(doc, ctx, {
         startY: y + 6,
+        tableWidth: contentWidth(doc),
         head: [["Transaksi", "Tanggal", "Diterima", "Kembalian", "Nilai"]],
         body: rows.map((r) => [
           r.code,
@@ -967,11 +976,17 @@ function drawSummaryTables(doc, ctx, y, summary) {
           IDR(rows.reduce((s, r) => s + r.change, 0)),
           IDR(rows.reduce((s, r) => s + r.total, 0)),
         ]],
-        columnStyles: {
-          2: { halign: "right", cellWidth: 88 },
-          3: { halign: "right", cellWidth: 88 },
-          4: { halign: "right", cellWidth: 88 },
-        },
+        columnStyles: (() => {
+          const tw = contentWidth(doc);
+          const money = 78;
+          return {
+            0: { cellWidth: tw - 110 - money * 3 },
+            1: { cellWidth: 110 },
+            2: { halign: "right", cellWidth: money },
+            3: { halign: "right", cellWidth: money },
+            4: { halign: "right", cellWidth: money },
+          };
+        })(),
       })
     );
     y = doc.lastAutoTable.finalY + 18;
@@ -1448,8 +1463,7 @@ function buildTransactionDailyBreakdown(sales) {
                 item?.name ||
                 `Produk #${item?.product_id ?? idx + 1}`;
               const qty = N(item?.qty ?? item?.quantity ?? 1);
-              const sku = item?.product?.sku || item?.product_sku;
-              return `${productName}${sku ? ` (${sku})` : ""} x${fmtNum(qty)}`;
+              return `${productName} x${fmtNum(qty)}`;
             })
             .join("\n")
         : "-",
@@ -1497,14 +1511,39 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
 
     setText(doc, COLOR.slate, 8.6, "bold");
     doc.text("1. BREAKDOWN TRANSAKSI", MARGIN, y);
+
+    // Fit exactly to the printable width so columns never spill past the margin.
+    const tw = contentWidth(doc);
+    const col = {
+      code: 74,
+      metode: 38,
+      harga: 54,
+      diskon: 42,
+      charge: 46,
+      diterima: 54,
+      kembalian: 50,
+      total: 54,
+    };
+    col.item =
+      tw -
+      (col.code +
+        col.metode +
+        col.harga +
+        col.diskon +
+        col.charge +
+        col.diterima +
+        col.kembalian +
+        col.total);
+
     autoTable(
       doc,
       tableOptions(doc, ctx, {
         startY: y + 6,
+        tableWidth: tw,
         styles: {
           font: "helvetica",
-          fontSize: 7.8,
-          cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
+          fontSize: 7.2,
+          cellPadding: { top: 3.5, right: 2.5, bottom: 3.5, left: 2.5 },
           lineColor: COLOR.border,
           lineWidth: 0.5,
           textColor: COLOR.ink,
@@ -1515,8 +1554,15 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
           fillColor: COLOR.navy,
           textColor: COLOR.white,
           fontStyle: "bold",
-          fontSize: 7.6,
-          cellPadding: { top: 5, right: 4, bottom: 5, left: 4 },
+          fontSize: 6.8,
+          cellPadding: { top: 4.5, right: 2.5, bottom: 4.5, left: 2.5 },
+        },
+        footStyles: {
+          fillColor: COLOR.softBlue,
+          textColor: COLOR.navy,
+          fontStyle: "bold",
+          fontSize: 6.8,
+          cellPadding: { top: 3.5, right: 2.5, bottom: 3.5, left: 2.5 },
         },
         head: [[
           "Kode",
@@ -1535,7 +1581,7 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
           row.methods,
           IDR(row.productPrice),
           row.discount > 0 ? IDR(row.discount) : "-",
-          IDR(row.additionalCharge),
+          row.additionalCharge > 0 ? IDR(row.additionalCharge) : "-",
           IDR(row.tendered),
           row.change > 0 ? IDR(row.change) : "-",
           IDR(row.total),
@@ -1548,19 +1594,19 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
           IDR(day.discounts),
           IDR(day.additionalCharge),
           IDR(day.tendered),
-          IDR(day.changeGiven),
+          day.changeGiven > 0 ? IDR(day.changeGiven) : "-",
           IDR(day.revenue),
         ]],
         columnStyles: {
-          0: { cellWidth: 82 },
-          1: { cellWidth: 118 },
-          2: { cellWidth: 42, halign: "center" },
-          3: { halign: "right", cellWidth: 58 },
-          4: { halign: "right", cellWidth: 48 },
-          5: { halign: "right", cellWidth: 48 },
-          6: { halign: "right", cellWidth: 58 },
-          7: { halign: "right", cellWidth: 58 },
-          8: { halign: "right", cellWidth: 62 },
+          0: { cellWidth: col.code },
+          1: { cellWidth: col.item },
+          2: { cellWidth: col.metode, halign: "center" },
+          3: { halign: "right", cellWidth: col.harga },
+          4: { halign: "right", cellWidth: col.diskon },
+          5: { halign: "right", cellWidth: col.charge },
+          6: { halign: "right", cellWidth: col.diterima },
+          7: { halign: "right", cellWidth: col.kembalian },
+          8: { halign: "right", cellWidth: col.total },
         },
         didParseCell: (data) => {
           if (data.column.index !== 7) return;
