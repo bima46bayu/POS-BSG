@@ -17,6 +17,7 @@ const COLOR = {
   white: [255, 255, 255],
   green: [5, 150, 105],
   amber: [217, 119, 6],
+  red: [220, 38, 38],
 };
 
 const MARGIN = 40;
@@ -404,6 +405,13 @@ function txPaymentMix(tx) {
   return mix;
 }
 
+/** Raw amount handed over by the customer, before change is returned. */
+function txTendered(tx) {
+  const payments = Array.isArray(tx?.payments) ? tx.payments : [];
+  if (payments.length === 0) return txTotal(tx);
+  return payments.reduce((sum, p) => sum + N(p?.amount), 0);
+}
+
 function summarize(sales) {
   let revenue = 0;
   let tx = 0;
@@ -412,7 +420,10 @@ function summarize(sales) {
   let itemsRevenue = 0;
   let itemsGross = 0;
   let additionalCharge = 0;
+  let tendered = 0;
+  let changeGiven = 0;
   const payMix = {};
+  const changeSales = [];
 
   for (const sale of sales) {
     const total = N(sale?.final_total ?? sale?.total);
@@ -423,6 +434,22 @@ function summarize(sales) {
     itemsRevenue += txItemsRevenue(sale);
     itemsGross += txItemsGross(sale);
     additionalCharge += txAdditionalCharge(sale);
+
+    const paid = txTendered(sale);
+    const change = Math.max(0, N(sale?.change));
+    tendered += paid;
+    changeGiven += change;
+
+    if (change > 0) {
+      changeSales.push({
+        code: sale?.code || sale?.number || "-",
+        at: sale?.created_at || sale?.createdAt || null,
+        total,
+        tendered: paid,
+        change,
+        methods: txPaymentLabels(sale).join(" / "),
+      });
+    }
 
     for (const [method, amount] of Object.entries(txPaymentMix(sale))) {
       payMix[method] = (payMix[method] || 0) + amount;
@@ -437,6 +464,9 @@ function summarize(sales) {
     itemsRevenue,
     itemsGross,
     additionalCharge,
+    tendered,
+    changeGiven,
+    changeSales: changeSales.sort((a, b) => b.change - a.change),
     aov: tx ? revenue / tx : 0,
     paymentMix: Object.entries(payMix)
       .map(([method, amount]) => ({ method, amount }))
@@ -459,6 +489,9 @@ function buildDailyBreakdown(sales) {
         revenue: 0,
         discounts: 0,
         itemsQty: 0,
+        tendered: 0,
+        changeGiven: 0,
+        changeTx: 0,
         products: {},
         methods: {},
       });
@@ -468,6 +501,10 @@ function buildDailyBreakdown(sales) {
     row.tx += 1;
     row.revenue += N(sale?.total);
     row.discounts += txTotalDiscount(sale);
+    row.tendered += txTendered(sale);
+    const dayChange = Math.max(0, N(sale?.change));
+    row.changeGiven += dayChange;
+    if (dayChange > 0) row.changeTx += 1;
 
     const items = Array.isArray(sale?.items) ? sale.items : [];
     for (const it of items) {
@@ -718,10 +755,137 @@ function drawDailyDetail(doc, ctx, y, sales) {
         },
       })
     );
-    y = doc.lastAutoTable.finalY + 20;
+    y = doc.lastAutoTable.finalY + 12;
+
+    if (day.changeGiven > 0) {
+      setText(doc, COLOR.amber, 7.8, "normal");
+      doc.text(
+        `Diterima ${IDR(day.tendered)} - kembalian ${IDR(day.changeGiven)} (${fmtNum(
+          day.changeTx
+        )} transaksi) = penerimaan bersih ${IDR(day.tendered - day.changeGiven)}.`,
+        MARGIN,
+        y
+      );
+      y += 12;
+    }
+
+    y += 8;
   }
 
   return y;
+}
+
+const CHANGE_ROWS_LIMIT = 40;
+
+/**
+ * Bridges tendered cash to net revenue so the two totals can never look like an
+ * unexplained gap: every rupiah of change is listed with the sale that returned it.
+ */
+function drawCashReconciliation(doc, ctx, y, summary, scopeLabel) {
+  const net = summary.tendered - summary.changeGiven;
+  const variance = net - summary.revenue;
+
+  y = ensureSpace(doc, ctx, y, 150);
+  y = sectionHeading(doc, "Rekonsiliasi Uang Diterima", y, scopeLabel);
+
+  autoTable(
+    doc,
+    tableOptions(doc, ctx, {
+      startY: y,
+      head: [["Keterangan", "Nominal"]],
+      body: [
+        ["Uang diterima dari pelanggan", IDR(summary.tendered)],
+        [
+          `Kembalian dikembalikan (${fmtNum(summary.changeSales.length)} transaksi)`,
+          `- ${IDR(summary.changeGiven)}`,
+        ],
+        ["Penerimaan bersih (masuk kas/rekening)", IDR(net)],
+        ["Total Pendapatan (nilai barang terjual)", IDR(summary.revenue)],
+      ],
+      foot: [[
+        variance === 0 ? "Selisih — seimbang" : "Selisih — perlu ditelusuri",
+        IDR(variance),
+      ]],
+      columnStyles: {
+        1: { halign: "right", cellWidth: 150, fontStyle: "bold" },
+      },
+      didParseCell: (data) => {
+        if (data.section === "body" && data.row.index === 1) {
+          data.cell.styles.textColor = COLOR.amber;
+        }
+        if (data.section === "foot" && variance !== 0) {
+          data.cell.styles.textColor = COLOR.red;
+        }
+      },
+    })
+  );
+  y = doc.lastAutoTable.finalY + 12;
+
+  setText(doc, COLOR.muted, 7.8, "normal");
+  doc.text(
+    "Kembalian bukan pendapatan: uang tersebut kembali ke pelanggan, sehingga tidak masuk kas maupun rekening.",
+    MARGIN,
+    y
+  );
+  y += 14;
+
+  if (summary.changeSales.length === 0) {
+    setText(doc, COLOR.muted, 8, "normal");
+    doc.text("Tidak ada transaksi dengan kembalian pada periode ini.", MARGIN, y);
+    return y + 16;
+  }
+
+  const rows = summary.changeSales.slice(0, CHANGE_ROWS_LIMIT);
+  y = ensureSpace(doc, ctx, y, 120);
+  setText(doc, COLOR.slate, 8.6, "bold");
+  doc.text("TRANSAKSI DENGAN KEMBALIAN", MARGIN, y);
+
+  autoTable(
+    doc,
+    tableOptions(doc, ctx, {
+      startY: y + 6,
+      head: [["Transaksi", "Tanggal", "Metode", "Diterima", "Kembalian", "Nilai Transaksi"]],
+      body: rows.map((r) => [
+        r.code,
+        r.at ? fmtDateTime(r.at) : "-",
+        r.methods || "-",
+        IDR(r.tendered),
+        IDR(r.change),
+        IDR(r.total),
+      ]),
+      foot: [[
+        "Total",
+        "",
+        "",
+        IDR(rows.reduce((s, r) => s + r.tendered, 0)),
+        IDR(rows.reduce((s, r) => s + r.change, 0)),
+        IDR(rows.reduce((s, r) => s + r.total, 0)),
+      ]],
+      columnStyles: {
+        3: { halign: "right", cellWidth: 82 },
+        4: { halign: "right", cellWidth: 82 },
+        5: { halign: "right", cellWidth: 90 },
+      },
+    })
+  );
+  y = doc.lastAutoTable.finalY + 10;
+
+  const hidden = summary.changeSales.length - rows.length;
+  if (hidden > 0) {
+    setText(doc, COLOR.muted, 7.8, "normal");
+    doc.text(
+      `Menampilkan ${fmtNum(rows.length)} kembalian terbesar dari ${fmtNum(
+        summary.changeSales.length
+      )} transaksi. Sisa ${fmtNum(hidden)} transaksi senilai ${IDR(
+        summary.changeGiven - rows.reduce((s, r) => s + r.change, 0)
+      )} tidak ditampilkan.`,
+      MARGIN,
+      y
+    );
+    y += 14;
+  }
+
+  return y + 6;
 }
 
 function drawSummaryTables(doc, ctx, y, summary) {
@@ -736,6 +900,8 @@ function drawSummaryTables(doc, ctx, y, summary) {
         ["Total Item Terjual", fmtNum(summary.itemsQty)],
         ["Rata-rata per Transaksi", IDR(summary.aov)],
         ["Total Diskon", IDR(summary.discounts)],
+        ["Uang Diterima (sebelum kembalian)", IDR(summary.tendered)],
+        ["Kembalian Dikembalikan", `- ${IDR(summary.changeGiven)}`],
       ],
       columnStyles: {
         1: { halign: "right", cellWidth: 160, fontStyle: "bold" },
@@ -775,8 +941,43 @@ function drawSummaryTables(doc, ctx, y, summary) {
       },
     })
   );
+  y = doc.lastAutoTable.finalY + 18;
 
-  return doc.lastAutoTable.finalY + 18;
+  if (summary.changeSales.length > 0) {
+    const rows = summary.changeSales.slice(0, CHANGE_ROWS_LIMIT);
+    y = ensureSpace(doc, ctx, y, 110);
+    setText(doc, COLOR.slate, 8.6, "bold");
+    doc.text("KEMBALIAN PER TRANSAKSI", MARGIN, y);
+    autoTable(
+      doc,
+      tableOptions(doc, ctx, {
+        startY: y + 6,
+        head: [["Transaksi", "Tanggal", "Diterima", "Kembalian", "Nilai"]],
+        body: rows.map((r) => [
+          r.code,
+          r.at ? fmtDateTime(r.at) : "-",
+          IDR(r.tendered),
+          IDR(r.change),
+          IDR(r.total),
+        ]),
+        foot: [[
+          "Total",
+          "",
+          IDR(rows.reduce((s, r) => s + r.tendered, 0)),
+          IDR(rows.reduce((s, r) => s + r.change, 0)),
+          IDR(rows.reduce((s, r) => s + r.total, 0)),
+        ]],
+        columnStyles: {
+          2: { halign: "right", cellWidth: 88 },
+          3: { halign: "right", cellWidth: 88 },
+          4: { halign: "right", cellWidth: 88 },
+        },
+      })
+    );
+    y = doc.lastAutoTable.finalY + 18;
+  }
+
+  return y;
 }
 
 function drawGrandTotalBox(doc, y, totals) {
@@ -1136,6 +1337,9 @@ export function exportToPDF(data, filters, aggRange, options = {}) {
       },
     })
   );
+  y = doc.lastAutoTable.finalY + 20;
+
+  y = drawCashReconciliation(doc, ctx, y, totals, scopeLabel);
 
   /* ---------- Per branch pages ---------- */
   for (const group of groups) {
@@ -1201,6 +1405,9 @@ function buildTransactionDailyBreakdown(sales) {
         itemsGross: 0,
         discounts: 0,
         additionalCharge: 0,
+        tendered: 0,
+        changeGiven: 0,
+        changeTx: 0,
         methods: {},
         transactions: [],
       });
@@ -1211,12 +1418,17 @@ function buildTransactionDailyBreakdown(sales) {
     const additionalCharge = txAdditionalCharge(sale);
     const productPrice = txItemsGross(sale);
     const discount = txTotalDiscount(sale);
+    const tendered = txTendered(sale);
+    const change = Math.max(0, N(sale?.change));
     row.tx += 1;
     row.revenue += total;
     row.itemsQty += saleItemsQty(sale);
     row.itemsGross += productPrice;
     row.discounts += discount;
     row.additionalCharge += additionalCharge;
+    row.tendered += tendered;
+    row.changeGiven += change;
+    if (change > 0) row.changeTx += 1;
 
     const labels = txPaymentLabels(sale);
     for (const [method, amount] of Object.entries(txPaymentMix(sale))) {
@@ -1245,6 +1457,8 @@ function buildTransactionDailyBreakdown(sales) {
       discount,
       additionalCharge,
       methods: labels.join(" | "),
+      tendered,
+      change,
       total,
     });
   }
@@ -1311,6 +1525,8 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
           "Harga Produk",
           "Diskon",
           "Add. Charge",
+          "Diterima",
+          "Kembalian",
           "Total",
         ]],
         body: day.transactions.map((row) => [
@@ -1320,6 +1536,8 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
           IDR(row.productPrice),
           row.discount > 0 ? IDR(row.discount) : "-",
           IDR(row.additionalCharge),
+          IDR(row.tendered),
+          row.change > 0 ? IDR(row.change) : "-",
           IDR(row.total),
         ]),
         foot: [[
@@ -1329,16 +1547,30 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
           IDR(day.itemsGross),
           IDR(day.discounts),
           IDR(day.additionalCharge),
+          IDR(day.tendered),
+          IDR(day.changeGiven),
           IDR(day.revenue),
         ]],
         columnStyles: {
-          0: { cellWidth: 90 },
-          1: { cellWidth: 145 },
-          2: { cellWidth: 48, halign: "center" },
-          3: { halign: "right", cellWidth: 68 },
-          4: { halign: "right", cellWidth: 58 },
-          5: { halign: "right", cellWidth: 58 },
-          6: { halign: "right", cellWidth: 68 },
+          0: { cellWidth: 82 },
+          1: { cellWidth: 118 },
+          2: { cellWidth: 42, halign: "center" },
+          3: { halign: "right", cellWidth: 58 },
+          4: { halign: "right", cellWidth: 48 },
+          5: { halign: "right", cellWidth: 48 },
+          6: { halign: "right", cellWidth: 58 },
+          7: { halign: "right", cellWidth: 58 },
+          8: { halign: "right", cellWidth: 62 },
+        },
+        didParseCell: (data) => {
+          if (data.column.index !== 7) return;
+          const raw = data.cell.raw;
+          if (data.section === "body" && raw !== "-") {
+            data.cell.styles.textColor = COLOR.amber;
+          }
+          if (data.section === "foot" && day.changeGiven > 0) {
+            data.cell.styles.textColor = COLOR.amber;
+          }
         },
       })
     );
@@ -1375,7 +1607,21 @@ function drawTransactionDailyDetail(doc, ctx, y, sales) {
         },
       })
     );
-    y = doc.lastAutoTable.finalY + 20;
+    y = doc.lastAutoTable.finalY + 12;
+
+    if (day.changeGiven > 0) {
+      setText(doc, COLOR.amber, 7.8, "normal");
+      doc.text(
+        `Diterima ${IDR(day.tendered)} - kembalian ${IDR(day.changeGiven)} (${fmtNum(
+          day.changeTx
+        )} transaksi) = penerimaan bersih ${IDR(day.tendered - day.changeGiven)}.`,
+        MARGIN,
+        y
+      );
+      y += 12;
+    }
+
+    y += 8;
   }
 
   return y;
@@ -1483,6 +1729,9 @@ export function exportTransactionHistoryPDF(data, filters = {}, options = {}) {
       },
     })
   );
+  y = doc.lastAutoTable.finalY + 20;
+
+  y = drawCashReconciliation(doc, ctx, y, totals, scopeLabel);
 
   for (const group of groups) {
     const summary = summarize(group.sales);
