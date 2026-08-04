@@ -316,6 +316,20 @@ function RegisterSummaryTicket({
             </div>
           </>
         )}
+        {(totals?.write_off_qty ?? 0) > 0 && (
+          <>
+            <div className="flex justify-between">
+              <span>Waste / Write-off</span>
+              <span className="font-medium">{totals?.write_off_qty ?? 0} pcs</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Waste Value</span>
+              <span className="font-medium text-red-600">
+                Rp{Number(totals?.write_off_cost ?? 0).toLocaleString("id-ID")}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="border-t border-dashed border-gray-300 my-2" />
@@ -568,6 +582,22 @@ export function RegisterSummaryModal({
                     value={
                       "Rp" +
                       Number(totals?.void_amount ?? 0).toLocaleString("id-ID")
+                    }
+                    highlight="neg"
+                  />
+                </>
+              )}
+              {(totals?.write_off_qty ?? 0) > 0 && (
+                <>
+                  <RegisterSummaryRow
+                    label="Waste / Write-off"
+                    value={`${totals?.write_off_qty ?? 0} pcs`}
+                  />
+                  <RegisterSummaryRow
+                    label="Waste Value"
+                    value={
+                      "Rp" +
+                      Number(totals?.write_off_cost ?? 0).toLocaleString("id-ID")
                     }
                     highlight="neg"
                   />

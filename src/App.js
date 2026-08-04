@@ -16,6 +16,7 @@ import GRPage from "./pages/GRPage";
 import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import StockReconciliationPage from "./pages/StockReconciliationPage";
+import StockWriteOffPage from "./pages/StockWriteOffPage";
 
 // Payment Request
 import PaymentRequestPage from "./pages/payment-request/PaymentRequestPage";
@@ -427,6 +428,16 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
                 <StockReconciliationPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ===== WASTE / WRITE-OFF ===== */}
+          <Route
+            path="/inventory/write-off"
+            element={
+              <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
+                <StockWriteOffPage />
               </ProtectedRoute>
             }
           />
