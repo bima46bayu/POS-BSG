@@ -35,6 +35,16 @@ const fmtIDR = (n) =>
     maximumFractionDigits: 0,
   });
 
+const fmtQty = (n) =>
+  Number(n ?? 0).toLocaleString("id-ID", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
+
+const uomLabel = (row) => row?.unit_name ?? row?.unit?.name ?? row?.uom ?? "-";
+
+const qtyDiff = (a, b) => Math.abs(Number(a ?? 0) - Number(b ?? 0)) > 1e-9;
+
 const ymd = (s) => {
   if (!s) return "";
   const d = new Date(s);
@@ -215,6 +225,7 @@ export default function ReconciliationDetail({ id, onBack }) {
       _rid: r.id ?? `${r.product_id}-${r.sku ?? ""}`,
       _sku: r.sku ?? "",
       _name: r.product_name ?? r.name ?? "-",
+      _uom: uomLabel(r),
       _sys: Number(r.system_qty ?? r.system_stock ?? 0),
       _avg: Number(r.avg_cost ?? 0),
     }));
@@ -300,7 +311,7 @@ export default function ReconciliationDetail({ id, onBack }) {
             ? Number(it.real_stock)
             : null;
 
-        if (edited !== current && (edited === null || Number.isFinite(edited))) {
+        if (qtyDiff(edited, current) && (edited === null || Number.isFinite(edited))) {
           payload.push({ id: it.id, physical_qty: edited });
         }
       }
@@ -356,7 +367,7 @@ export default function ReconciliationDetail({ id, onBack }) {
     {
       key: "_name",
       header: "Nama Produk",
-      width: "320px",
+      width: "280px",
       cell: (row) => (
         <div className="flex flex-col">
           <span className="text-gray-800">{row._name}</span>
@@ -365,11 +376,22 @@ export default function ReconciliationDetail({ id, onBack }) {
       ),
     },
     {
+      key: "_uom",
+      header: "UOM",
+      width: "80px",
+      cell: (row) => <span className="text-gray-700">{row._uom}</span>,
+    },
+    {
       key: "_sys",
       header: "System Stock",
       width: "140px",
       align: "right",
-      cell: (row) => <span>{row._sys}</span>,
+      cell: (row) => (
+        <span>
+          {fmtQty(row._sys)}
+          {row._uom && row._uom !== "-" ? ` ${row._uom}` : ""}
+        </span>
+      ),
     },
     {
       key: "_total",
@@ -388,26 +410,29 @@ export default function ReconciliationDetail({ id, onBack }) {
     {
       key: "__form",
       header: "Form Real Stock",
-      width: "180px",
+      width: "200px",
       sticky: "right",
       className: "sticky right-0 z-20 bg-white",
       cell: (row) => {
         const value = draft[row._rid] ?? null;
         return (
-          <div
-            className="sticky right-0 z-20 bg-white pr-2"
-            // style={{ boxShadow: "-6px 0 6px -6px rgba(0,0,0,.12)" }}
-          >
-            <input
-              type="number"
-              inputMode="decimal"
-              step="1"
-              className="w-40 px-3 py-2 rounded-lg border border-gray-200 text-right focus:outline-none focus:ring-1 focus:ring-blue-600"
-              placeholder="diisi user"
-              value={value ?? ""}
-              onChange={(e) => handleEditQty(row._rid, e.target.value)}
-              disabled={rec.status !== "DRAFT"}
-            />
+          <div className="sticky right-0 z-20 bg-white pr-2">
+            <div className="flex items-center justify-end gap-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                min={0}
+                className="w-28 px-3 py-2 rounded-lg border border-gray-200 text-right focus:outline-none focus:ring-1 focus:ring-blue-600"
+                placeholder="0.05"
+                value={value ?? ""}
+                onChange={(e) => handleEditQty(row._rid, e.target.value)}
+                disabled={rec.status !== "DRAFT"}
+              />
+              {row._uom && row._uom !== "-" ? (
+                <span className="text-xs text-gray-500 w-8">{row._uom}</span>
+              ) : null}
+            </div>
           </div>
         );
       },

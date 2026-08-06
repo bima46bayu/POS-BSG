@@ -13,6 +13,7 @@ export function exportStockCardPdf(payload) {
     company = "PT. BUANA SELARAS GLOBALINDO",
     productName = "-",
     sku = "-",
+    uom = "",
     period = {},
     summary,
     openingQty = 0,
@@ -22,7 +23,19 @@ export function exportStockCardPdf(payload) {
 
   const fmtIDR = (n) =>
     Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
-  const fmtNum = (n) => Number(n || 0).toLocaleString("id-ID");
+  const fmtNum = (n) => {
+    const v = Number(n || 0);
+    if (!Number.isFinite(v)) return "0";
+    return v.toLocaleString("id-ID", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    });
+  };
+  const fmtQtyUom = (n) => {
+    const qty = fmtNum(n);
+    const unit = String(uom || "").trim();
+    return unit && unit !== "-" ? `${qty} ${unit}` : qty;
+  };
   const fmtDate = (s) => {
     if (!s) return "-";
     const d = new Date(s);
@@ -43,6 +56,9 @@ export function exportStockCardPdf(payload) {
   doc.setFontSize(10);
   doc.text(`Product: ${productName}`, marginX, y); y += 14;
   doc.text(`SKU: ${sku}`, marginX, y); y += 14;
+  if (uom && uom !== "-") {
+    doc.text(`UOM: ${uom}`, marginX, y); y += 14;
+  }
   doc.text(`Period: ${period?.from ?? "—"} s.d. ${period?.to ?? "—"}`, marginX, y); y += 16;
 
   // Summary ringkas
@@ -56,10 +72,10 @@ export function exportStockCardPdf(payload) {
       "Cost Beginning","Cost In (GR)","Cost Out","Cost Ending"
     ]],
     body: [[
-      fmtNum(summary?.stockBeginning ?? 0),
-      fmtNum(summary?.stockIn ?? 0),
-      fmtNum(summary?.stockOut ?? 0),
-      fmtNum(summary?.stockEnding ?? 0),
+      fmtQtyUom(summary?.stockBeginning ?? 0),
+      fmtQtyUom(summary?.stockIn ?? 0),
+      fmtQtyUom(summary?.stockOut ?? 0),
+      fmtQtyUom(summary?.stockEnding ?? 0),
       fmtIDR(summary?.costBeginning ?? 0),
       fmtIDR(summary?.costIn ?? 0),
       fmtIDR(summary?.costOut ?? 0),
@@ -70,8 +86,10 @@ export function exportStockCardPdf(payload) {
   y = doc.lastAutoTable.finalY + 14;
 
   // Detail
+  const qtyHeader = uom && uom !== "-" ? `Qty (±) / ${uom}` : "Qty (±)";
+  const balHeader = uom && uom !== "-" ? `Bal / ${uom}` : "Bal Qty";
   const head = [
-    "Date","Type","Doc No","Qty (±)","Bal Qty","Unit Cost","Total Cost (±)","Bal Cost"
+    "Date","Type","Doc No", qtyHeader, balHeader,"Unit Cost","Total Cost (±)","Bal Cost"
   ];
 
   const body = rows.map((r) => {
@@ -86,8 +104,8 @@ export function exportStockCardPdf(payload) {
       fmtDate(r._date),
       String(r._ref_type || "-").toUpperCase(),
       String(docNo),
-      fmtNum(qtySigned),
-      fmtNum(balQty),
+      fmtQtyUom(qtySigned),
+      fmtQtyUom(balQty),
       fmtIDR(unitCost),
       fmtIDR(costSigned),
       fmtIDR(balCost),
@@ -119,7 +137,7 @@ export function exportStockCardPdf(payload) {
       const pageH = doc.internal.pageSize.getHeight();
       doc.setFontSize(9);
       doc.text(
-        `Criteria: ${period?.from ?? "—"} s.d. ${period?.to ?? "—"} • Opening Qty ${fmtNum(openingQty)} • Opening Cost ${fmtIDR(openingCost)}`,
+        `Criteria: ${period?.from ?? "—"} s.d. ${period?.to ?? "—"} • Opening ${fmtQtyUom(openingQty)} • Opening Cost ${fmtIDR(openingCost)}`,
         marginX, pageH - 20
       );
     },

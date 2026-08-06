@@ -62,6 +62,14 @@ const normalizeCartItem = (item) => {
     inventoryType,
     isStockTracked:
       item.isStockTracked ?? item.is_stock_tracked ?? inventoryType === "stock",
+    hasRecipe: !!(item.hasRecipe ?? item.has_recipe),
+    availableToMake:
+      item.availableToMake != null
+        ? Number(item.availableToMake)
+        : item.available_to_make != null
+        ? Number(item.available_to_make)
+        : null,
+    recipeBottleneck: item.recipeBottleneck ?? item.recipe_bottleneck ?? null,
   };
 };
 
@@ -102,6 +110,14 @@ const normalize = (p) => {
     sub_category_id: p.sub_category_id,
     inventoryType,     // ⬅️ simpan tipe
     isStockTracked,    // ⬅️ dipakai di FE
+    hasRecipe: !!(p.has_recipe ?? p.hasRecipe),
+    availableToMake:
+      p.available_to_make != null
+        ? Number(p.available_to_make)
+        : p.availableToMake != null
+        ? Number(p.availableToMake)
+        : null,
+    recipeBottleneck: p.recipe_bottleneck ?? p.recipeBottleneck ?? null,
   };
 };
 
@@ -505,22 +521,26 @@ export default function POSPage() {
     return Array.from(map.values());
   }, [productsQuery.data]);
 
-  /* ===== Filter stok di FE (aware non-stock) =====
-     available: semua non-stock + stock qty>0
-     out      : hanya produk stock qty<=0
+  /* ===== Filter stok di FE (aware non-stock + recipe can-make) =====
+     available: stock qty>0, OR recipe can-make>0, OR non-stock tanpa resep
+     out      : stock qty<=0, OR recipe can-make<=0
   */
   const filteredProducts = useMemo(() => {
     let arr = flatProducts;
 
+    const effectiveQty = (p) => {
+      if (p.hasRecipe && p.availableToMake != null) return Number(p.availableToMake);
+      if (p.isStockTracked) return Number(p.stock ?? 0);
+      return Infinity; // non-stock, no recipe
+    };
+
     if (filters.stock_status === "available") {
-      arr = arr.filter((p) => {
-        if (!p.isStockTracked) return true; // non-stock/service selalu available
-        return Number(p.stock ?? 0) > 0;
-      });
+      arr = arr.filter((p) => effectiveQty(p) > 0);
     } else if (filters.stock_status === "out") {
-      arr = arr.filter(
-        (p) => p.isStockTracked && Number(p.stock ?? 0) <= 0
-      );
+      arr = arr.filter((p) => {
+        if (p.hasRecipe && p.availableToMake != null) return Number(p.availableToMake) <= 0;
+        return p.isStockTracked && Number(p.stock ?? 0) <= 0;
+      });
     }
 
     return arr;
@@ -543,40 +563,75 @@ export default function POSPage() {
       : "";
 
   /* ===== Cart handlers ===== */
+  const maxSellableQty = useCallback((product) => {
+    if (product?.hasRecipe && product.availableToMake != null) {
+      return Math.max(0, Number(product.availableToMake));
+    }
+    if (product?.isStockTracked) {
+      return Math.max(0, Number(product.stock ?? 0));
+    }
+    return Infinity;
+  }, []);
+
   const handleAddToCart = useCallback((product) => {
+    const maxQty = maxSellableQty(product);
+    if (maxQty <= 0) {
+      toast.error(
+        product.recipeBottleneck
+          ? `Tidak bisa dibuat — stok ${product.recipeBottleneck} habis`
+          : "Stok tidak cukup"
+      );
+      return;
+    }
+
     setCartItems((prev) => {
       const exist = prev.find((i) => i.id === product.id);
-      return exist
-        ? prev.map((i) =>
-            i.id === product.id
-              ? { ...i, quantity: i.quantity + 1 }
-              : i
-          )
-        : [
-            ...prev,
-            {
-              ...product,
-              quantity: 1,
-              discount_type: "%",
-              discount_value: 0,
-            },
-          ];
+      if (exist) {
+        if (exist.quantity + 1 > maxQty) {
+          toast.error(
+            product.hasRecipe
+              ? `Maksimal bisa dibuat ${maxQty} (bahan terbatas)`
+              : `Stok hanya ${maxQty}`
+          );
+          return prev;
+        }
+        return prev.map((i) =>
+          i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
+        );
+      }
+      return [
+        ...prev,
+        {
+          ...product,
+          quantity: 1,
+          discount_type: "%",
+          discount_value: 0,
+        },
+      ];
     });
-  }, []);
+  }, [maxSellableQty]);
 
   const handleUpdateQuantity = useCallback((id, change) => {
     setCartItems((prev) =>
       prev
-        .map((item) =>
-          item.id !== id
-            ? item
-            : item.quantity + change > 0
-            ? { ...item, quantity: item.quantity + change }
-            : null
-        )
+        .map((item) => {
+          if (item.id !== id) return item;
+          const next = item.quantity + change;
+          if (next <= 0) return null;
+          const maxQty = maxSellableQty(item);
+          if (next > maxQty) {
+            toast.error(
+              item.hasRecipe
+                ? `Maksimal bisa dibuat ${maxQty}`
+                : `Stok hanya ${maxQty}`
+            );
+            return item;
+          }
+          return { ...item, quantity: next };
+        })
         .filter(Boolean)
     );
-  }, []);
+  }, [maxSellableQty]);
 
   const handleUpdateDiscount = useCallback(
     (id, payload) => {

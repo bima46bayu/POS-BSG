@@ -79,14 +79,16 @@ export default function ReceiptTicket({
       </div>
     );
 
-  // prioritas store:
-  // 1) cabang kasir di sale
+  // prioritas store (penting untuk Admin HQ):
+  // 1) cabang transaksi (sale.store_location) — tempat register dibuka
   // 2) prop store (kalau dikirim manual)
-  // 3) store dari profil user (me)
-  const saleStore = pickStore(sale?.cashier);
+  // 3) cabang kasir di sale
+  // 4) store dari profil user (me) — last resort only
+  const saleStore = pickStore(sale);
   const propStore = storeProp || null;
+  const cashierStore = pickStore(sale?.cashier);
   const meStore = pickStore(me);
-  const loc = saleStore || propStore || meStore || null;
+  const loc = saleStore || propStore || cashierStore || meStore || null;
 
   // URL logo yang sudah di-normalisasi untuk endpoint API
   const logoUrl = buildStoreLogoUrl(loc);

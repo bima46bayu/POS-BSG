@@ -138,6 +138,14 @@ export async function getProduct(id, signal) {
   return data?.data || data || null;
 }
 
+/** Next auto SKU for a store: SK-{storeCode}-001 */
+export async function getNextSku(storeLocationId, signal) {
+  const params =
+    storeLocationId != null ? { store_location_id: storeLocationId } : {};
+  const { data } = await api.get("/api/products/next-sku", { params, signal });
+  return data?.sku ?? "";
+}
+
 /* =========================
    Mutations
 ========================= */

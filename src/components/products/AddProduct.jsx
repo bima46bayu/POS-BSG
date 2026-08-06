@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
 import UnitDropdown from "./UnitDropdown";
+import { getNextSku } from "../../api/products";
 
 /**
  * Props:
@@ -38,11 +39,43 @@ export default function AddProduct({
   const [files, setFiles] = useState([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [skuLoading, setSkuLoading] = useState(false);
 
   // Reset category picks when the selected branch changes
   useEffect(() => {
     if (!open) return;
     setForm((f) => ({ ...f, category_id: "", sub_category_id: "" }));
+  }, [open, storeLocationId]);
+
+  // Auto-generate SKU: SK-{storeCode}-001 when modal opens / branch changes
+  useEffect(() => {
+    if (!open || storeLocationId == null) {
+      if (open) setForm((f) => ({ ...f, sku: "" }));
+      return;
+    }
+
+    let cancelled = false;
+    setSkuLoading(true);
+
+    (async () => {
+      try {
+        const sku = await getNextSku(storeLocationId);
+        if (!cancelled) {
+          setForm((f) => ({ ...f, sku: sku || "" }));
+        }
+      } catch (err) {
+        console.error(err);
+        if (!cancelled) {
+          setForm((f) => ({ ...f, sku: "" }));
+        }
+      } finally {
+        if (!cancelled) setSkuLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, storeLocationId]);
 
   // Filter subcategory berdasarkan category
@@ -71,6 +104,7 @@ export default function AddProduct({
         unit_id: "",
       });
       setTrackInventory(true);
+      setSkuLoading(false);
       setFiles((prev) => {
         // revoke semua url preview
         prev.forEach((f) => f?.url && URL.revokeObjectURL(f.url));
@@ -297,11 +331,15 @@ export default function AddProduct({
 
           <Field label="SKU">
             <Input
-              placeholder="SKU-041"
+              placeholder={skuLoading ? "Generating..." : "SK-CODE-001"}
               value={form.sku}
-              onChange={onChange("sku")}
+              readOnly
               required
+              className="bg-gray-50 text-gray-700 cursor-default"
             />
+            <p className="mt-1 text-[11px] text-gray-500">
+              Auto-generated, e.g. SK-F-CBR-001
+            </p>
           </Field>
 
           <Field label="Description">
@@ -402,7 +440,12 @@ export default function AddProduct({
           <button
             type="submit"
             className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-            disabled={submitting || storeLocationId == null}
+            disabled={
+              submitting ||
+              storeLocationId == null ||
+              skuLoading ||
+              !form.sku
+            }
             title={
               storeLocationId == null ? "Pilih cabang terlebih dahulu" : undefined
             }

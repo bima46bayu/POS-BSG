@@ -20,7 +20,19 @@ const STORAGE_KEY = "inventory_store_id";
 /* ===================== Formatter ===================== */
 const fmtIDR = (n) =>
   Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
-const fmtNum = (n) => Number(n || 0).toLocaleString("id-ID");
+const fmtNum = (n) => {
+  const v = Number(n || 0);
+  if (!Number.isFinite(v)) return "0";
+  return v.toLocaleString("id-ID", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
+};
+const fmtQtyUom = (n, uom) => {
+  const qty = fmtNum(n);
+  const unit = String(uom || "").trim();
+  return unit && unit !== "-" ? `${qty} ${unit}` : qty;
+};
 const fmtDate = (s) => {
   if (!s) return "-";
   const d = new Date(s);
@@ -64,7 +76,7 @@ const InfoRow = ({ label, value }) => (
 );
 
 const ProductSummaryCard = ({
-  productName, sku, period,
+  productName, sku, uom, period,
   stockBeginning, stockIn, stockOut, stockEnding,
   costBeginning, costIn, costOut, costEnding,
 }) => (
@@ -81,6 +93,11 @@ const ProductSummaryCard = ({
           <div className="text-[18px] md:text-[20px] font-semibold text-slate-900 truncate">{productName}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <span className="px-2 py-0.5 rounded-md border border-slate-200 bg-white/80">SKU: {sku}</span>
+            {uom && uom !== "-" ? (
+              <span className="px-2 py-0.5 rounded-md border border-blue-200 bg-blue-50 text-blue-800">
+                UOM: {uom}
+              </span>
+            ) : null}
             {period?.from || period?.to ? <span>Periode: {period.from ?? "—"} s.d. {period.to ?? "—"}</span> : null}
           </div>
         </div>
@@ -90,12 +107,14 @@ const ProductSummaryCard = ({
     <div className="relative z-10 px-5 pb-5">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section>
-          <h3 className="text-sm font-semibold text-slate-900 mb-3">Stock Summary</h3>
+          <h3 className="text-sm font-semibold text-slate-900 mb-3">
+            Stock Summary{uom && uom !== "-" ? ` (${uom})` : ""}
+          </h3>
           <div className="grid grid-cols-2 gap-3">
-            <InfoRow label="Stock Beginning" value={fmtNum(stockBeginning)} />
-            <InfoRow label="Stock In (GR)" value={fmtNum(stockIn)} />
-            <InfoRow label="Stock Out" value={fmtNum(stockOut)} />
-            <InfoRow label="Stock Ending" value={fmtNum(stockEnding)} />
+            <InfoRow label="Stock Beginning" value={fmtQtyUom(stockBeginning, uom)} />
+            <InfoRow label="Stock In (GR)" value={fmtQtyUom(stockIn, uom)} />
+            <InfoRow label="Stock Out" value={fmtQtyUom(stockOut, uom)} />
+            <InfoRow label="Stock Ending" value={fmtQtyUom(stockEnding, uom)} />
           </div>
         </section>
         <section>
@@ -340,6 +359,14 @@ export default function InventorySummaryPage() {
 
   const [period, setPeriod] = useState({ from: null, to: null });
   const [allLogs, setAllLogs] = useState([]);
+  const [productMeta, setProductMeta] = useState({
+    name: productFromState?.name || null,
+    sku: productFromState?.sku || null,
+    uom:
+      productFromState?.unit?.name ||
+      productFromState?.unit_name ||
+      null,
+  });
 
   const [summary, setSummary] = useState({
     stockBeginning: 0, stockIn: 0, stockOut: 0, stockEnding: 0,
@@ -374,6 +401,15 @@ export default function InventorySummaryPage() {
       ]);
 
       setPeriod(sum?.period ?? { from: null, to: null });
+      setProductMeta({
+        name: sum?.product_name || productFromState?.name || null,
+        sku: sum?.sku || productFromState?.sku || null,
+        uom:
+          sum?.unit_name ||
+          productFromState?.unit?.name ||
+          productFromState?.unit_name ||
+          null,
+      });
 
       const openingQty = Number(sum?.opening_qty ?? 0);
 
@@ -480,8 +516,13 @@ export default function InventorySummaryPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const headerName = productFromState?.name || `Product #${id}`;
-  const headerSKU  = productFromState?.sku || "-";
+  const headerName = productMeta.name || productFromState?.name || `Product #${id}`;
+  const headerSKU = productMeta.sku || productFromState?.sku || "-";
+  const headerUom =
+    productMeta.uom ||
+    productFromState?.unit?.name ||
+    productFromState?.unit_name ||
+    "-";
 
   // Balance kronologis (ASC)
   const logsWithBalancesAsc = useMemo(() => {
@@ -537,21 +578,21 @@ export default function InventorySummaryPage() {
           </span>
       ) },
       {
-        header: "Qty (±)",
-        width: "110px",
+        header: headerUom && headerUom !== "-" ? `Qty (±) / ${headerUom}` : "Qty (±)",
+        width: "130px",
         align: "right",
         cell: (r) => {
           const v = Number(r._display_qty ?? 0);
           const cls = v < 0 ? "text-red-600" : v > 0 ? "text-emerald-600" : "text-slate-700";
           const sign = v > 0 ? "+" : "";
-          return <span className={`font-medium ${cls}`}>{sign}{fmtNum(v)}</span>;
+          return <span className={`font-medium ${cls}`}>{sign}{fmtQtyUom(v, headerUom)}</span>;
         },
       },
       {
-        header: "Unit Balance",
-        width: "130px",
+        header: headerUom && headerUom !== "-" ? `Balance / ${headerUom}` : "Unit Balance",
+        width: "140px",
         align: "right",
-        cell: (r) => <span className="font-semibold">{fmtNum(r._unit_balance_after)}</span>,
+        cell: (r) => <span className="font-semibold">{fmtQtyUom(r._unit_balance_after, headerUom)}</span>,
       },
       {
         header: "Unit Cost",
@@ -572,7 +613,7 @@ export default function InventorySummaryPage() {
         cell: (r) => <span className="font-semibold">{fmtIDR(r._cost_balance_after)}</span>,
       },
     ],
-    []
+    [headerUom]
   );
 
   /* ===================== Export Handler (client-side) ===================== */
@@ -606,6 +647,7 @@ export default function InventorySummaryPage() {
         company: "PT. BUANA SELARAS GLOBALINDO",
         productName: headerName,
         sku: headerSKU,
+        uom: headerUom,
         period: { from: from || period?.from || null, to: to || period?.to || null },
         summary: pdfSummary,
         openingQty,
@@ -676,6 +718,7 @@ export default function InventorySummaryPage() {
         <ProductSummaryCard
           productName={headerName}
           sku={headerSKU}
+          uom={headerUom}
           period={period}
           stockBeginning={summary.stockBeginning}
           stockIn={summary.stockIn}
