@@ -11,6 +11,7 @@ import ProductGrid from "../components/pos/ProductGrid";
 import OrderDetails from "../components/pos/OrderDetails";
 import MobileOrderSheet from "../components/pos/MobileOrderSheet";
 import SaleSubmitter from "../components/pos/SaleSubmitter";
+import OptionPickerModal from "../components/pos/OptionPickerModal";
 import { ShoppingCart, ChevronUp } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -21,6 +22,11 @@ import { listStoreLocations } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
 import { listDiscounts } from "../api/discounts";
 import { listAdditionalCharges } from "../api/additionalCharges";
+import {
+  normalizeOptionGroups,
+  sumOptionsPrice,
+  buildCartLineKey,
+} from "../api/productOptions";
 import {
   getCurrentRegister,
   openRegister,
@@ -51,10 +57,23 @@ const normalizeCartItem = (item) => {
   const inventoryType = String(
     item.inventoryType ?? item.inventory_type ?? "stock"
   ).toLowerCase();
+
+  const selectedOptions = Array.isArray(item.selected_options)
+    ? item.selected_options
+    : [];
+  const optionsPrice = selectedOptions.length
+    ? sumOptionsPrice(selectedOptions)
+    : Number(item.options_price ?? 0);
+  const basePrice = Number(item.base_price ?? item.price ?? 0);
+
   return {
     ...item,
     id: item.id,
-    price: Number(item.price ?? 0),
+    line_key: item.line_key || buildCartLineKey(item.id, selectedOptions),
+    selected_options: selectedOptions,
+    options_price: optionsPrice,
+    base_price: basePrice,
+    price: basePrice + optionsPrice,
     quantity: Math.max(1, Number(item.quantity ?? 1)),
     discount_type: item.discount_type || "%",
     discount_value: Number(item.discount_value ?? 0),
@@ -118,6 +137,7 @@ const normalize = (p) => {
         ? Number(p.availableToMake)
         : null,
     recipeBottleneck: p.recipe_bottleneck ?? p.recipeBottleneck ?? null,
+    optionGroups: normalizeOptionGroups(p),
   };
 };
 
@@ -139,6 +159,7 @@ export default function POSPage() {
   const cartSaveTimerRef = React.useRef(null);
   const hydratedSessionIdRef = React.useRef(null);
   const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [optionPickerProduct, setOptionPickerProduct] = React.useState(null);
 
   /* ===== /api/me (role & store) ===== */
   const meQ = useQuery({
@@ -573,21 +594,33 @@ export default function POSPage() {
     return Infinity;
   }, []);
 
-  const handleAddToCart = useCallback((product) => {
-    const maxQty = maxSellableQty(product);
-    if (maxQty <= 0) {
-      toast.error(
-        product.recipeBottleneck
-          ? `Tidak bisa dibuat — stok ${product.recipeBottleneck} habis`
-          : "Stok tidak cukup"
-      );
-      return;
-    }
+  /**
+   * Tambah ke cart. `selectedOptions` = [{group_id, group, value_id, name, price_delta}]
+   * Produk sama dengan opsi berbeda = baris terpisah (line_key).
+   */
+  const handleAddToCart = useCallback(
+    (product, selectedOptions = []) => {
+      const maxQty = maxSellableQty(product);
+      if (maxQty <= 0) {
+        toast.error(
+          product.recipeBottleneck
+            ? `Tidak bisa dibuat — stok ${product.recipeBottleneck} habis`
+            : "Stok tidak cukup"
+        );
+        return;
+      }
 
-    setCartItems((prev) => {
-      const exist = prev.find((i) => i.id === product.id);
-      if (exist) {
-        if (exist.quantity + 1 > maxQty) {
+      const options = selectedOptions || [];
+      const lineKey = buildCartLineKey(product.id, options);
+      const optionsPrice = sumOptionsPrice(options);
+
+      setCartItems((prev) => {
+        // stok dihitung dari total qty semua baris produk yang sama
+        const usedQty = prev
+          .filter((i) => i.id === product.id)
+          .reduce((acc, i) => acc + Number(i.quantity || 0), 0);
+
+        if (usedQty + 1 > maxQty) {
           toast.error(
             product.hasRecipe
               ? `Maksimal bisa dibuat ${maxQty} (bahan terbatas)`
@@ -595,58 +628,101 @@ export default function POSPage() {
           );
           return prev;
         }
-        return prev.map((i) =>
-          i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i
-        );
-      }
-      return [
-        ...prev,
-        {
-          ...product,
-          quantity: 1,
-          discount_type: "%",
-          discount_value: 0,
-        },
-      ];
-    });
-  }, [maxSellableQty]);
 
-  const handleUpdateQuantity = useCallback((id, change) => {
-    setCartItems((prev) =>
-      prev
-        .map((item) => {
-          if (item.id !== id) return item;
-          const next = item.quantity + change;
-          if (next <= 0) return null;
-          const maxQty = maxSellableQty(item);
-          if (next > maxQty) {
-            toast.error(
-              item.hasRecipe
-                ? `Maksimal bisa dibuat ${maxQty}`
-                : `Stok hanya ${maxQty}`
-            );
-            return item;
-          }
-          return { ...item, quantity: next };
-        })
-        .filter(Boolean)
-    );
-  }, [maxSellableQty]);
+        const exist = prev.find((i) => i.line_key === lineKey);
+        if (exist) {
+          return prev.map((i) =>
+            i.line_key === lineKey ? { ...i, quantity: i.quantity + 1 } : i
+          );
+        }
 
-  const handleUpdateDiscount = useCallback(
-    (id, payload) => {
-      setCartItems((prev) =>
-        prev.map((it) =>
-          it.id === id ? { ...it, ...payload } : it
-        )
-      );
+        return [
+          ...prev,
+          {
+            ...product,
+            line_key: lineKey,
+            quantity: 1,
+            discount_type: "%",
+            discount_value: 0,
+            selected_options: options,
+            options_price: optionsPrice,
+            // harga dasar disimpan supaya bisa dihitung ulang
+            base_price: Number(product.price || 0),
+            price: Number(product.price || 0) + optionsPrice,
+          },
+        ];
+      });
     },
-    []
+    [maxSellableQty]
   );
 
-  const handleRemoveItem = useCallback((id) => {
-    setCartItems((prev) => prev.filter((i) => i.id !== id));
+  const handleUpdateQuantity = useCallback(
+    (lineKey, change) => {
+      setCartItems((prev) => {
+        const target = prev.find((i) => i.line_key === lineKey);
+        if (!target) return prev;
+
+        const next = target.quantity + change;
+        if (next <= 0) return prev.filter((i) => i.line_key !== lineKey);
+
+        const maxQty = maxSellableQty(target);
+        const usedByOthers = prev
+          .filter((i) => i.id === target.id && i.line_key !== lineKey)
+          .reduce((acc, i) => acc + Number(i.quantity || 0), 0);
+
+        if (usedByOthers + next > maxQty) {
+          toast.error(
+            target.hasRecipe
+              ? `Maksimal bisa dibuat ${maxQty}`
+              : `Stok hanya ${maxQty}`
+          );
+          return prev;
+        }
+
+        return prev.map((i) =>
+          i.line_key === lineKey ? { ...i, quantity: next } : i
+        );
+      });
+    },
+    [maxSellableQty]
+  );
+
+  const handleUpdateDiscount = useCallback((lineKey, payload) => {
+    setCartItems((prev) =>
+      prev.map((it) =>
+        it.line_key === lineKey ? { ...it, ...payload } : it
+      )
+    );
   }, []);
+
+  const handleRemoveItem = useCallback((lineKey) => {
+    setCartItems((prev) => prev.filter((i) => i.line_key !== lineKey));
+  }, []);
+
+  /**
+   * Klik produk: kalau punya grup opsi → buka modal dulu.
+   * Kalau tidak → langsung masuk cart (perilaku lama).
+   */
+  const handleProductClick = useCallback(
+    (product) => {
+      if (product?.optionGroups?.length) {
+        setOptionPickerProduct(product);
+        return;
+      }
+      handleAddToCart(product, []);
+    },
+    [handleAddToCart]
+  );
+
+  const handleConfirmOptions = useCallback(
+    (selected) => {
+      if (optionPickerProduct) {
+        handleAddToCart(optionPickerProduct, selected);
+      }
+      setOptionPickerProduct(null);
+    },
+    [optionPickerProduct, handleAddToCart]
+  );
 
   const handleClearCart = useCallback(() => {
     clearCartState();
@@ -679,15 +755,19 @@ export default function POSPage() {
           console.warn(`SKU mismatch: expected ${cleanCode}, got ${p.sku}`);
           return toast.error(`Produk tidak ditemukan`);
         }
-        // pakai normalize supaya inventoryType & isStockTracked ikut
-        handleAddToCart(normalize(p));
-        toast.success(`${p.name} ditambahkan ke cart`);
+        // pakai normalize supaya inventoryType & isStockTracked ikut.
+        // handleProductClick → produk beropsi tetap buka modal pilihan dulu.
+        const normalized = normalize(p);
+        handleProductClick(normalized);
+        if (!normalized.optionGroups?.length) {
+          toast.success(`${p.name} ditambahkan ke cart`);
+        }
       } catch (e) {
         console.error(e);
         toast.error("Scanner error. Coba lagi.");
       }
     },
-    [handleAddToCart, selectedStoreId]
+    [handleProductClick, selectedStoreId]
   );
 
   /* ===== Totals ===== */
@@ -825,7 +905,7 @@ export default function POSPage() {
 
             <ProductGrid
               products={filteredProducts}
-              onAddToCart={handleAddToCart}
+              onAddToCart={handleProductClick}
             />
 
             {loadingMore && (
@@ -926,6 +1006,14 @@ export default function POSPage() {
         registerOpen={!!currentRegister}
         extraPayload={saleExtraPayload}
         onClearCart={handleClearCart}
+      />
+
+      {/* Item options picker (Sugar Level, Ice Level, dll) */}
+      <OptionPickerModal
+        open={!!optionPickerProduct}
+        product={optionPickerProduct}
+        onClose={() => setOptionPickerProduct(null)}
+        onConfirm={handleConfirmOptions}
       />
 
       {/* Open register modal */}

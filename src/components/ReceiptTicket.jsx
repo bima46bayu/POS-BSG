@@ -139,6 +139,19 @@ export default function ReceiptTicket({
     itemDiscountTotal += Math.min(unitPrice, discNom) * qty;
     itemsNetSubtotal += lineTotal;
 
+    // opsi item (sugar level, ice level, dll) — snapshot dari sale_items.options
+    let rawOptions = it?.options ?? null;
+    if (typeof rawOptions === "string") {
+      try {
+        rawOptions = JSON.parse(rawOptions);
+      } catch {
+        rawOptions = null;
+      }
+    }
+    const optionsLabel = Array.isArray(rawOptions)
+      ? rawOptions.map((o) => o?.name).filter(Boolean).join(", ")
+      : "";
+
     return {
       id: it.id,
       name,
@@ -147,6 +160,7 @@ export default function ReceiptTicket({
       discNom,
       netUnit: netUnit || Math.max(0, unitPrice - discNom),
       lineTotal,
+      optionsLabel,
     };
   });
 
@@ -248,6 +262,11 @@ export default function ReceiptTicket({
               <div className="whitespace-normal break-words leading-tight">
                 {it.name}
               </div>
+              {it.optionsLabel && (
+                <div className="whitespace-normal break-words leading-tight text-[11px] text-gray-600 pl-2">
+                  - {it.optionsLabel}
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-gray-700">
                   {it.qty} x {fmtIDR(it.unitPrice)}

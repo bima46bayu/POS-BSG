@@ -196,6 +196,11 @@ export async function createProduct(body = {}, signal) {
     // opsional: kalau BE kamu masih nerima flag lama
     if (body.is_stock_tracked != null) fd.append("is_stock_tracked", String(Number(body.is_stock_tracked)));
 
+    // opsi item (sugar level, ice level, dll) — FormData butuh JSON string
+    if (Array.isArray(body.option_group_ids)) {
+      fd.append("option_group_ids", JSON.stringify(body.option_group_ids.map(Number)));
+    }
+
     const { data } = await api.post("/api/products", fd, {
       headers: { "Content-Type": "multipart/form-data" },
       signal,
@@ -228,6 +233,11 @@ export async function createProduct(body = {}, signal) {
 
     // opsional: flag lama (biar backward compatible)
     ...(body.is_stock_tracked != null ? { is_stock_tracked: Number(body.is_stock_tracked) } : {}),
+
+    // opsi item (sugar level, ice level, dll)
+    ...(Array.isArray(body.option_group_ids)
+      ? { option_group_ids: body.option_group_ids.map(Number) }
+      : {}),
   };
 
   const { data } = await api.post("/api/products", payload, { signal });
@@ -288,6 +298,11 @@ export async function updateProduct(id, body = {}, signal) {
 
     // opsional: flag lama
     ...(body.is_stock_tracked != null ? { is_stock_tracked: Number(body.is_stock_tracked) } : {}),
+
+    // opsi item (sugar level, ice level, dll)
+    ...(Array.isArray(body.option_group_ids)
+      ? { option_group_ids: body.option_group_ids.map(Number) }
+      : {}),
   };
 
   const { data } = await api.put(`/api/products/${id}`, payload, { signal });

@@ -209,8 +209,13 @@ export default function SaleSubmitter({
       items: items.map((i) => ({
         product_id: i.product_id ?? i.id,
         qty: Number(i.quantity || 0),
-        unit_price: Number(i.price || 0),
+        // ⚠️ kirim HARGA DASAR. Tambahan harga opsi dihitung ulang di backend
+        // dari master (anti tamper), jadi jangan kirim harga yang sudah + opsi.
+        unit_price: Number(i.base_price ?? i.price ?? 0),
         discount_id: i.item_discount_id ?? null,
+        option_value_ids: (i.selected_options || [])
+          .map((o) => Number(o.value_id))
+          .filter((n) => Number.isFinite(n)),
       })),
       global_discount_id: p.global_discount_id ?? null,
       payments: [

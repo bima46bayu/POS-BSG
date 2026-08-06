@@ -38,6 +38,8 @@ const ProductGrid = ({ products, onAddToCart }) => {
         const recipeBottleneck =
           p.recipeBottleneck ?? p.recipe_bottleneck ?? null;
 
+        const optionGroups = p.optionGroups ?? p.option_groups ?? [];
+
         return (
           <ProductCard
             key={id}
@@ -50,6 +52,7 @@ const ProductGrid = ({ products, onAddToCart }) => {
             hasRecipe={hasRecipe}
             availableToMake={availableToMake}
             recipeBottleneck={recipeBottleneck}
+            optionGroups={optionGroups}
             onAddToCart={onAddToCart}
           />
         );

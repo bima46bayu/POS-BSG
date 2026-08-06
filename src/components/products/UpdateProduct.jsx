@@ -76,6 +76,7 @@ export default function UpdateProduct({
       });
 
       setTrackInventory(tracked);
+
       setFiles([]);
       setSubmitting(false);
       return;

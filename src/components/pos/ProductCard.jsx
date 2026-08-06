@@ -10,6 +10,7 @@ const ProductCard = memo(function ProductCard({
   hasRecipe = false,
   availableToMake = null,
   recipeBottleneck = null,
+  optionGroups = null,
   onAddToCart,
   className = "",
 }) {
@@ -100,6 +101,7 @@ const ProductCard = memo(function ProductCard({
             hasRecipe,
             availableToMake: makeQty,
             recipeBottleneck,
+            optionGroups: optionGroups || [],
           })
         }
         disabled={outOfStock}

@@ -22,7 +22,7 @@ const OrderDetails = ({
         <div className="space-y-0 min-w-0 max-w-full">
           {items.map((item) => (
             <OrderItem
-              key={item.id}
+              key={item.line_key ?? item.id}
               item={item}
               itemDiscounts={itemDiscounts}
               onUpdateQuantity={onUpdateQuantity}
