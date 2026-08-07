@@ -2,7 +2,7 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getSale } from "../api/sales";
-import { getMyProfile } from "../api/users";
+import { getStoreLocation } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
 
 const toNumber = (v) =>
@@ -17,6 +17,13 @@ const fmtIDR = (n) =>
 // Ambil store dari berbagai bentuk relasi yang mungkin
 const pickStore = (obj) =>
   obj?.storeLocation || obj?.store_location || obj?.store || null;
+
+const storeIdOf = (obj) =>
+  obj?.id ??
+  obj?.store_location_id ??
+  obj?.store_id ??
+  obj?.storeLocationId ??
+  null;
 
 /**
  * Build URL logo yang aman untuk CORS & html2canvas
@@ -36,7 +43,7 @@ const buildStoreLogoUrl = (loc) => {
   }
 
   // mapping path lama → endpoint logo API
-  const storeId = loc.id ?? loc.store_location_id ?? loc.store_id ?? null;
+  const storeId = storeIdOf(loc);
   if (!storeId) {
     // kalau id nggak ketemu, fallback: tetap pakai raw
     return toAbsoluteUrl(raw);
@@ -62,9 +69,27 @@ export default function ReceiptTicket({
     enabled: !!saleId,
   });
 
-  const { data: me } = useQuery({
-    queryKey: ["me"],
-    queryFn: () => getMyProfile(),
+  // Branding MUST come from the sale's cabang — never from the admin HQ
+  // profile (that mixed Instafactory text with Tanabambu logo).
+  const saleStore = pickStore(sale);
+  const propStore = storeProp || null;
+  const cashierStore = pickStore(sale?.cashier);
+  const saleStoreId =
+    storeIdOf(saleStore) ??
+    sale?.store_location_id ??
+    sale?.storeLocationId ??
+    storeIdOf(propStore) ??
+    storeIdOf(cashierStore) ??
+    null;
+
+  const needsStoreFetch =
+    !!saleStoreId &&
+    !(saleStore?.name || propStore?.name || cashierStore?.name);
+
+  const { data: fetchedStore } = useQuery({
+    queryKey: ["store-location", saleStoreId],
+    queryFn: () => getStoreLocation(saleStoreId),
+    enabled: needsStoreFetch,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -80,15 +105,13 @@ export default function ReceiptTicket({
     );
 
   // prioritas store (penting untuk Admin HQ):
-  // 1) cabang transaksi (sale.store_location) — tempat register dibuka
-  // 2) prop store (kalau dikirim manual)
+  // 1) cabang transaksi (sale.store_location)
+  // 2) prop store
   // 3) cabang kasir di sale
-  // 4) store dari profil user (me) — last resort only
-  const saleStore = pickStore(sale);
-  const propStore = storeProp || null;
-  const cashierStore = pickStore(sale?.cashier);
-  const meStore = pickStore(me);
-  const loc = saleStore || propStore || cashierStore || meStore || null;
+  // 4) fetch by sale.store_location_id
+  // NEVER fall back to /me store — that is the admin home brand.
+  const loc =
+    saleStore || propStore || cashierStore || fetchedStore || null;
 
   // URL logo yang sudah di-normalisasi untuk endpoint API
   const logoUrl = buildStoreLogoUrl(loc);

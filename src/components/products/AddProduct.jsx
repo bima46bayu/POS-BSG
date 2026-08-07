@@ -45,7 +45,6 @@ export default function AddProduct({
   useEffect(() => {
     if (!open) return;
     setForm((f) => ({ ...f, category_id: "", sub_category_id: "" }));
-    setOptionGroupIds([]);
   }, [open, storeLocationId]);
 
   // Auto-generate SKU: SK-{storeCode}-001 when modal opens / branch changes
