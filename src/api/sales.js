@@ -141,9 +141,21 @@ export async function voidSale(saleId, payload = {}, signal) {
   return data;
 }
 
-/** Backend caps per_page at 200; callers must walk all pages for a full range. */
+/** Backend caps per_page (200 without items, 50 with). Walk pages for a full range. */
 const SALES_PAGE_SIZE = 200;
+const SALES_PAGE_SIZE_WITH_ITEMS = 50;
+const SALES_MIN_PAGE_SIZE = 5;
 const SALES_MAX_PAGES = 500;
+
+function isTruncatedSalesError(err) {
+  const msg = String(err?.message || err || "");
+  return (
+    err?.name === "SyntaxError" ||
+    /Unexpected end of (JSON )?input/i.test(msg) ||
+    /Unexpected token/i.test(msg) ||
+    /terpotong/i.test(msg)
+  );
+}
 
 /** Fetch every page of /api/sales for the given filters (from, to, status, code, …). */
 export async function listAllSales(params = {}, signal, options = {}) {
@@ -151,21 +163,39 @@ export async function listAllSales(params = {}, signal, options = {}) {
   const all = [];
   let page = 1;
   let lastPage = 1;
+  let pageSize = includeItems ? SALES_PAGE_SIZE_WITH_ITEMS : SALES_PAGE_SIZE;
 
   do {
     const pageParams = {
       ...params,
       page,
-      per_page: SALES_PAGE_SIZE,
+      per_page: pageSize,
     };
     if (!includeItems) {
       pageParams.without_items = 1;
     }
 
-    const { items, meta } = await getSales(pageParams, signal);
-    all.push(...items);
-    lastPage = meta?.last_page ?? 1;
-    page += 1;
+    try {
+      const { items, meta } = await getSales(pageParams, signal);
+      all.push(...items);
+      lastPage = meta?.last_page ?? 1;
+      page += 1;
+      if (!items?.length) break;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (isTruncatedSalesError(err) && pageSize > SALES_MIN_PAGE_SIZE) {
+        // Page index depends on per_page — restart with a smaller chunk.
+        pageSize = Math.max(
+          SALES_MIN_PAGE_SIZE,
+          Math.floor(pageSize / 2)
+        );
+        all.length = 0;
+        page = 1;
+        lastPage = 1;
+        continue;
+      }
+      throw err;
+    }
   } while (page <= lastPage && page <= SALES_MAX_PAGES);
 
   return all;

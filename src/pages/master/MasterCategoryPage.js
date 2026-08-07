@@ -44,13 +44,13 @@ function BaseModal({ open, title, onClose, children, footer }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl w-full max-w-md mx-4 shadow-xl border">
-        <div className="px-5 py-4 border-b flex items-center justify-between">
-          <h3 className="font-semibold">{title}</h3>
+      <div className="bg-white rounded-xl w-full max-w-xl mx-4 shadow-xl border">
+        <div className="px-6 py-5 border-b flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{title}</h3>
           <button onClick={onClose}><X className="w-5 h-5" /></button>
         </div>
-        <div className="p-5">{children}</div>
-        <div className="px-5 py-4 border-t flex justify-end gap-3">
+        <div className="p-6">{children}</div>
+        <div className="px-6 py-5 border-t flex justify-end gap-3">
           {footer}
         </div>
       </div>

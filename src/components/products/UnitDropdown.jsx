@@ -23,8 +23,14 @@ import {
  *  - value: unit_id (number | string | null)
  *  - onChange: (unitId) => void
  *  - placeholder?: string
+ *  - initialLabel?: string  // show selected name before units finish loading
  */
-export default function UnitDropdown({ value, onChange, placeholder }) {
+export default function UnitDropdown({
+  value,
+  onChange,
+  placeholder,
+  initialLabel = "",
+}) {
   const [open, setOpen] = useState(false);
   const [units, setUnits] = useState([]); // {id, name}
   const [loading, setLoading] = useState(false);
@@ -42,10 +48,15 @@ export default function UnitDropdown({ value, onChange, placeholder }) {
   const containerRef = useRef(null);
 
   const selectedUnit = units.find((u) => String(u.id) === String(value));
+  const displayLabel =
+    selectedUnit?.name ||
+    (value != null && value !== "" ? initialLabel : "") ||
+    "";
 
-  // load units saat dropdown pertama kali dibuka
+  // Load units when opened OR when a value is already selected (edit form)
   useEffect(() => {
-    if (!open || units.length) return;
+    const needsLabel = value != null && value !== "";
+    if ((!open && !needsLabel) || units.length) return;
 
     let cancelled = false;
     (async () => {
@@ -64,7 +75,7 @@ export default function UnitDropdown({ value, onChange, placeholder }) {
     return () => {
       cancelled = true;
     };
-  }, [open, units.length]);
+  }, [open, value, units.length]);
 
   // click outside dropdown → tutup
   useEffect(() => {
@@ -198,8 +209,8 @@ export default function UnitDropdown({ value, onChange, placeholder }) {
           onClick={() => setOpen((s) => !s)}
           className="w-full flex items-center justify-between rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm text-left hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
-          <span className={selectedUnit ? "text-gray-900" : "text-gray-400"}>
-            {selectedUnit?.name || placeholder || "Pilih satuan"}
+          <span className={displayLabel ? "text-gray-900" : "text-gray-400"}>
+            {displayLabel || placeholder || "Pilih satuan"}
           </span>
           <ChevronDown className="w-4 h-4 text-gray-500 ml-2" />
         </button>

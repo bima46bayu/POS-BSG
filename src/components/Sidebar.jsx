@@ -23,6 +23,7 @@ import {
   BadgeDollarSign,
   ChefHat,
   KeyRound,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -169,6 +170,7 @@ export default function Sidebar({
     { label: "Category", path: "/master/category", icon: Folder },
     { label: "Sub-Category", path: "/master/sub-category", icon: GitBranch },
     { label: "Product Recipe", path: "/master/recipe", icon: ChefHat },
+    { label: "Product Options", path: "/master/product-option", icon: SlidersHorizontal },
     { label: "Additional Charge", path: "/master/additional-charge", icon: BadgeDollarSign },
     { label: "Discount", path: "/master/discount", icon: BadgePercent },
     { label: "Supplier", path: "/master/supplier", icon: Truck },

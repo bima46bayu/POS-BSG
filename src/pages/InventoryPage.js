@@ -28,7 +28,11 @@ const PER_PAGE = 10;
 const STORAGE_KEY = "inventory_store_id";
 const PARENT_STORAGE_KEY = "inventory_parent_store_id";
 
-const toNum = (v) => Number(v ?? 0).toLocaleString("id-ID");
+const toNum = (v) =>
+  Number(v ?? 0).toLocaleString("id-ID", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 4,
+  });
 const formatIDR = (v) =>
   Number(v ?? 0).toLocaleString("id-ID", {
     style: "currency",
@@ -39,6 +43,22 @@ const labelFromMap = (m, id) =>
   id == null
     ? "-"
     : m.get(id) ?? m.get(Number(id)) ?? m.get(String(id)) ?? String(id);
+
+const categoryLabel = (row, catMap) =>
+  row?.category?.name ||
+  row?.category_name ||
+  labelFromMap(catMap, row?.category_id);
+
+const subCategoryLabel = (row, subMap) =>
+  row?.sub_category?.name ||
+  row?.subCategory?.name ||
+  row?.sub_category_name ||
+  labelFromMap(subMap, row?.sub_category_id);
+
+const stockQty = (row) => Number(row?.stock ?? row?.stock_total ?? 0) || 0;
+const lineTotal = (row) => stockQty(row) * (Number(row?.price) || 0);
+const uomLabel = (row) =>
+  row?.unit?.name || row?.unit_name || row?.uom || "-";
 
 export default function InventoryProductsPage() {
   const navigate = useNavigate();
@@ -142,56 +162,43 @@ export default function InventoryProductsPage() {
   // client filter aktif untuk kategori/subkategori
   const clientFilterActive = Boolean(categoryId || subCategoryId);
 
-  // ===== load categories & subcategories (simple cache 5 menit) =====
+  // ===== load categories & subcategories for the selected store =====
   useEffect(() => {
+    if (needsStoreSelection || effectiveStoreId == null) {
+      setCategories([]);
+      setSubCategories([]);
+      return;
+    }
+
     let cancel = false;
 
     const toArray = (res) => {
       const payload = res?.data ?? res;
       if (Array.isArray(payload)) return payload;
       if (Array.isArray(payload?.data)) return payload.data;
+      if (Array.isArray(payload?.items)) return payload.items;
       return [];
     };
 
-    const cached = (() => {
-      try {
-        const raw = localStorage.getItem("POS_CATEGORIES_CACHE_V1");
-        return raw ? JSON.parse(raw) : null;
-      } catch {
-        return null;
-      }
-    })();
-
-    if (cached?.categories?.length) {
-      setCategories(cached.categories);
-      setSubCategories(cached.subCategories || []);
-    }
-
     const fetchFresh = async () => {
       try {
+        const storeParams = {
+          store_location_id: effectiveStoreId,
+          per_page: 1000,
+        };
         const [catRes, subRes] = await Promise.all([
-          getCategories(),
-          listSubCategories({ per_page: 1000 }),
+          getCategories(storeParams),
+          listSubCategories(storeParams),
         ]);
         if (cancel) return;
         const cats = toArray(catRes);
-        const subs = (subRes?.items || []).map((s) => ({
+        const subs = (subRes?.items || toArray(subRes) || []).map((s) => ({
           id: s.id,
           name: s.name,
           category_id: s.category_id,
         }));
         setCategories(cats);
         setSubCategories(subs);
-        try {
-          localStorage.setItem(
-            "POS_CATEGORIES_CACHE_V1",
-            JSON.stringify({
-              categories: cats,
-              subCategories: subs,
-              ts: Date.now(),
-            })
-          );
-        } catch {}
       } catch {
         if (!cancel) {
           setCategories([]);
@@ -200,14 +207,12 @@ export default function InventoryProductsPage() {
       }
     };
 
-    const needFetch =
-      !cached || !cached.ts || Date.now() - cached.ts > 5 * 60 * 1000;
-    if (needFetch) fetchFresh();
+    fetchFresh();
 
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [effectiveStoreId, needsStoreSelection]);
 
   // ===== FETCH LIST (server paging vs client filter mode) =====
   useEffect(() => {
@@ -319,9 +324,9 @@ export default function InventoryProductsPage() {
         list = [...list].sort((a, b) => {
           const pick = (row) => {
             if (sortKey === "category_id")
-              return labelFromMap(catMap, row.category_id);
+              return categoryLabel(row, catMap);
             if (sortKey === "sub_category_id")
-              return labelFromMap(subMap, row.sub_category_id);
+              return subCategoryLabel(row, subMap);
             return row[sortKey];
           };
           const va = pick(a);
@@ -420,10 +425,16 @@ export default function InventoryProductsPage() {
       cell: (row) => <span className="text-gray-700">{row.sku || "-"}</span>,
     },
     {
+      key: "uom",
+      header: "UOM",
+      width: "100px",
+      cell: (row) => <span className="text-gray-700">{uomLabel(row)}</span>,
+    },
+    {
       key: "category_id",
       header: "Category",
       width: "200px",
-      cell: (row) => <span>{labelFromMap(catMap, row.category_id)}</span>,
+      cell: (row) => <span>{categoryLabel(row, catMap)}</span>,
     },
     {
       key: "sub_category_id",
@@ -431,7 +442,7 @@ export default function InventoryProductsPage() {
       width: "220px",
       cell: (row) => (
         <span className="text-gray-700">
-          {labelFromMap(subMap, row.sub_category_id)}
+          {subCategoryLabel(row, subMap)}
         </span>
       ),
     },
@@ -450,6 +461,17 @@ export default function InventoryProductsPage() {
       className: "hidden sm:table-cell",
       cell: (row) => (
         <span className="font-medium">{formatIDR(row.price)}</span>
+      ),
+    },
+    {
+      key: "total",
+      header: "Total",
+      align: "right",
+      width: "150px",
+      cell: (row) => (
+        <span className="font-semibold text-slate-900">
+          {formatIDR(lineTotal(row))}
+        </span>
       ),
     },
     {
@@ -506,10 +528,12 @@ export default function InventoryProductsPage() {
       const headers = [
         "SKU",
         "Product",
+        "UOM",
         "Category",
         "Sub Category",
         "Stock",
         "Price",
+        "Total",
       ];
       const escape = (v) => {
         if (v == null) return "";
@@ -517,15 +541,17 @@ export default function InventoryProductsPage() {
         return /[\",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
       };
       const csvRows = (data || []).map((r) => {
-        const cat = labelFromMap(catMap, r.category_id);
-        const sub = labelFromMap(subMap, r.sub_category_id);
+        const cat = categoryLabel(r, catMap);
+        const sub = subCategoryLabel(r, subMap);
         return [
           r.sku || "-",
           r.name || "-",
+          uomLabel(r),
           cat,
           sub,
-          toNum(r.stock ?? r.stock_total ?? 0),
+          toNum(stockQty(r)),
           formatIDR(r.price),
+          formatIDR(lineTotal(r)),
         ]
           .map(escape)
           .join(",");

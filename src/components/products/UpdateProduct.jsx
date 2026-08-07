@@ -53,21 +53,30 @@ export default function UpdateProduct({
         tracked = !!Number(product.is_stock_tracked);
       }
 
+      const unitId =
+        product.unit_id ??
+        product.unit?.id ??
+        null;
+
+      const stockRaw = product.stock;
+      const stockFormatted =
+        stockRaw === null || stockRaw === undefined || stockRaw === ""
+          ? ""
+          : Number(stockRaw).toFixed(2);
+
       setForm({
         name: product.name ?? "",
         price: product.price ?? "",
         category_id: product.category_id ?? "",
         sub_category_id: product.sub_category_id ?? "",
-        stock: product.stock ?? "",
+        stock: stockFormatted,
         sku: product.sku ?? "",
         description: product.description ?? "",
-        unit_id:
-          product.unit_id === null || product.unit_id === undefined
-            ? ""
-            : String(product.unit_id),
+        unit_id: unitId === null || unitId === undefined ? "" : String(unitId),
       });
 
       setTrackInventory(tracked);
+
       setFiles([]);
       setSubmitting(false);
       return;
@@ -315,11 +324,10 @@ export default function UpdateProduct({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Field label="Stock (baca saja)">
               <Input
-                type="number"
-                inputMode="numeric"
-                placeholder="0"
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
                 value={form.stock}
-                min="0"
                 disabled
                 title="Stok diubah via GR, stock opname, atau import — bukan edit produk"
               />
@@ -332,6 +340,9 @@ export default function UpdateProduct({
                 value={form.unit_id}
                 onChange={onChangeUnit}
                 placeholder="Pilih / kelola satuan"
+                initialLabel={
+                  product?.unit?.name || product?.unit_name || ""
+                }
               />
             </Field>
           </div>

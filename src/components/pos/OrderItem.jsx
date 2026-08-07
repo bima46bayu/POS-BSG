@@ -9,6 +9,11 @@ const OrderItem = ({
 }) => {
   const unitPrice = Number(item.price || 0);
   const qty = Number(item.quantity || 0);
+  const lineKey = item.line_key ?? item.id;
+  const optionsLabel = (item.selected_options || [])
+    .map((o) => o.name)
+    .filter(Boolean)
+    .join(", ");
 
   const formatCurrency = (amount) =>
     `Rp${Number(amount || 0).toLocaleString("id-ID")}`;
@@ -53,15 +58,29 @@ const OrderItem = ({
               >
                 {item.name}
               </div>
+              {optionsLabel && (
+                <div
+                  className="text-[11px] text-blue-600 mt-0.5 whitespace-normal break-words leading-snug"
+                  title={optionsLabel}
+                >
+                  {optionsLabel}
+                </div>
+              )}
               <div className="text-xs text-gray-500 mt-0.5">
                 {formatCurrency(unitPrice)} / item
+                {Number(item.options_price) > 0 && (
+                  <span className="text-gray-400">
+                    {" "}
+                    (+{formatCurrency(item.options_price)})
+                  </span>
+                )}
               </div>
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
-                onClick={() => onUpdateQuantity(item.id, -1)}
+                onClick={() => onUpdateQuantity(lineKey, -1)}
                 className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-300"
                 aria-label="Decrease quantity"
               >
@@ -72,7 +91,7 @@ const OrderItem = ({
               </span>
               <button
                 type="button"
-                onClick={() => onUpdateQuantity(item.id, 1)}
+                onClick={() => onUpdateQuantity(lineKey, 1)}
                 className="w-7 h-7 rounded-full bg-blue-500 flex items-center justify-center text-white hover:bg-blue-600"
                 aria-label="Increase quantity"
               >
@@ -89,7 +108,7 @@ const OrderItem = ({
                 const val = e.target.value;
 
                 if (!val) {
-                  onUpdateDiscount?.(item.id, {
+                  onUpdateDiscount?.(lineKey, {
                     item_discount_id: null,
                     discount_type: "%",
                     discount_value: 0,
@@ -102,7 +121,7 @@ const OrderItem = ({
                 );
                 if (!d) return;
 
-                onUpdateDiscount?.(item.id, {
+                onUpdateDiscount?.(lineKey, {
                   item_discount_id: d.id,
                   discount_type: d.kind === "PERCENT" ? "%" : "rp",
                   discount_value: Number(d.value),

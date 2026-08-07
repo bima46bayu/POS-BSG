@@ -185,6 +185,22 @@ export default function SaleDetailModal({ open, onClose, sale }) {
                           netU * qty
                       );
 
+                      // opsi item (sugar level, ice level, dll)
+                      let rawOpts = it.options ?? null;
+                      if (typeof rawOpts === "string") {
+                        try {
+                          rawOpts = JSON.parse(rawOpts);
+                        } catch {
+                          rawOpts = null;
+                        }
+                      }
+                      const optionsLabel = Array.isArray(rawOpts)
+                        ? rawOpts
+                            .map((o) => o?.name)
+                            .filter(Boolean)
+                            .join(", ")
+                        : "";
+
                       return (
                         <tr key={idx} className="border-t">
                           <td className="px-4 py-2">
@@ -192,6 +208,11 @@ export default function SaleDetailModal({ open, onClose, sale }) {
                               it.product_name ||
                               it?.product?.name ||
                               `Item ${idx + 1}`}
+                            {optionsLabel && (
+                              <div className="text-[11px] text-blue-600 mt-0.5">
+                                {optionsLabel}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-2 text-right">
                             {qty}

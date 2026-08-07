@@ -180,7 +180,10 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
               </label>
               <input
                 type="number"
-                min={1}
+                min={0}
+                step="any"
+                inputMode="decimal"
+                placeholder="0.05"
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
@@ -407,7 +410,7 @@ export default function StockWriteOffPage() {
         width: "90px",
         cell: (r) => (
           <span className="font-medium">
-            {r.qty}
+            {Number(r.qty).toLocaleString("id-ID", { maximumFractionDigits: 4 })}
             {r.product?.unit?.name ? ` ${r.product.unit.name}` : ""}
           </span>
         ),
@@ -491,7 +494,9 @@ export default function StockWriteOffPage() {
               >
                 <div className="text-xs text-gray-500">{row.label}</div>
                 <div className="text-lg font-semibold text-gray-900">
-                  {row.qty}
+                  {Number(row.qty || 0).toLocaleString("id-ID", {
+                    maximumFractionDigits: 4,
+                  })}
                 </div>
                 <div className="text-xs text-gray-500">{IDR(row.cost)}</div>
               </div>
@@ -499,7 +504,9 @@ export default function StockWriteOffPage() {
             <div className="bg-slate-900 text-white rounded-lg p-3">
               <div className="text-xs text-slate-300">Total</div>
               <div className="text-lg font-semibold">
-                {summary?.total_qty ?? 0}
+                {Number(summary?.total_qty ?? 0).toLocaleString("id-ID", {
+                  maximumFractionDigits: 4,
+                })}
               </div>
               <div className="text-xs text-slate-300">
                 {IDR(summary?.total_cost)}
