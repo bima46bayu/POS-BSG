@@ -50,6 +50,9 @@ const DEFAULT_CHECKOUT = {
   reference: "",
   note: "",
   global_discount_id: null,
+  // Selected member object (customer database). Cleared with the rest of the
+  // checkout after each sale so the next customer never inherits it.
+  member: null,
 };
 
 const normalizeCartItem = (item) => {

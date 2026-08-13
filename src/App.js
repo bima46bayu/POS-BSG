@@ -36,6 +36,7 @@ import MasterRecipePage from "./pages/master/MasterRecipePage";
 import MasterDiscountPage from "./pages/master/MasterDiscountPage";
 import AdditionalChargePage from "./pages/master/AdditionalChargePage";
 import MasterProductOptionPage from "./pages/master/MasterProductOptionPage";
+import MasterMemberPage from "./pages/master/MasterMemberPage";
 import VoidSecurityCodePage from "./pages/master/VoidSecurityCodePage";
 
 /* ===== AUTH / API ===== */
@@ -395,6 +396,14 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterProductOptionPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/member"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterMemberPage />
               </ProtectedRoute>
             }
           />
