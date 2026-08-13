@@ -8,6 +8,8 @@ import {
   Landmark,
 } from "lucide-react";
 
+import MemberPicker from "./MemberPicker";
+
 const METHODS = [
   { value: "cash", label: "Cash", icon: Banknote },
   { value: "card", label: "Card", icon: CreditCard },
@@ -27,6 +29,7 @@ export default function Payment({
   registerOpen = true,
   checkout,
   onCheckoutChange,
+  storeLocationId,
 }) {
   const method = checkout?.payment_method ?? "cash";
   const customer = checkout?.customer_name ?? "General";
@@ -34,6 +37,7 @@ export default function Payment({
   const reference = checkout?.reference ?? "";
   const note = checkout?.note ?? "";
   const globalDiscountId = checkout?.global_discount_id ?? null;
+  const member = checkout?.member ?? null;
 
   const patchCheckout = (patch) => {
     onCheckoutChange?.({
@@ -43,6 +47,7 @@ export default function Payment({
       reference,
       note,
       global_discount_id: globalDiscountId,
+      member,
       ...patch,
     });
   };
@@ -91,6 +96,7 @@ export default function Payment({
       reference,
       note,
       global_discount_id: globalDiscountId,
+      member,
     });
   }, [
     method,
@@ -99,6 +105,7 @@ export default function Payment({
     reference,
     note,
     globalDiscountId,
+    member,
     onCheckoutChange,
   ]);
 
@@ -122,6 +129,7 @@ export default function Payment({
         method === "cash" ? Number(paid || 0) : finalTotal,
       reference: reference?.trim() || null,
       customer_name: customer || null,
+      member_id: member?.id ?? null,
       note,
       global_discount_id: globalDiscountId,
       total_preview: finalTotal, // FE preview
@@ -191,6 +199,21 @@ export default function Payment({
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
         </div>
       </div>
+
+      {/* ===== MEMBER (customer database) ===== */}
+      <MemberPicker
+        storeLocationId={storeLocationId}
+        value={member}
+        total={finalTotal}
+        onChange={(m) =>
+          patchCheckout({
+            member: m,
+            // Keep the free-text type in sync so History/receipt still reads
+            // sensibly for a member sale.
+            customer_name: m ? "Member" : customer,
+          })
+        }
+      />
 
       {/* ===== PAYMENT METHOD ===== */}
       <div className="mt-3">

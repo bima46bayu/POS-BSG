@@ -204,6 +204,8 @@ export default function SaleSubmitter({
 
     const payload = {
       customer_name: p.customer_name || null,
+      // Member (customer database). Only the id travels — poin dihitung server.
+      member_id: p.member_id ?? null,
       note: p.note || null,
       store_location_id: storeLocationId,
       items: items.map((i) => ({
@@ -272,6 +274,7 @@ export default function SaleSubmitter({
         registerOpen={registerOpen}
         checkout={checkout}
         onCheckoutChange={onCheckoutChange}
+        storeLocationId={extraPayload?.store_location_id ?? null}
         onSummaryChange={({ discountAmount }) => {
           setDiscountAmount(discountAmount);
         }}

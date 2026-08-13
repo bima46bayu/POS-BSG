@@ -131,6 +131,18 @@ export default function ReceiptTicket({
   const paid = toNumber(sale?.paid);
   const change = toNumber(sale?.change);
   const payments = Array.isArray(sale?.payments) ? sale.payments : [];
+
+  /*
+   | Member & loyalty points.
+   | points_earned is snapshotted on the sale by the server, so the printed
+   | receipt keeps showing the right number even if the rate changes later.
+   */
+  const member = sale?.member || null;
+  const pointsEarned = toNumber(sale?.points_earned);
+  const memberPointBalance =
+    member && member.points_balance != null
+      ? toNumber(member.points_balance)
+      : null;
   // Perubahan: Ambil dari additional_charges_snapshot sesuai response API
   const additionalCharges = Array.isArray(sale?.additional_charges_snapshot)
     ? sale.additional_charges_snapshot
@@ -370,6 +382,27 @@ export default function ReceiptTicket({
           />
         )}
         <Row label="Kembali" value={fmtIDR(change)} />
+
+        {/* Member & poin — hanya tampil kalau transaksi pakai member */}
+        {member && (
+          <>
+            <div className="border-t border-dashed border-gray-600 my-2" />
+            <Row
+              label="Member"
+              value={`${member.name}${member.code ? ` (${member.code})` : ""}`}
+            />
+            {pointsEarned > 0 && (
+              <Row label="Poin didapat" value={`+${pointsEarned}`} />
+            )}
+            {memberPointBalance != null && (
+              <Row
+                label="Total poin"
+                value={String(memberPointBalance)}
+                bold
+              />
+            )}
+          </>
+        )}
 
         <div className="border-t border-dashed border-gray-600 my-2" />
 
