@@ -25,7 +25,7 @@ function BaseModal({ open, title, onClose, children, footer }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-xl shadow-xl border max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-xl w-full max-w-4xl shadow-xl border max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-center justify-between shrink-0">
           <h3 className="font-semibold">{title}</h3>
           <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-100">
@@ -434,6 +434,7 @@ export default function MasterRecipePage() {
       toast.success("Recipe saved");
       setShowAdd(false);
       qc.invalidateQueries({ queryKey: ["product-recipes"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to save"),
   });
@@ -444,6 +445,7 @@ export default function MasterRecipePage() {
       toast.success("Recipe updated");
       setEditTarget(null);
       qc.invalidateQueries({ queryKey: ["product-recipes"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to update"),
   });
@@ -454,6 +456,7 @@ export default function MasterRecipePage() {
       toast.success("Recipe deleted");
       setConfirmDel(null);
       qc.invalidateQueries({ queryKey: ["product-recipes"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Failed to delete"),
   });

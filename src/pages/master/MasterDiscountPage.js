@@ -69,7 +69,7 @@ const computeNominalPreview = (r, base = 100000) => {
 };
 
 /* ===== Base Modal ===== */
-function BaseModal({ open, title, onClose, children, footer, maxW = "max-w-xl" }) {
+function BaseModal({ open, title, onClose, children, footer, maxW = "max-w-3xl" }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -269,7 +269,7 @@ function AddDiscountModal({ open, loading, onClose, onSubmit, stores = [] }) {
       open={open}
       title="Add Discount"
       onClose={loading ? () => {} : onClose}
-      maxW="max-w-2xl"
+      maxW="max-w-4xl"
       footer={
         <>
           <button onClick={onClose} disabled={loading} className="px-3 py-2 border rounded-lg text-sm">
@@ -431,7 +431,7 @@ function EditDiscountModal({ open, loading, onClose, onSubmit, initial, stores =
       open={open}
       title="Edit Discount"
       onClose={loading ? () => {} : onClose}
-      maxW="max-w-2xl"
+      maxW="max-w-4xl"
       footer={
         <>
           <button onClick={onClose} disabled={loading} className="px-3 py-2 border rounded-lg text-sm">
@@ -541,7 +541,7 @@ function DetailDiscountModal({ open, onClose, data, stores = [] }) {
       open={open}
       title="Discount Detail"
       onClose={onClose}
-      maxW="max-w-xl"
+      maxW="max-w-3xl"
       footer={
         <button onClick={onClose} className="px-3 py-2 border rounded-lg text-sm">
           Close

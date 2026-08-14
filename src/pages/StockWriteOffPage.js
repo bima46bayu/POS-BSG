@@ -358,6 +358,7 @@ export default function StockWriteOffPage() {
       qc.invalidateQueries({ queryKey: ["write-offs"] });
       qc.invalidateQueries({ queryKey: ["write-offs-summary"] });
       qc.invalidateQueries({ queryKey: ["inventory-products"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) => {
       const res = e?.response?.data;

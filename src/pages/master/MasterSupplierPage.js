@@ -46,7 +46,7 @@ const startCase = (s) => String(s || "")
   .replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
 /* ---------- Base Modal ---------- */
-function BaseModal({ open, title, onClose, children, footer, maxW = "max-w-xl" }) {
+function BaseModal({ open, title, onClose, children, footer, maxW = "max-w-3xl" }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">

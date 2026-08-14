@@ -113,7 +113,23 @@ export function buildCartLineKey(productId, selected) {
   return ids.length ? `${productId}::${ids.join("-")}` : `${productId}`;
 }
 
-/** Label ringkas untuk ditampilkan di cart / struk. */
+/**
+ * Label for cart / receipt.
+ * Paid add-ons are shown next to the name so the customer sees why the line
+ * price is higher, e.g. `More Ice (+Rp2.000), Less Sugar`.
+ */
 export function formatOptionsLabel(selected) {
-  return (selected || []).map((o) => o.name).filter(Boolean).join(", ");
+  return (selected || [])
+    .map((o) => {
+      const name = (o?.name || "").toString().trim();
+      if (!name) return "";
+
+      const delta = Number(o?.price_delta ?? 0);
+      if (!Number.isFinite(delta) || delta === 0) return name;
+
+      const signed = `${delta > 0 ? "+" : "-"}Rp${Math.abs(delta).toLocaleString("id-ID")}`;
+      return `${name} (${signed})`;
+    })
+    .filter(Boolean)
+    .join(", ");
 }

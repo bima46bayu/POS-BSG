@@ -35,7 +35,7 @@ export default function AddUserModal({
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute left-1/2 top-1/2 w-[560px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white shadow-xl">
+      <div className="absolute left-1/2 top-1/2 w-[768px] max-w-[95vw] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white shadow-xl">
         <div className="px-5 py-4 border-b">
           <h3 className="text-lg font-semibold">{title}</h3>
         </div>

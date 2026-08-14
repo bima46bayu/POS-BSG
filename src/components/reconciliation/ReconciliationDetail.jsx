@@ -291,6 +291,8 @@ export default function ReconciliationDetail({ id, onBack }) {
 
       qc.invalidateQueries({ queryKey: ["recon:detail", id] });
       qc.invalidateQueries({ queryKey: ["recon:list"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
+      qc.invalidateQueries({ queryKey: ["inventory-products"], exact: false });
     },
     onError: (e) => toast.error(e?.response?.data?.message ?? "Gagal apply rekonsiliasi"),
   });

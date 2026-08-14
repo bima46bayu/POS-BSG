@@ -79,7 +79,7 @@ export default function MemberPointsModal({ open, member, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl bg-white rounded-xl shadow-lg max-h-[90vh] flex flex-col">
+      <div className="w-full max-w-4xl bg-white rounded-xl shadow-lg max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <div>
             <h3 className="font-semibold flex items-center gap-2">

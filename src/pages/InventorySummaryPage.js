@@ -48,6 +48,56 @@ const toYMD = (s) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+/* ===== Stock UOM ↔ smallest UOM (Kg↔g, L↔Ml) ===== */
+const UOM_MODE_KEY = "stock_logs_uom_mode"; // "stock" | "smallest"
+
+function normalizeUnitKey(name) {
+  const key = String(name || "")
+    .trim()
+    .toLowerCase();
+  const map = {
+    kg: "kg",
+    kilogram: "kg",
+    kilograms: "kg",
+    g: "g",
+    gr: "g",
+    gram: "g",
+    grams: "g",
+    l: "l",
+    liter: "l",
+    litre: "l",
+    ltr: "l",
+    ml: "ml",
+    milliliter: "ml",
+    millilitre: "ml",
+  };
+  return map[key] || key;
+}
+
+/** Display label for a canonical unit key, preferring the product's own spelling. */
+function unitDisplayLabel(canonicalKey, stockLabel) {
+  const stockKey = normalizeUnitKey(stockLabel);
+  if (stockKey === canonicalKey && stockLabel) return String(stockLabel).trim();
+  const defaults = { kg: "Kg", g: "g", l: "L", ml: "Ml" };
+  return defaults[canonicalKey] || canonicalKey;
+}
+
+/**
+ * @returns {{ stockKey: string, smallestKey: string, factorToSmallest: number } | null}
+ * factorToSmallest: multiply stock-qty by this to get smallest-qty (e.g. Kg→g = 1000).
+ */
+function resolveUomPair(stockUom) {
+  const stockKey = normalizeUnitKey(stockUom);
+  if (!stockKey || stockKey === "-") return null;
+  if (stockKey === "kg" || stockKey === "g") {
+    return { stockKey, smallestKey: "g", factorToSmallest: stockKey === "kg" ? 1000 : 1 };
+  }
+  if (stockKey === "l" || stockKey === "ml") {
+    return { stockKey, smallestKey: "ml", factorToSmallest: stockKey === "l" ? 1000 : 1 };
+  }
+  return null;
+}
+
 /* =========== Arah normalisasi Qty/Cost per Ref Type =========== */
 const fallbackDirection = (refType) => {
   const t = String(refType || "").toUpperCase();
@@ -382,6 +432,25 @@ export default function InventorySummaryPage() {
   // 'desc' (default terbaru di atas) / 'asc'
   const [sortOrder, setSortOrder] = useState("desc");
 
+  // stock = product UOM (e.g. Kg); smallest = g / Ml when convertible
+  const [uomMode, setUomMode] = useState(() => {
+    try {
+      const v = localStorage.getItem(UOM_MODE_KEY);
+      return v === "smallest" ? "smallest" : "stock";
+    } catch {
+      return "stock";
+    }
+  });
+
+  const setUomModePersist = (mode) => {
+    setUomMode(mode);
+    try {
+      localStorage.setItem(UOM_MODE_KEY, mode);
+    } catch {
+      // ignore
+    }
+  };
+
   const load = useCallback(async () => {
     if (needsStoreSelection) {
       setAllLogs([]);
@@ -524,6 +593,21 @@ export default function InventorySummaryPage() {
     productFromState?.unit_name ||
     "-";
 
+  const uomPair = useMemo(() => resolveUomPair(headerUom), [headerUom]);
+  const canToggleSmallest = !!uomPair && uomPair.factorToSmallest !== 1;
+  const displayUom = useMemo(() => {
+    if (!headerUom || headerUom === "-") return "-";
+    if (uomMode === "smallest" && uomPair) {
+      return unitDisplayLabel(uomPair.smallestKey, headerUom);
+    }
+    return String(headerUom).trim();
+  }, [headerUom, uomMode, uomPair]);
+
+  const qtyFactor =
+    uomMode === "smallest" && uomPair ? uomPair.factorToSmallest : 1;
+  // Unit cost is per stock UOM; in smallest view divide by the same factor.
+  const costFactor = qtyFactor > 0 ? 1 / qtyFactor : 1;
+
   // Balance kronologis (ASC)
   const logsWithBalancesAsc = useMemo(() => {
     return addRunningBalances(allLogs, summary.stockBeginning, summary.costBeginning);
@@ -578,27 +662,31 @@ export default function InventorySummaryPage() {
           </span>
       ) },
       {
-        header: headerUom && headerUom !== "-" ? `Qty (±) / ${headerUom}` : "Qty (±)",
+        header: displayUom && displayUom !== "-" ? `Qty (±) / ${displayUom}` : "Qty (±)",
         width: "130px",
         align: "right",
         cell: (r) => {
-          const v = Number(r._display_qty ?? 0);
+          const v = Number(r._display_qty ?? 0) * qtyFactor;
           const cls = v < 0 ? "text-red-600" : v > 0 ? "text-emerald-600" : "text-slate-700";
           const sign = v > 0 ? "+" : "";
-          return <span className={`font-medium ${cls}`}>{sign}{fmtQtyUom(v, headerUom)}</span>;
+          return <span className={`font-medium ${cls}`}>{sign}{fmtQtyUom(v, displayUom)}</span>;
         },
       },
       {
-        header: headerUom && headerUom !== "-" ? `Balance / ${headerUom}` : "Unit Balance",
+        header: displayUom && displayUom !== "-" ? `Balance / ${displayUom}` : "Unit Balance",
         width: "140px",
         align: "right",
-        cell: (r) => <span className="font-semibold">{fmtQtyUom(r._unit_balance_after, headerUom)}</span>,
+        cell: (r) => (
+          <span className="font-semibold">
+            {fmtQtyUom(Number(r._unit_balance_after ?? 0) * qtyFactor, displayUom)}
+          </span>
+        ),
       },
       {
-        header: "Unit Cost",
-        width: "120px",
+        header: displayUom && displayUom !== "-" ? `Unit Cost / ${displayUom}` : "Unit Cost",
+        width: "140px",
         align: "right",
-        cell: (r) => <span>{fmtIDR(r._unit_cost)}</span>,
+        cell: (r) => <span>{fmtIDR(Number(r._unit_cost ?? 0) * costFactor)}</span>,
       },
       {
         header: "Total Cost (±)",
@@ -613,7 +701,7 @@ export default function InventorySummaryPage() {
         cell: (r) => <span className="font-semibold">{fmtIDR(r._cost_balance_after)}</span>,
       },
     ],
-    [headerUom]
+    [displayUom, qtyFactor, costFactor]
   );
 
   /* ===================== Export Handler (client-side) ===================== */
@@ -628,13 +716,24 @@ export default function InventorySummaryPage() {
         to || null
       );
 
+      const pdfRows =
+        qtyFactor === 1
+          ? rowsBalanced
+          : rowsBalanced.map((r) => ({
+              ...r,
+              _display_qty: Number(r._display_qty ?? 0) * qtyFactor,
+              _signed_qty: Number(r._signed_qty ?? 0) * qtyFactor,
+              _unit_balance_after: Number(r._unit_balance_after ?? 0) * qtyFactor,
+              _unit_cost: Number(r._unit_cost ?? 0) * costFactor,
+            }));
+
       const pdfSummary = {
-        stockBeginning: openingQty,
+        stockBeginning: openingQty * qtyFactor,
         stockIn: rowsBalanced.filter(r => Number(r._display_qty||0) > 0)
-                             .reduce((a,b)=> a + Number(b._display_qty||0), 0),
+                             .reduce((a,b)=> a + Number(b._display_qty||0), 0) * qtyFactor,
         stockOut: rowsBalanced.filter(r => Number(r._display_qty||0) < 0)
-                              .reduce((a,b)=> a + Math.abs(Number(b._display_qty||0)), 0),
-        stockEnding: rowsBalanced.length ? rowsBalanced[rowsBalanced.length-1]._unit_balance_after : openingQty,
+                              .reduce((a,b)=> a + Math.abs(Number(b._display_qty||0)), 0) * qtyFactor,
+        stockEnding: (rowsBalanced.length ? rowsBalanced[rowsBalanced.length-1]._unit_balance_after : openingQty) * qtyFactor,
         costBeginning: openingCost,
         costIn: rowsBalanced.filter(r => Number(r._display_cost||0) > 0)
                             .reduce((a,b)=> a + Number(b._display_cost||0), 0),
@@ -647,12 +746,12 @@ export default function InventorySummaryPage() {
         company: "PT. BUANA SELARAS GLOBALINDO",
         productName: headerName,
         sku: headerSKU,
-        uom: headerUom,
+        uom: displayUom,
         period: { from: from || period?.from || null, to: to || period?.to || null },
         summary: pdfSummary,
-        openingQty,
+        openingQty: openingQty * qtyFactor,
         openingCost,
-        rows: rowsBalanced,
+        rows: pdfRows,
       });
 
       toast.success("PDF berhasil dibuat.");
@@ -741,6 +840,35 @@ export default function InventorySummaryPage() {
             </div>
 
             <div className="flex items-center gap-2">
+              {canToggleSmallest && (
+                <div
+                  className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs"
+                  title="Tampilkan Qty & Balance dalam satuan stok atau satuan terkecil"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setUomModePersist("stock")}
+                    className={`px-2.5 py-1.5 rounded-md font-medium transition ${
+                      uomMode === "stock"
+                        ? "bg-white text-slate-900 shadow-sm border border-slate-200"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    {unitDisplayLabel(uomPair.stockKey, headerUom)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUomModePersist("smallest")}
+                    className={`px-2.5 py-1.5 rounded-md font-medium transition ${
+                      uomMode === "smallest"
+                        ? "bg-white text-slate-900 shadow-sm border border-slate-200"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    {unitDisplayLabel(uomPair.smallestKey, headerUom)}
+                  </button>
+                </div>
+              )}
               <div className="text-xs text-slate-500 hidden md:block pl-1">
                 Menampilkan {PER_PAGE} • Total {fmtNum(meta?.total ?? 0)}
               </div>
