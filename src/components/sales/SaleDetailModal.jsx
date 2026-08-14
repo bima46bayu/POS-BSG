@@ -3,6 +3,7 @@ import React, { useCallback, useMemo } from "react";
 import ReceiptTicket from "../ReceiptTicket";
 import { X } from "lucide-react";
 import html2canvas from "html2canvas";
+import { formatOptionsLabel } from "../../api/productOptions";
 
 const fmtIDR = (v) =>
   Number(v ?? 0).toLocaleString("id-ID", {
@@ -194,12 +195,9 @@ export default function SaleDetailModal({ open, onClose, sale }) {
                           rawOpts = null;
                         }
                       }
-                      const optionsLabel = Array.isArray(rawOpts)
-                        ? rawOpts
-                            .map((o) => o?.name)
-                            .filter(Boolean)
-                            .join(", ")
-                        : "";
+                      const optionsLabel = formatOptionsLabel(
+                        Array.isArray(rawOpts) ? rawOpts : []
+                      );
 
                       return (
                         <tr key={idx} className="border-t">

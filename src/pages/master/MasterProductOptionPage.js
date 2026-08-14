@@ -18,11 +18,68 @@ import {
   listOptionGroupProducts,
   syncOptionGroupProducts,
 } from "../../api/productOptions";
+import { getProducts } from "../../api/products";
+import { listUnits } from "../../api/units";
 
 const BRANCH_STORAGE_KEY = "product_option_store_id";
 const PARENT_STORAGE_KEY = "product_option_parent_store_id";
 
 const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
+
+function productUnitId(product) {
+  return product?.unit_id ?? product?.unit?.id ?? "";
+}
+
+function productUnit(product) {
+  return (
+    product?.unit_name ||
+    product?.unit?.name ||
+    product?.unit?.code ||
+    ""
+  );
+}
+
+function normalizeUnitKey(name) {
+  const key = String(name || "").toLowerCase().trim();
+  const map = {
+    kg: "kg",
+    kilogram: "kg",
+    kilograms: "kg",
+    g: "g",
+    gr: "g",
+    gram: "g",
+    grams: "g",
+    l: "l",
+    liter: "l",
+    litre: "l",
+    ltr: "l",
+    ml: "ml",
+    milliliter: "ml",
+    millilitre: "ml",
+  };
+  return map[key] || key;
+}
+
+function unitFamily(name) {
+  const key = normalizeUnitKey(name);
+  if (key === "kg" || key === "g") return "mass";
+  if (key === "l" || key === "ml") return "volume";
+  return "other";
+}
+
+/** Same filter as Master Recipe — only units convertible to the bahan stock unit. */
+function compatibleUnits(allUnits, stockUnitName) {
+  if (!stockUnitName) return allUnits;
+  const family = unitFamily(stockUnitName);
+  if (family === "mass") {
+    return allUnits.filter((u) => unitFamily(u.name) === "mass");
+  }
+  if (family === "volume") {
+    return allUnits.filter((u) => unitFamily(u.name) === "volume");
+  }
+  const stockKey = normalizeUnitKey(stockUnitName);
+  return allUnits.filter((u) => normalizeUnitKey(u.name) === stockKey);
+}
 
 function Toggle({ checked, onChange, disabled }) {
   return (
@@ -43,11 +100,15 @@ function Toggle({ checked, onChange, disabled }) {
   );
 }
 
-function BaseModal({ open, title, onClose, children, footer }) {
+function BaseModal({ open, title, onClose, children, footer, wide }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-lg shadow-xl border max-h-[90vh] flex flex-col">
+      <div
+        className={`bg-white rounded-xl w-full ${
+          wide ? "max-w-4xl" : "max-w-3xl"
+        } shadow-xl border max-h-[90vh] flex flex-col`}
+      >
         <div className="px-5 py-3 border-b flex items-center justify-between shrink-0">
           <h3 className="font-semibold">{title}</h3>
           <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-100">
@@ -64,7 +125,7 @@ function BaseModal({ open, title, onClose, children, footer }) {
 }
 
 /* ================= ADD / EDIT GROUP ================= */
-function GroupModal({ open, onClose, onSubmit, loading, initial }) {
+function GroupModal({ open, onClose, onSubmit, loading, initial, storeLocationId }) {
   const isEdit = !!initial;
 
   const [form, setForm] = useState({
@@ -73,27 +134,107 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
     is_required: false,
     is_active: true,
     sort_order: 0,
+    ingredient_product_id: "",
   });
   const [values, setValues] = useState([]);
+  const [hydrated, setHydrated] = useState(false);
 
+  // Stock products = recipe ingredients (Ice, Gula, …).
+  const stockQuery = useQuery({
+    queryKey: ["option-ingredients", storeLocationId],
+    enabled: open && storeLocationId != null,
+    queryFn: ({ signal }) =>
+      getProducts(
+        {
+          per_page: 500,
+          inventory_type: "stock",
+          store_location_id: storeLocationId,
+        },
+        signal
+      ).then((res) => res?.items ?? []),
+    staleTime: 60_000,
+  });
+
+  const unitsQuery = useQuery({
+    queryKey: ["units-for-option-qty"],
+    enabled: open,
+    queryFn: () => listUnits({ per_page: 200 }),
+    staleTime: 120_000,
+  });
+
+  const stockProducts = stockQuery.data ?? [];
+  const units = unitsQuery.data ?? [];
+
+  // Wait for catalogs before painting editable rows — otherwise the unit
+  // <select> has no options yet and browsers flash the stock unit (L).
+  const catalogsReady =
+    open &&
+    unitsQuery.isSuccess &&
+    (storeLocationId == null || stockQuery.isSuccess);
+
+  const selectedIngredient = useMemo(() => {
+    const id = Number(form.ingredient_product_id || 0);
+    if (!id) return null;
+    return (
+      stockProducts.find((x) => Number(x.id) === id) ??
+      (Number(initial?.ingredient_product_id) === id ? initial?.ingredient : null) ??
+      null
+    );
+  }, [form.ingredient_product_id, stockProducts, initial]);
+
+  const stockUnitName =
+    productUnit(selectedIngredient) || productUnit(initial?.ingredient) || "";
+  const qtyUnits = useMemo(
+    () => compatibleUnits(units, stockUnitName),
+    [units, stockUnitName]
+  );
+
+  const defaultQtyUnitId = useMemo(() => {
+    const fromIng =
+      productUnitId(selectedIngredient) || productUnitId(initial?.ingredient);
+    if (fromIng) return String(fromIng);
+    return qtyUnits[0] ? String(qtyUnits[0].id) : "";
+  }, [selectedIngredient, initial, qtyUnits]);
+
+  // Reset when closed so the next open always re-hydrates from saved data.
   useEffect(() => {
-    if (!open) return;
+    if (!open) setHydrated(false);
+  }, [open]);
+
+  // Hydrate once catalogs are ready — never before, so saved Ml is not lost.
+  useEffect(() => {
+    if (!open || !catalogsReady || hydrated) return;
 
     if (initial) {
+      const ingId = initial.ingredient_product_id
+        ? String(initial.ingredient_product_id)
+        : "";
+      const fallbackUnit = String(
+        productUnitId(initial.ingredient) || defaultQtyUnitId || ""
+      );
       setForm({
         name: initial.name || "",
         selection_type: initial.selection_type === "MULTI" ? "MULTI" : "SINGLE",
         is_required: !!initial.is_required,
         is_active: initial.is_active !== false,
         sort_order: Number(initial.sort_order ?? 0),
+        ingredient_product_id: ingId,
       });
       setValues(
-        (initial.values || []).map((v) => ({
-          id: v.id,
-          name: v.name || "",
-          price_delta: Number(v.price_delta ?? 0),
-          is_active: v.is_active !== false,
-        }))
+        (initial.values || []).map((v) => {
+          const saved = String(
+            v.qty_delta_unit_id ?? v.qty_delta_unit?.id ?? ""
+          );
+          return {
+            id: v.id,
+            name: v.name || "",
+            price_delta: Number(v.price_delta ?? 0),
+            qty_delta: String(v.qty_delta ?? 0),
+            // Prefer the saved unit; only fall back when none was stored.
+            qty_delta_unit_id: saved || fallbackUnit,
+            is_active: v.is_active !== false,
+          };
+        })
       );
     } else {
       setForm({
@@ -102,10 +243,20 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
         is_required: false,
         is_active: true,
         sort_order: 0,
+        ingredient_product_id: "",
       });
-      setValues([{ name: "", price_delta: 0, is_active: true }]);
+      setValues([
+        {
+          name: "",
+          price_delta: 0,
+          qty_delta: "0",
+          qty_delta_unit_id: "",
+          is_active: true,
+        },
+      ]);
     }
-  }, [open, initial]);
+    setHydrated(true);
+  }, [open, catalogsReady, hydrated, initial, defaultQtyUnitId]);
 
   const set = (k) => (e) =>
     setForm((p) => ({
@@ -113,13 +264,47 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
       [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value,
     }));
 
+  const onIngredientChange = (e) => {
+    const id = e.target.value;
+    const product = stockProducts.find((x) => String(x.id) === String(id));
+    const nextStock = productUnit(product);
+    const allowed = compatibleUnits(units, nextStock);
+    const nextUnitId =
+      productUnitId(product) || (allowed[0] ? String(allowed[0].id) : "");
+
+    setForm((p) => ({
+      ...p,
+      ingredient_product_id: id,
+      name:
+        p.name.trim() === "" || p.name === (initial?.ingredient?.name ?? "")
+          ? product?.name || p.name
+          : p.name,
+    }));
+
+    setValues((prev) =>
+      prev.map((v) => ({
+        ...v,
+        qty_delta_unit_id: nextUnitId || v.qty_delta_unit_id,
+      }))
+    );
+  };
+
   const setValue = (idx, patch) =>
     setValues((prev) =>
       prev.map((v, i) => (i === idx ? { ...v, ...patch } : v))
     );
 
   const addValue = () =>
-    setValues((prev) => [...prev, { name: "", price_delta: 0, is_active: true }]);
+    setValues((prev) => [
+      ...prev,
+      {
+        name: "",
+        price_delta: 0,
+        qty_delta: "0",
+        qty_delta_unit_id: defaultQtyUnitId,
+        is_active: true,
+      },
+    ]);
 
   const removeValue = (idx) =>
     setValues((prev) => prev.filter((_, i) => i !== idx));
@@ -133,6 +318,10 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
         ...(v.id ? { id: v.id } : {}),
         name: (v.name || "").trim(),
         price_delta: Number(v.price_delta || 0),
+        qty_delta: Number(v.qty_delta || 0),
+        qty_delta_unit_id: v.qty_delta_unit_id
+          ? Number(v.qty_delta_unit_id)
+          : null,
         is_active: v.is_active !== false,
         sort_order: i,
       }))
@@ -140,19 +329,35 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
 
     if (!cleaned.length) return toast.error("Minimal 1 pilihan");
 
+    const hasQtyAdjust = cleaned.some((v) => Number(v.qty_delta) !== 0);
+    if (hasQtyAdjust && !form.ingredient_product_id) {
+      return toast.error(
+        "Pilih bahan inventory dulu — kolom qty mengubah resep bahan itu."
+      );
+    }
+    if (hasQtyAdjust && cleaned.some((v) => Number(v.qty_delta) !== 0 && !v.qty_delta_unit_id)) {
+      return toast.error("Pilih satuan (Unit) untuk qty, sama seperti di resep.");
+    }
+
     onSubmit({
       name,
       selection_type: form.selection_type,
       is_required: !!form.is_required,
       is_active: !!form.is_active,
       sort_order: Number(form.sort_order || 0),
+      ingredient_product_id: form.ingredient_product_id
+        ? Number(form.ingredient_product_id)
+        : null,
       values: cleaned,
     });
   };
 
+  const showForm = catalogsReady && hydrated;
+
   return (
     <BaseModal
       open={open}
+      wide
       title={isEdit ? `Edit ${initial.name}` : "Tambah Grup Opsi"}
       onClose={loading ? () => {} : onClose}
       footer={
@@ -166,7 +371,7 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
           </button>
           <button
             onClick={submit}
-            disabled={loading}
+            disabled={loading || !showForm}
             className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50"
           >
             {loading ? "Saving..." : "Save"}
@@ -174,13 +379,43 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
         </>
       }
     >
+      {!showForm ? (
+        <div className="py-16 text-center text-sm text-gray-500">
+          Memuat data opsi…
+        </div>
+      ) : (
       <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            Bahan Inventory (untuk qty resep)
+          </label>
+          <select
+            value={form.ingredient_product_id}
+            onChange={onIngredientChange}
+            className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+          >
+            <option value="">— Tidak dihubungkan (harga saja) —</option>
+            {stockProducts.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.unit_name || p.unit?.name
+                  ? ` (${p.unit_name || p.unit?.name})`
+                  : ""}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-gray-500">
+            Contoh: pilih <b>Ice</b> supaya kolom qty menambah/mengurangi es di
+            resep produk.
+          </p>
+        </div>
+
         <div>
           <label className="block text-sm font-medium mb-1">Nama Grup</label>
           <input
             value={form.name}
             onChange={set("name")}
-            placeholder="Sugar Level"
+            placeholder="Ice / Sugar Level"
             className="w-full px-3 py-2 border rounded-lg text-sm"
           />
         </div>
@@ -222,6 +457,7 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium">Pilihan</span>
             <button
+              type="button"
               onClick={addValue}
               className="inline-flex items-center gap-1 text-xs px-2 py-1 border rounded-lg hover:bg-gray-50"
             >
@@ -230,17 +466,33 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
             </button>
           </div>
 
+          <div className="grid grid-cols-[1fr_5rem_4.5rem_4.5rem_2.5rem] gap-2 items-center px-1 mb-1">
+            <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+              Nama
+            </span>
+            <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+              Harga
+            </span>
+            <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+              Amount
+            </span>
+            <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+              Unit
+            </span>
+            <span />
+          </div>
+
           <div className="space-y-2">
             {values.map((v, idx) => (
-              <div key={idx} className="flex items-center gap-2">
+              <div key={v.id ?? `new-${idx}`} className="flex gap-2 items-center">
                 <input
                   value={v.name}
                   onChange={(e) => setValue(idx, { name: e.target.value })}
-                  placeholder="No Sugar"
-                  className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                  placeholder="No Ice"
+                  className="flex-1 min-w-0 px-2 py-2 border rounded-lg text-sm"
                 />
-                <div className="relative w-32">
-                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                <div className="relative w-[5rem] shrink-0">
+                  <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-gray-400">
                     Rp
                   </span>
                   <input
@@ -250,12 +502,39 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
                     onChange={(e) =>
                       setValue(idx, { price_delta: e.target.value })
                     }
-                    className="w-full pl-7 pr-2 py-2 border rounded-lg text-sm"
+                    className="w-full pl-6 pr-1 py-2 border rounded-lg text-sm"
+                    title="Tambahan harga"
                   />
                 </div>
+                <input
+                  type="number"
+                  step="0.0001"
+                  value={v.qty_delta}
+                  onChange={(e) => setValue(idx, { qty_delta: e.target.value })}
+                  className="w-[4.5rem] px-2 py-2 border rounded-lg text-sm shrink-0"
+                  title="Qty vs resep (+ tambah / − kurang)"
+                  placeholder="0"
+                />
+                <select
+                  value={v.qty_delta_unit_id || ""}
+                  onChange={(e) =>
+                    setValue(idx, { qty_delta_unit_id: e.target.value })
+                  }
+                  className="w-[4.5rem] px-1 py-2 border rounded-lg text-sm shrink-0 bg-white"
+                  title="Satuan amount (sama seperti resep)"
+                  disabled={!form.ingredient_product_id}
+                >
+                  <option value="">Unit</option>
+                  {qtyUnits.map((u) => (
+                    <option key={u.id} value={String(u.id)}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
                 <button
+                  type="button"
                   onClick={() => removeValue(idx)}
-                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg shrink-0"
                   title="Hapus pilihan"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -265,10 +544,18 @@ function GroupModal({ open, onClose, onSubmit, loading, initial }) {
           </div>
 
           <p className="mt-2 text-[11px] text-gray-500">
-            Isi Rp 0 kalau pilihan tidak menambah harga.
+            Amount + Unit sama seperti Product Recipe.{" "}
+            <b>+5 Ml</b> menambah, <b>-10 Ml</b> mengurangi dari qty resep.
+            {stockUnitName ? (
+              <>
+                {" "}
+                Bahan ini stoknya dalam <b>{stockUnitName}</b>.
+              </>
+            ) : null}
           </p>
         </div>
       </div>
+      )}
     </BaseModal>
   );
 }
@@ -344,6 +631,7 @@ function AssignProductsModal({ open, group, onClose }) {
       toast.success(`Terpasang di ${res?.count ?? 0} produk`);
       qc.invalidateQueries({ queryKey: ["product-option-groups"] });
       qc.invalidateQueries({ queryKey: ["option-group-products", groupId] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
       onClose();
     },
     onError: (e) =>
@@ -509,6 +797,28 @@ export default function MasterProductOptionPage() {
       listProductOptionGroups({ store_location_id: effectiveStoreId }, signal),
   });
 
+  // Prefetch catalogs so Edit can hydrate with the real saved units immediately.
+  useQuery({
+    queryKey: ["units-for-option-qty"],
+    queryFn: () => listUnits({ per_page: 200 }),
+    staleTime: 120_000,
+  });
+
+  useQuery({
+    queryKey: ["option-ingredients", effectiveStoreId],
+    enabled: effectiveStoreId != null,
+    queryFn: ({ signal }) =>
+      getProducts(
+        {
+          per_page: 500,
+          inventory_type: "stock",
+          store_location_id: effectiveStoreId,
+        },
+        signal
+      ).then((res) => res?.items ?? []),
+    staleTime: 60_000,
+  });
+
   const mCreate = useMutation({
     mutationFn: (payload) =>
       createProductOptionGroup({
@@ -519,6 +829,7 @@ export default function MasterProductOptionPage() {
       toast.success("Grup opsi dibuat");
       setShowAdd(false);
       qc.invalidateQueries({ queryKey: ["product-option-groups"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) =>
       toast.error(e?.response?.data?.message || "Gagal membuat grup opsi"),
@@ -530,6 +841,7 @@ export default function MasterProductOptionPage() {
       toast.success("Grup opsi diperbarui");
       setEditTarget(null);
       qc.invalidateQueries({ queryKey: ["product-option-groups"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) =>
       toast.error(e?.response?.data?.message || "Gagal memperbarui"),
@@ -541,6 +853,7 @@ export default function MasterProductOptionPage() {
     onSuccess: (_, v) => {
       toast.success(v.is_active ? "Diaktifkan" : "Dimatikan");
       qc.invalidateQueries({ queryKey: ["product-option-groups"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) =>
       toast.error(e?.response?.data?.message || "Gagal ubah status"),
@@ -552,6 +865,7 @@ export default function MasterProductOptionPage() {
       toast.success("Grup opsi dihapus");
       setConfirmDel(null);
       qc.invalidateQueries({ queryKey: ["product-option-groups"] });
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
     },
     onError: (e) => toast.error(e?.response?.data?.message || "Gagal hapus"),
   });
@@ -569,6 +883,11 @@ export default function MasterProductOptionPage() {
               <div className="text-[11px] text-gray-500">
                 {r.selection_type === "MULTI" ? "Pilih banyak" : "Pilih 1"}
                 {r.is_required ? " · wajib" : ""}
+                {r.ingredient?.name
+                  ? ` · bahan: ${r.ingredient.name}`
+                  : r.ingredient_product_id
+                    ? " · bahan terhubung"
+                    : ""}
               </div>
             </div>
           </div>
@@ -591,6 +910,13 @@ export default function MasterProductOptionPage() {
                 {v.name}
                 {Number(v.price_delta) > 0
                   ? ` +${rupiah(v.price_delta)}`
+                  : ""}
+                {Number(v.qty_delta) !== 0
+                  ? ` ${Number(v.qty_delta) > 0 ? "+" : ""}${v.qty_delta}${
+                      v.qty_delta_unit?.name
+                        ? ` ${v.qty_delta_unit.name}`
+                        : ""
+                    }`
                   : ""}
               </span>
             ))}
@@ -708,22 +1034,25 @@ export default function MasterProductOptionPage() {
       </div>
 
       <GroupModal
-        open={showAdd}
-        onClose={() => setShowAdd(false)}
-        loading={mCreate.isPending}
-        onSubmit={(payload) => mCreate.mutate(payload)}
-      />
-
-      <GroupModal
+        key={editTarget ? `edit-${editTarget.id}` : "edit-closed"}
         open={!!editTarget}
         onClose={() => setEditTarget(null)}
         loading={mUpdate.isPending}
         initial={editTarget}
+        storeLocationId={effectiveStoreId}
         onSubmit={(payload) =>
           mUpdate.mutate({ id: editTarget.id, payload })
         }
       />
 
+      <GroupModal
+        key={showAdd ? "add-open" : "add-closed"}
+        open={showAdd}
+        onClose={() => setShowAdd(false)}
+        loading={mCreate.isPending}
+        storeLocationId={effectiveStoreId}
+        onSubmit={(payload) => mCreate.mutate(payload)}
+      />
       <AssignProductsModal
         open={!!assignTarget}
         group={assignTarget}

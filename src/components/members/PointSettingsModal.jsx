@@ -64,7 +64,7 @@ export default function PointSettingsModal({ open, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md bg-white rounded-xl shadow-lg">
+      <div className="w-full max-w-2xl bg-white rounded-xl shadow-lg">
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <h3 className="font-semibold flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-amber-500" />

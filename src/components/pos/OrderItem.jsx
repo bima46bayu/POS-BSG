@@ -1,4 +1,5 @@
 import React from "react";
+import { formatOptionsLabel } from "../../api/productOptions";
 
 const OrderItem = ({
   item,
@@ -10,10 +11,7 @@ const OrderItem = ({
   const unitPrice = Number(item.price || 0);
   const qty = Number(item.quantity || 0);
   const lineKey = item.line_key ?? item.id;
-  const optionsLabel = (item.selected_options || [])
-    .map((o) => o.name)
-    .filter(Boolean)
-    .join(", ");
+  const optionsLabel = formatOptionsLabel(item.selected_options);
 
   const formatCurrency = (amount) =>
     `Rp${Number(amount || 0).toLocaleString("id-ID")}`;

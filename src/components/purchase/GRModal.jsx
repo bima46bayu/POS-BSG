@@ -94,6 +94,9 @@ export default function GRModal({ open, onClose, purchaseId }) {
       qc.invalidateQueries({ queryKey: ["purchases"] });
       qc.invalidateQueries({ queryKey: ["purchase", headerPurchaseId] });
       qc.invalidateQueries({ queryKey: ["receipts"] });
+      // POS caches products/stock — force a fresh catalog after stock comes in.
+      qc.invalidateQueries({ queryKey: ["products"], exact: false });
+      qc.invalidateQueries({ queryKey: ["inventory-products"], exact: false });
       onClose?.();
     },
     onError: (e) => {

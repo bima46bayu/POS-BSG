@@ -12,6 +12,9 @@ import OrderDetails from "../components/pos/OrderDetails";
 import MobileOrderSheet from "../components/pos/MobileOrderSheet";
 import SaleSubmitter from "../components/pos/SaleSubmitter";
 import OptionPickerModal from "../components/pos/OptionPickerModal";
+import LowStockReminderModal, {
+  buildLowStockAlerts,
+} from "../components/pos/LowStockReminderModal";
 import { ShoppingCart, ChevronUp } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -531,10 +534,16 @@ export default function POSPage() {
       const m = lastPage?.meta;
       return m && m.current_page < m.last_page ? m.current_page + 1 : undefined;
     },
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 1000,
     gcTime: 30 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    // Always pull a fresh catalog when opening POS or returning to this tab,
+    // so GR / write-off / recipe stock changes show without a hard refresh.
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    // Quiet background refresh while the cashier stays on POS.
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
     keepPreviousData: true,
   });
 
@@ -569,6 +578,56 @@ export default function POSPage() {
 
     return arr;
   }, [flatProducts, filters.stock_status]);
+
+  /* ===== Low ingredient / stock reminder ===== */
+  const [lowStockOpen, setLowStockOpen] = useState(false);
+  const [lowStockAlerts, setLowStockAlerts] = useState([]);
+  const dismissedLowStockRef = React.useRef(new Set());
+  const lastLowStockStoreRef = React.useRef(null);
+
+  useEffect(() => {
+    // Reset dismiss memory when switching cabang.
+    if (lastLowStockStoreRef.current !== posStoreId) {
+      lastLowStockStoreRef.current = posStoreId;
+      dismissedLowStockRef.current = new Set();
+      setLowStockOpen(false);
+      setLowStockAlerts([]);
+    }
+  }, [posStoreId]);
+
+  useEffect(() => {
+    if (posStoreId == null) return;
+    if (productsQuery.isLoading || productsQuery.isFetchingNextPage) return;
+    if (!flatProducts.length) return;
+
+    const all = buildLowStockAlerts(flatProducts);
+    if (!all.length) {
+      setLowStockOpen(false);
+      setLowStockAlerts([]);
+      return;
+    }
+
+    const fresh = all.filter(
+      (a) => !dismissedLowStockRef.current.has(`${a.id}:${a.critical ? "out" : "low"}`)
+    );
+    if (!fresh.length) return;
+
+    setLowStockAlerts(fresh);
+    setLowStockOpen(true);
+  }, [
+    flatProducts,
+    posStoreId,
+    productsQuery.isLoading,
+    productsQuery.isFetchingNextPage,
+    productsQuery.dataUpdatedAt,
+  ]);
+
+  const dismissLowStockReminder = useCallback(() => {
+    for (const a of lowStockAlerts) {
+      dismissedLowStockRef.current.add(`${a.id}:${a.critical ? "out" : "low"}`);
+    }
+    setLowStockOpen(false);
+  }, [lowStockAlerts]);
 
   const hasMore = !!productsQuery.hasNextPage;
   const loading =
@@ -1009,6 +1068,16 @@ export default function POSPage() {
         registerOpen={!!currentRegister}
         extraPayload={saleExtraPayload}
         onClearCart={handleClearCart}
+      />
+
+      {/* Low ingredient / stock reminder */}
+      <LowStockReminderModal
+        open={lowStockOpen}
+        alerts={lowStockAlerts}
+        onClose={dismissLowStockReminder}
+        storeLabel={
+          stores.find((s) => String(s.id) === String(posStoreId))?.name ?? ""
+        }
       />
 
       {/* Item options picker (Sugar Level, Ice Level, dll) */}

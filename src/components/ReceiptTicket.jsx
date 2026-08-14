@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getSale } from "../api/sales";
 import { getStoreLocation } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
+import { formatOptionsLabel } from "../api/productOptions";
 
 const toNumber = (v) =>
   v == null ? 0 : Number(String(v).replace(/[^0-9.-]/g, ""));
@@ -183,9 +184,9 @@ export default function ReceiptTicket({
         rawOptions = null;
       }
     }
-    const optionsLabel = Array.isArray(rawOptions)
-      ? rawOptions.map((o) => o?.name).filter(Boolean).join(", ")
-      : "";
+    const optionsLabel = formatOptionsLabel(
+      Array.isArray(rawOptions) ? rawOptions : []
+    );
 
     return {
       id: it.id,

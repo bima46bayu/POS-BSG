@@ -158,7 +158,7 @@ function MemberModal({ open, onClose, onSubmit, loading, initial, storeId }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg bg-white rounded-xl shadow-lg max-h-[90vh] overflow-y-auto">
+      <div className="w-full max-w-3xl bg-white rounded-xl shadow-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b sticky top-0 bg-white">
           <h3 className="font-semibold">
             {isEdit ? "Edit Member" : "Tambah Member"}
