@@ -1,7 +1,7 @@
 // src/pages/StockWriteOffPage.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Trash, X } from "lucide-react";
+import { Plus, Search, Trash, X, Check, Pencil } from "lucide-react";
 import toast from "react-hot-toast";
 
 import DataTable from "../components/data-table/DataTable";
@@ -12,9 +12,13 @@ import { listStoreLocations } from "../api/storeLocations";
 import { getProducts } from "../api/products";
 import {
   createWriteOff,
+  updateWriteOff,
+  submitWriteOff,
+  deleteWriteOff,
   getWriteOffSummary,
   listWriteOffs,
 } from "../api/stockWriteOffs";
+import { listUnits } from "../api/units";
 
 const BRANCH_STORAGE_KEY = "write_off_store_id";
 const PARENT_STORAGE_KEY = "write_off_parent_store_id";
@@ -54,9 +58,69 @@ const fmtDateTime = (s) =>
       })
     : "-";
 
-function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
+function productUnitName(p) {
+  return p?.unit_name || p?.unit?.name || "";
+}
+function productUnitId(p) {
+  return p?.unit_id ?? p?.unit?.id ?? "";
+}
+
+function normalizeUnitKey(name) {
+  const key = String(name || "").toLowerCase().trim();
+  const map = {
+    kg: "kg",
+    kilogram: "kg",
+    kilograms: "kg",
+    g: "g",
+    gr: "g",
+    gram: "g",
+    grams: "g",
+    l: "l",
+    liter: "l",
+    litre: "l",
+    ltr: "l",
+    ml: "ml",
+    milliliter: "ml",
+    millilitre: "ml",
+  };
+  return map[key] || key;
+}
+
+function unitFamily(name) {
+  const key = normalizeUnitKey(name);
+  if (key === "kg" || key === "g") return "mass";
+  if (key === "l" || key === "ml") return "volume";
+  return "other";
+}
+
+function compatibleUnits(allUnits, stockUnitName) {
+  if (!stockUnitName) return allUnits;
+  const family = unitFamily(stockUnitName);
+  if (family === "mass") {
+    return allUnits.filter((u) => unitFamily(u.name) === "mass");
+  }
+  if (family === "volume") {
+    return allUnits.filter((u) => unitFamily(u.name) === "volume");
+  }
+  const stockKey = normalizeUnitKey(stockUnitName);
+  return allUnits.filter((u) => normalizeUnitKey(u.name) === stockKey);
+}
+
+function writeOffUnitLabel(r) {
+  return (
+    r.qty_unit?.name ||
+    r.qtyUnit?.name ||
+    r.product?.unit?.name ||
+    r.product?.unit_name ||
+    ""
+  );
+}
+
+function WriteOffModal({ open, onClose, storeId, onSubmit, saving, initial }) {
+  const isEdit = !!initial;
   const [productId, setProductId] = useState("");
   const [qty, setQty] = useState("");
+  const [qtyUnitId, setQtyUnitId] = useState("");
   const [reason, setReason] = useState("WASTE");
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
@@ -64,13 +128,33 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
 
   useEffect(() => {
     if (!open) return;
-    setProductId("");
-    setQty("");
-    setReason("WASTE");
-    setNote("");
-    setSearch("");
-    setDebounced("");
-  }, [open]);
+    if (initial) {
+      setProductId(String(initial.product_id || initial.product?.id || ""));
+      setQty(String(initial.qty ?? ""));
+      setQtyUnitId(
+        String(
+          initial.qty_unit_id ??
+            initial.qty_unit?.id ??
+            initial.qtyUnit?.id ??
+            initial.product?.unit_id ??
+            initial.product?.unit?.id ??
+            ""
+        )
+      );
+      setReason(initial.reason || "WASTE");
+      setNote(initial.note || "");
+      setSearch(initial.product?.name || "");
+      setDebounced(initial.product?.name || "");
+    } else {
+      setProductId("");
+      setQty("");
+      setQtyUnitId("");
+      setReason("WASTE");
+      setNote("");
+      setSearch("");
+      setDebounced("");
+    }
+  }, [open, initial]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300);
@@ -93,8 +177,43 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
     keepPreviousData: true,
   });
 
+  const unitsQ = useQuery({
+    queryKey: ["units-for-write-off"],
+    enabled: open,
+    queryFn: () => listUnits({ per_page: 200 }),
+    staleTime: 120_000,
+  });
+
+  const units = unitsQ.data || [];
   const products = productsQ.data?.items || [];
-  const selected = products.find((p) => String(p.id) === String(productId));
+  const selectedFromList = products.find(
+    (p) => String(p.id) === String(productId)
+  );
+  const selected =
+    selectedFromList ||
+    (initial && String(initial.product_id) === String(productId)
+      ? initial.product
+      : null);
+  const productOptions =
+    selected && !selectedFromList
+      ? [selected, ...products]
+      : products;
+
+  const stockUnitName = productUnitName(selected);
+  const qtyUnits = useMemo(
+    () => compatibleUnits(units, stockUnitName),
+    [units, stockUnitName]
+  );
+  const defaultUnitId = String(productUnitId(selected) || qtyUnits[0]?.id || "");
+
+  // When product changes, default unit to stock unit if empty / incompatible.
+  useEffect(() => {
+    if (!open || !productId) return;
+    const allowed = qtyUnits.some((u) => String(u.id) === String(qtyUnitId));
+    if (!qtyUnitId || !allowed) {
+      if (defaultUnitId) setQtyUnitId(defaultUnitId);
+    }
+  }, [open, productId, defaultUnitId, qtyUnits, qtyUnitId]);
 
   if (!open) return null;
 
@@ -103,10 +222,12 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
     if (!productId) return toast.error("Pilih produk dulu");
     const n = Number(qty);
     if (!Number.isFinite(n) || n <= 0) return toast.error("Qty harus > 0");
+    if (!qtyUnitId) return toast.error("Pilih satuan (Unit)");
     onSubmit({
-      store_location_id: storeId,
+      ...(isEdit ? { id: initial.id } : { store_location_id: storeId }),
       product_id: Number(productId),
       qty: n,
+      qty_unit_id: Number(qtyUnitId),
       reason,
       note: note.trim() || undefined,
     });
@@ -117,9 +238,11 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
       <div className="bg-white rounded-xl w-full max-w-lg shadow-xl border">
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-gray-900">Catat Write-off</h3>
+            <h3 className="font-semibold text-gray-900">
+              {isEdit ? "Edit Draft Write-off" : "Catat Write-off (Draft)"}
+            </h3>
             <p className="text-xs text-gray-500">
-              Stok berkurang nyata (FIFO layer).
+              Disimpan sebagai draft — stok belum berkurang sampai di-Submit.
             </p>
           </div>
           <button
@@ -152,13 +275,16 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
             </label>
             <select
               value={productId}
-              onChange={(e) => setProductId(e.target.value)}
+              onChange={(e) => {
+                setProductId(e.target.value);
+                setQtyUnitId("");
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
             >
               <option value="">
                 {productsQ.isFetching ? "Memuat produk..." : "-- Pilih Produk --"}
               </option>
-              {products.map((p) => (
+              {productOptions.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                   {p.sku ? ` (${p.sku})` : ""}
@@ -168,12 +294,12 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
             {selected && (
               <p className="text-xs text-gray-500 mt-1">
                 Stok saat ini: <b>{selected.stock ?? "-"}</b>
-                {selected.unit_name ? ` ${selected.unit_name}` : ""}
+                {stockUnitName ? ` ${stockUnitName}` : ""}
               </p>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-[1fr_5.5rem_1fr] gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Qty
@@ -183,11 +309,29 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
                 min={0}
                 step="any"
                 inputMode="decimal"
-                placeholder="0.05"
+                placeholder="50"
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Unit
+              </label>
+              <select
+                value={qtyUnitId}
+                onChange={(e) => setQtyUnitId(e.target.value)}
+                disabled={!productId}
+                className="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50"
+              >
+                <option value="">Unit</option>
+                {qtyUnits.map((u) => (
+                  <option key={u.id} value={String(u.id)}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -206,6 +350,12 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
               </select>
             </div>
           </div>
+          {stockUnitName ? (
+            <p className="text-[11px] text-gray-500 -mt-2">
+              Boleh isi dalam satuan kecil (contoh <b>g</b> / <b>Ml</b>). Saat
+              Submit dikonversi ke stok (<b>{stockUnitName}</b>).
+            </p>
+          ) : null}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -233,7 +383,11 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
               disabled={saving}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {saving ? "Menyimpan..." : "Simpan Write-off"}
+              {saving
+                ? "Menyimpan..."
+                : isEdit
+                  ? "Simpan Perubahan"
+                  : "Simpan Draft"}
             </button>
           </div>
         </form>
@@ -242,6 +396,7 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving }) {
   );
 }
 
+
 export default function StockWriteOffPage() {
   const qc = useQueryClient();
   const [me, setMe] = useState(null);
@@ -249,11 +404,13 @@ export default function StockWriteOffPage() {
 
   const [page, setPage] = useState(1);
   const [reason, setReason] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,7 +464,7 @@ export default function StockWriteOffPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [effectiveStoreId, reason, from, to, debouncedSearch]);
+  }, [effectiveStoreId, reason, statusFilter, from, to, debouncedSearch]);
 
   const params = useMemo(
     () => ({
@@ -317,11 +474,12 @@ export default function StockWriteOffPage() {
         ? { store_location_id: effectiveStoreId }
         : {}),
       ...(reason ? { reason } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
     }),
-    [page, effectiveStoreId, reason, from, to, debouncedSearch]
+    [page, effectiveStoreId, reason, statusFilter, from, to, debouncedSearch]
   );
 
   const listQ = useQuery({
@@ -350,20 +508,69 @@ export default function StockWriteOffPage() {
       ),
   });
 
+  const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: ["write-offs"] });
+    qc.invalidateQueries({ queryKey: ["write-offs-summary"] });
+    qc.invalidateQueries({ queryKey: ["inventory-products"] });
+    qc.invalidateQueries({ queryKey: ["products"], exact: false });
+  };
+
   const createM = useMutation({
     mutationFn: (payload) => createWriteOff(payload),
     onSuccess: () => {
-      toast.success("Write-off tercatat, stok berkurang");
+      toast.success("Draft tersimpan — stok belum berkurang. Submit bila sudah benar.");
       setModalOpen(false);
-      qc.invalidateQueries({ queryKey: ["write-offs"] });
-      qc.invalidateQueries({ queryKey: ["write-offs-summary"] });
-      qc.invalidateQueries({ queryKey: ["inventory-products"] });
-      qc.invalidateQueries({ queryKey: ["products"], exact: false });
+      setEditTarget(null);
+      invalidateAll();
     },
     onError: (e) => {
       const res = e?.response?.data;
       const msg =
-        res?.errors?.qty?.[0] || res?.message || "Gagal menyimpan write-off";
+        res?.errors?.qty?.[0] || res?.message || "Gagal menyimpan draft";
+      toast.error(msg);
+    },
+  });
+
+  const updateM = useMutation({
+    mutationFn: ({ id, ...payload }) => updateWriteOff(id, payload),
+    onSuccess: () => {
+      toast.success("Draft diperbarui");
+      setModalOpen(false);
+      setEditTarget(null);
+      invalidateAll();
+    },
+    onError: (e) => {
+      const res = e?.response?.data;
+      const msg =
+        res?.errors?.qty?.[0] || res?.message || "Gagal memperbarui draft";
+      toast.error(msg);
+    },
+  });
+
+  const submitM = useMutation({
+    mutationFn: (id) => submitWriteOff(id),
+    onSuccess: () => {
+      toast.success("Write-off di-submit — stok berkurang (FIFO)");
+      invalidateAll();
+    },
+    onError: (e) => {
+      const res = e?.response?.data;
+      const msg =
+        res?.errors?.qty?.[0] || res?.message || "Gagal submit write-off";
+      toast.error(msg);
+    },
+  });
+
+  const deleteM = useMutation({
+    mutationFn: (id) => deleteWriteOff(id),
+    onSuccess: () => {
+      toast.success("Draft dihapus");
+      invalidateAll();
+    },
+    onError: (e) => {
+      const res = e?.response?.data;
+      const msg =
+        res?.errors?.status?.[0] || res?.message || "Gagal hapus draft";
       toast.error(msg);
     },
   });
@@ -375,6 +582,25 @@ export default function StockWriteOffPage() {
         header: "Waktu",
         width: "170px",
         cell: (r) => fmtDateTime(r.created_at),
+      },
+      {
+        key: "status",
+        header: "Status",
+        width: "110px",
+        cell: (r) => {
+          const draft = (r.status || "submitted") === "draft";
+          return (
+            <span
+              className={`inline-flex px-2 py-0.5 rounded-full border text-xs font-medium ${
+                draft
+                  ? "bg-amber-50 text-amber-800 border-amber-200"
+                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+              }`}
+            >
+              {draft ? "Draft" : "Submitted"}
+            </span>
+          );
+        },
       },
       {
         key: "product",
@@ -408,20 +634,30 @@ export default function StockWriteOffPage() {
         key: "qty",
         header: "Qty",
         align: "right",
-        width: "90px",
-        cell: (r) => (
-          <span className="font-medium">
-            {Number(r.qty).toLocaleString("id-ID", { maximumFractionDigits: 4 })}
-            {r.product?.unit?.name ? ` ${r.product.unit.name}` : ""}
-          </span>
-        ),
+        width: "110px",
+        cell: (r) => {
+          const uom = writeOffUnitLabel(r);
+          return (
+            <span className="font-medium">
+              {Number(r.qty).toLocaleString("id-ID", {
+                maximumFractionDigits: 4,
+              })}
+              {uom ? ` ${uom}` : ""}
+            </span>
+          );
+        },
       },
       {
         key: "total_cost",
         header: "Nilai (COGS)",
         align: "right",
         width: "140px",
-        cell: (r) => IDR(r.total_cost),
+        cell: (r) =>
+          (r.status || "submitted") === "draft" ? (
+            <span className="text-gray-400 text-xs">Setelah submit</span>
+          ) : (
+            IDR(r.total_cost)
+          ),
       },
       {
         key: "user",
@@ -436,8 +672,69 @@ export default function StockWriteOffPage() {
           <span className="text-gray-600">{r.note || "-"}</span>
         ),
       },
+      {
+        key: "actions",
+        header: "Aksi",
+        width: "180px",
+        cell: (r) => {
+          const draft = (r.status || "submitted") === "draft";
+          if (!draft) {
+            return <span className="text-xs text-gray-400">Terkunci</span>;
+          }
+          const busy =
+            submitM.isPending || updateM.isPending || deleteM.isPending;
+          return (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                title="Edit draft"
+                disabled={busy}
+                onClick={() => {
+                  setEditTarget(r);
+                  setModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit
+              </button>
+              <button
+                type="button"
+                title="Submit — stok berkurang"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Submit write-off ${r.product?.name || ""} (${r.qty})? Stok akan berkurang.`
+                    )
+                  ) {
+                    submitM.mutate(r.id);
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 disabled:opacity-50"
+              >
+                <Check className="w-3.5 h-3.5" />
+                Submit
+              </button>
+              <button
+                type="button"
+                title="Hapus draft"
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm("Hapus draft write-off ini?")) {
+                    deleteM.mutate(r.id);
+                  }
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-rose-200 text-rose-700 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50"
+              >
+                <Trash className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          );
+        },
+      },
     ],
-    []
+    [submitM.isPending, updateM.isPending, deleteM.isPending]
   );
 
   const summary = summaryQ.data;
@@ -452,8 +749,8 @@ export default function StockWriteOffPage() {
             Waste / Write-off
           </h1>
           <p className="text-sm text-gray-500">
-            Catat barang waste, spoiled, atau expired. Stok berkurang nyata
-            lewat FIFO layer.
+            Catat waste/spoiled/expired sebagai <b>draft</b>, perbaiki bila
+            salah, lalu <b>Submit</b> agar stok berkurang (FIFO).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -468,7 +765,10 @@ export default function StockWriteOffPage() {
             lockedLabel={activeStoreLabel}
           />
           <button
-            onClick={() => setModalOpen(true)}
+            onClick={() => {
+              setEditTarget(null);
+              setModalOpen(true);
+            }}
             disabled={effectiveStoreId == null}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
@@ -541,6 +841,16 @@ export default function StockWriteOffPage() {
                 ))}
               </select>
 
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+              >
+                <option value="">Semua status</option>
+                <option value="draft">Draft</option>
+                <option value="submitted">Submitted</option>
+              </select>
+
               <input
                 type="date"
                 value={from}
@@ -554,10 +864,11 @@ export default function StockWriteOffPage() {
                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
               />
 
-              {(reason || from || to || search) && (
+              {(reason || statusFilter || from || to || search) && (
                 <button
                   onClick={() => {
                     setReason("");
+                    setStatusFilter("");
                     setFrom("");
                     setTo("");
                     setSearch("");
@@ -595,10 +906,21 @@ export default function StockWriteOffPage() {
 
       <WriteOffModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setEditTarget(null);
+        }}
         storeId={effectiveStoreId}
-        saving={createM.isPending}
-        onSubmit={(payload) => createM.mutate(payload)}
+        initial={editTarget}
+        saving={createM.isPending || updateM.isPending}
+        onSubmit={(payload) => {
+          if (payload.id) {
+            const { id, ...rest } = payload;
+            updateM.mutate({ id, ...rest });
+          } else {
+            createM.mutate(payload);
+          }
+        }}
       />
     </div>
   );
