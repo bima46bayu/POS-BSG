@@ -3,7 +3,7 @@ import "./App.css";
 import { Toaster } from "react-hot-toast";
 
 import LoginPages from "./components/LoginPages";
-import Sidebar from "./components/Sidebar";
+import AppsTopBar from "./components/AppsTopBar";
 
 import POSPage from "./pages/POSPage";
 import ProductPage from "./pages/ProductPage";
@@ -12,6 +12,7 @@ import InventoryProductSummaryPage from "./pages/InventorySummaryPage";
 import PurchasePage from "./pages/PurchasePage";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
+import AppsHomePage from "./pages/AppsHomePage";
 import GRPage from "./pages/GRPage";
 import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -74,6 +75,7 @@ const queryClient = new QueryClient({
 
 const PAGE_PATH = {
   home: "/home",
+  dashboard: "/dashboard",
   pos: "/pos",
   products: "/products",
   inventory: "/inventory/products",
@@ -167,50 +169,58 @@ function AppShell() {
           const r = getRoleFromStorage();
           setRole(r);
 
-          const first =
-            (getAllowedPages(r)[0]) || "pos";
-          navigate(PAGE_PATH[first] || "/pos", { replace: true });
+          navigate(PAGE_PATH.home, { replace: true });
         }}
       />
     );
   }
 
-  const handleNavigate = (pageKey) => {
-    if (!allowedPages.includes(pageKey)) return;
-    navigate(PAGE_PATH[pageKey] || "/pos");
+  const handleLogout = async () => {
+    await logoutRequest();
+    queryClient.clear();
+    setLoggedIn(false);
+    setRole("kasir");
+    navigate("/", { replace: true });
   };
 
-  const getActivePageKey = () => {
-    const p = location.pathname;
-    if (p.startsWith("/inventory")) return "inventory";
-    if (p.startsWith("/master")) return "master";
-    if (p === PAGE_PATH.purchase || p === PAGE_PATH.gr) return null;
+  const isAppsHome = location.pathname === PAGE_PATH.home;
 
-    for (const [k, v] of Object.entries(PAGE_PATH)) {
-      if (p === v) return k;
-    }
+  const moduleTitle = (() => {
+    const p = location.pathname || "";
+    if (p === PAGE_PATH.dashboard) return "Dashboard";
+    if (p === PAGE_PATH.pos) return "Point of Sale";
+    if (p === PAGE_PATH.products) return "Catalog";
+    if (p.startsWith("/inventory/write-off")) return "Waste / Write-off";
+    if (p.startsWith("/inventory/reconciliation")) return "Reconciliation";
+    if (p.startsWith("/inventory")) return "Inventory";
+    if (p === PAGE_PATH.purchase) return "Purchase";
+    if (p === PAGE_PATH.gr) return "Goods Receipt";
+    if (p === PAGE_PATH.history) return "History";
+    if (p.startsWith("/payment-requests")) return "Payment Requests";
+    if (p.startsWith("/master/user")) return "User";
+    if (p.startsWith("/master/member")) return "Member & Customer";
+    if (p.startsWith("/master/category")) return "Category";
+    if (p.startsWith("/master/sub-category")) return "Sub-Category";
+    if (p.startsWith("/master/recipe")) return "Product Recipe";
+    if (p.startsWith("/master/product-option")) return "Product Options";
+    if (p.startsWith("/master/additional-charge")) return "Additional Charge";
+    if (p.startsWith("/master/discount")) return "Discount";
+    if (p.startsWith("/master/supplier")) return "Supplier";
+    if (p.startsWith("/master/store-location")) return "Store Location";
+    if (p.startsWith("/master/void-security-code")) return "Kode Void";
+    if (p.startsWith("/master")) return "Master";
     return null;
-  };
+  })();
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar
-        currentPage={getActivePageKey() || undefined}
-        onNavigate={handleNavigate}
-        userRole={role}
-        allowedPages={allowedPages}
-        onLogout={async () => {
-          await logoutRequest();
-          queryClient.clear();
-          setLoggedIn(false);
-          setRole("kasir");
-          navigate("/", { replace: true });
-        }}
-      />
+    <div className="flex min-h-screen flex-col">
+      {!isAppsHome && (
+        <AppsTopBar onLogout={handleLogout} title={moduleTitle} />
+      )}
 
-      <div className="flex-1 md:ml-24">
+      <div className="flex-1">
         <Routes>
-          <Route path="/" element={<Navigate to={PAGE_PATH.pos} replace />} />
+          <Route path="/" element={<Navigate to={PAGE_PATH.home} replace />} />
 
           {/* ===== PAYMENT REQUEST ===== */}
           <Route
@@ -272,6 +282,18 @@ function AppShell() {
           {/* ===== CORE ===== */}
           <Route
             path={PAGE_PATH.home}
+            element={
+              <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
+                <AppsHomePage
+                  allowedPages={allowedPages}
+                  onLogout={handleLogout}
+                />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path={PAGE_PATH.dashboard}
             element={
               <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
                 <HomePage />

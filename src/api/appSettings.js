@@ -61,11 +61,13 @@ export async function getVoidSecurityCodeStatus(params = {}, signal) {
   return data;
 }
 
-export async function updateVoidSecurityCode(securityCode, storeLocationId) {
+export async function rotateVoidSecurityCode(storeLocationId) {
   const { data } = await api.put("/api/settings/void-security-code", {
     store_location_id: storeLocationId,
-    security_code: securityCode,
-    security_code_confirmation: securityCode,
   });
   return data;
+}
+
+export async function updateVoidSecurityCode(securityCode, storeLocationId) {
+  return rotateVoidSecurityCode(storeLocationId);
 }

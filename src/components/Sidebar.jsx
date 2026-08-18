@@ -26,6 +26,7 @@ import {
   KeyRound,
   SlidersHorizontal,
   Layers,
+  LayoutGrid,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -177,14 +178,12 @@ export default function Sidebar({
 
   // ====== DATA ======
   const menuItems = [
-    { id: "home", label: "Home", icon: Home },
+    { id: "home", label: "Apps", icon: LayoutGrid },
+    { id: "dashboard", label: "Dashboard", icon: Home },
     { id: "pos", label: "POS", icon: CreditCard },
     { id: "products", label: "Catalog", icon: Package },
     { id: "inventory", label: "Inventory", icon: Archive },
     { id: "reconciliation", label: "Rekonsiliasi", icon: Scale },
-    // Purchase & GR DIKELUARKAN dari menu utama → akan masuk submenu
-    // { id: "purchase", label: "Purchase", icon: ShoppingCart },
-    // { id: "gr", label: "GR", icon: PackageCheck },
     { id: "history", label: "History", icon: Clock },
   ];
 
@@ -214,10 +213,15 @@ export default function Sidebar({
   ];
 
   const allowedList = allowedPages?.length ? allowedPages : menuItems.map((i) => i.id);
-  const allowedSet = useMemo(() => new Set(allowedList), [allowedList]);
+  // Dashboard shares the same permission as the apps home ("home")
+  const allowedSet = useMemo(() => {
+    const s = new Set(allowedList);
+    if (s.has("home")) s.add("dashboard");
+    return s;
+  }, [allowedList]);
   const visibleItems = useMemo(
     () => menuItems.filter((i) => allowedSet.has(i.id)),
-    [menuItems, allowedSet]
+    [allowedSet]
   );
 
   const showMaster = allowedSet.has("master");
@@ -339,7 +343,7 @@ export default function Sidebar({
       <div className="hidden md:flex w-24 bg-white shadow-lg flex-col py-6 border-r border-gray-200 h-screen fixed top-0 left-0 z-40">
         {/* Logo */}
         <div className="flex items-center justify-center mb-6">
-          <Link to="/" aria-label="Go to home">
+          <Link to="/home" aria-label="Go to apps">
             <img
               src={logoSrcAbs}
               alt="Logo"
