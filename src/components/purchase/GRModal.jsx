@@ -227,7 +227,18 @@ export default function GRModal({ open, onClose, purchaseId }) {
                     const remain = remainOf(row);
                     return (
                       <tr key={key} className="border-t">
-                        <td className="p-2">{row?.product_label ?? `#${row.product_id}`}</td>
+                        <td className="p-2">
+                          {row?.product_label ?? `#${row.product_id}`}
+                          {/* Receiving is counted in the stock unit (e.g. Pack),
+                              so state the contents to confirm the right goods
+                              without implying the number must be converted. */}
+                          {Number(row?.pack_size) > 1 && (
+                            <span className="block text-[11px] text-slate-500">
+                              1 {row?.unit_name || "unit"} = {Number(row.pack_size)}{" "}
+                              {row.pack_label || "isi"}
+                            </span>
+                          )}
+                        </td>
                         <td className="p-2 text-right">{remain}</td>
                         <td className="p-2 text-right">
                           <input

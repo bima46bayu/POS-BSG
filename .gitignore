@@ -1,1 +1,15 @@
 node_modules
+
+# Local environment files. Commit .env.example instead.
+.env
+.env.local
+.env.*.local
+
+# Build output
+/build
+/dist
+
+# Logs / OS cruft
+npm-debug.log*
+yarn-error.log*
+.DS_Store

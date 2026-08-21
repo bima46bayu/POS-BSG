@@ -2,14 +2,17 @@
 import React from "react";
 import { ShieldAlert, LogIn } from "lucide-react";
 import { STORAGE_KEY } from "../api/client";
-import { useNavigate } from "react-router-dom";
 
 export default function UnauthorizedPage() {
-  const navigate = useNavigate();
   const handleLogin = () => {
-    // pastikan storage bersih lalu ke login
-    localStorage.removeItem(STORAGE_KEY);
-    navigate("/", { replace: true });
+    // Pakai reload penuh, bukan navigate(). Saat halaman ini tampil, state
+    // `loggedIn` di AppShell masih true, jadi navigate("/") hanya akan
+    // di-redirect balik ke /home dan memicu 401 lagi. Reload me-reset state
+    // React sepenuhnya, dan karena storage sudah bersih, app kembali ke login.
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
+    window.location.replace("/");
   };
 
   return (

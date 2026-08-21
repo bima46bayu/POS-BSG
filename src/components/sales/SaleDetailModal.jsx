@@ -4,14 +4,8 @@ import ReceiptTicket from "../ReceiptTicket";
 import { X } from "lucide-react";
 import html2canvas from "html2canvas";
 import { formatOptionsLabel } from "../../api/productOptions";
-
-const fmtIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
-
+import { saleCustomerLabel } from "../../utils/customerLabel";
+import { IDR as fmtIDR } from "../../lib/fmt";
 /**
  * Ambil additional charge dari snapshot backend
  * type: "PB1" | "SERVICE"
@@ -139,7 +133,7 @@ export default function SaleDetailModal({ open, onClose, sale }) {
               />
               <Info
                 label="Customer"
-                value={sale.customer_name || "General"}
+                value={saleCustomerLabel(sale)}
               />
               <Info
                 label="Metode"

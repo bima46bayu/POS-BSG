@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { rupiah } from "../../lib/fmt";
 import { useQuery } from "@tanstack/react-query";
 import { UserPlus, X, Search, Sparkles, Loader2 } from "lucide-react";
 
 import { lookupMembers, pointsForAmount } from "../../api/members";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 
 /**
  * Member picker for the POS checkout.
@@ -18,6 +18,7 @@ export default function MemberPicker({
   value, // selected member object (or null)
   onChange,
   total = 0,
+  disabled = false,
 }) {
   const [open, setOpen] = useState(false);
   const [term, setTerm] = useState("");
@@ -28,6 +29,13 @@ export default function MemberPicker({
     const t = setTimeout(() => setDebounced(term.trim()), 300);
     return () => clearTimeout(t);
   }, [term]);
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+      setTerm("");
+    }
+  }, [disabled]);
 
   // Close the dropdown when clicking elsewhere.
   useEffect(() => {
@@ -43,10 +51,15 @@ export default function MemberPicker({
 
   const { data, isFetching } = useQuery({
     queryKey: ["member-lookup", storeLocationId, debounced],
-    enabled: open && storeLocationId != null,
+    enabled: !disabled && open,
     queryFn: ({ signal }) =>
       lookupMembers(
-        { store_location_id: storeLocationId, search: debounced || undefined },
+        {
+          ...(storeLocationId != null
+            ? { store_location_id: storeLocationId }
+            : {}),
+          search: debounced || undefined,
+        },
         signal
       ),
     staleTime: 15_000,
@@ -104,7 +117,8 @@ export default function MemberPicker({
               type="button"
               onClick={() => onChange?.(null)}
               title="Lepas member"
-              className="ml-1 p-1 rounded-full text-blue-400 hover:text-blue-700 hover:bg-blue-100 shrink-0"
+              disabled={disabled}
+              className="ml-1 p-1 rounded-full text-blue-400 hover:text-blue-700 hover:bg-blue-100 shrink-0 disabled:opacity-40 disabled:pointer-events-none"
             >
               <X className="w-4 h-4" />
             </button>
@@ -142,8 +156,8 @@ export default function MemberPicker({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          disabled={storeLocationId == null}
-          className="w-full h-11 flex items-center justify-center gap-2 rounded-full border border-dashed border-gray-300 text-sm text-gray-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50"
+          disabled={disabled || storeLocationId == null}
+          className="w-full h-11 flex items-center justify-center gap-2 rounded-full border border-dashed border-gray-300 text-sm text-gray-600 hover:border-blue-400 hover:text-blue-600 disabled:bg-gray-100 disabled:text-gray-400 disabled:hover:border-gray-300 disabled:hover:text-gray-400 disabled:cursor-not-allowed disabled:opacity-100"
         >
           <UserPlus className="w-4 h-4" />
           Pasang Member

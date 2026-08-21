@@ -1,6 +1,6 @@
 // src/api/auth.js
 import { api, STORAGE_KEY } from "./client";
-import { queryClient } from "../lib/queryClient"; // pastikan ada instance queryClient yang sama dipakai di app
+import { queryClient } from "../queryClient";
 
 /** Helper: pasang/bersihkan header Authorization di axios */
 function applyAuthHeader(token) {
@@ -26,11 +26,11 @@ export async function loginRequest(email, password) {
   const { data } = await api.post("/api/login", { email, password });
   // { token, user, expires_at }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  applyAuthHeader(data?.token);
 
-  // 👉 langsung hard redirect (atau reload)
-  // window.location.reload(); // kalau mau reload halaman sekarang
-  window.location.replace("/pos"); // arahkan ke dashboard
-  return data; // (opsional, tidak akan dipakai karena sudah redirect)
+  // Stay in the SPA. AppShell sends the cashier to the apps launcher (/home),
+  // not straight into POS.
+  return data;
 }
 
 export async function logoutRequest() {

@@ -3,7 +3,6 @@ import React, { useEffect, useState, useRef } from "react";
 import {
   ChevronDown,
   Loader2,
-  Plus,
   Trash2,
   Check,
   Pencil,
@@ -11,12 +10,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import {
-  listUnits,
-  createUnit,
-  updateUnit,
-  deleteUnit,
-} from "../../api/units";
+import { listUnits, updateUnit, deleteUnit } from "../../api/units";
 
 /**
  * Props:
@@ -34,8 +28,7 @@ export default function UnitDropdown({
   const [open, setOpen] = useState(false);
   const [units, setUnits] = useState([]); // {id, name}
   const [loading, setLoading] = useState(false);
-  const [savingRow, setSavingRow] = useState(null); // id atau "new"
-  const [newName, setNewName] = useState("");
+  const [savingRow, setSavingRow] = useState(null);
 
   // state untuk edit rename
   const [editingUnitId, setEditingUnitId] = useState(null);
@@ -88,8 +81,11 @@ export default function UnitDropdown({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  // Second arg is the unit's name. Callers that only care about the id can
+  // ignore it; product forms need it to reason about the unit itself (e.g.
+  // spotting that stock is being tracked in "Pack").
   const handleSelect = (u) => {
-    onChange?.(u.id);
+    onChange?.(u.id, u.name);
     setOpen(false);
   };
 
@@ -120,17 +116,21 @@ export default function UnitDropdown({
     try {
       setSavingRow(id);
       const updated = await updateUnit(id, { name: trimmed });
+      // Same { message, data } envelope as create.
+      const row = updated?.data ?? updated;
       setUnits((prev) =>
-        prev.map((u) =>
-          u.id === id ? { ...u, name: updated?.name ?? trimmed } : u
-        )
+        prev.map((u) => (u.id === id ? { ...u, name: row?.name ?? trimmed } : u))
       );
       toast.success("Satuan diperbarui");
       setEditingUnitId(null);
       setEditName("");
     } catch (e) {
       console.error(e);
-      toast.error("Gagal memperbarui satuan");
+      toast.error(
+        e?.response?.data?.message ||
+          e?.response?.data?.errors?.name?.[0] ||
+          "Gagal memperbarui satuan"
+      );
     } finally {
       setSavingRow(null);
     }
@@ -162,40 +162,16 @@ export default function UnitDropdown({
       await deleteUnit(id);
       setUnits((prev) => prev.filter((u) => u.id !== id));
       if (String(value) === String(id)) {
-        onChange?.(null);
+        onChange?.(null, "");
       }
       toast.success("Satuan dihapus");
     } catch (e) {
       console.error(e);
-      toast.error("Gagal menghapus satuan");
+      // e.g. "masih dipakai di 40 product" — actionable, unlike a generic error.
+      toast.error(e?.response?.data?.message || "Gagal menghapus satuan");
     } finally {
       setSavingRow(null);
       closeConfirmDelete();
-    }
-  };
-
-  // ==== CREATE ====
-
-  const handleCreate = async () => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-
-    try {
-      setSavingRow("new");
-      const created = await createUnit({ name: trimmed });
-      const newUnit = {
-        id: created?.id,
-        name: created?.name ?? trimmed,
-      };
-      setUnits((prev) => [...prev, newUnit]);
-      setNewName("");
-      onChange?.(newUnit.id);
-      toast.success("Satuan ditambahkan");
-    } catch (e) {
-      console.error(e);
-      toast.error("Gagal menambah satuan");
-    } finally {
-      setSavingRow(null);
     }
   };
 
@@ -220,7 +196,7 @@ export default function UnitDropdown({
           <div className="absolute z-40 mt-2 w-full rounded-xl border border-gray-200 bg-white shadow-lg max-h-80 overflow-y-auto">
             <div className="p-2">
               <p className="text-[11px] text-gray-500 mb-2 px-1">
-                Pilih satuan, atau edit / tambah langsung di sini.
+                Pilih satuan.
               </p>
 
               {loading && (
@@ -232,7 +208,7 @@ export default function UnitDropdown({
 
               {!loading && units.length === 0 && (
                 <div className="text-xs text-gray-500 px-1 py-2">
-                  Belum ada satuan. Tambah baru di bawah.
+                  Belum ada satuan.
                 </div>
               )}
 
@@ -262,12 +238,19 @@ export default function UnitDropdown({
                           )}
                         </button>
 
-                        {/* Edit */}
+                        {/* Edit. Built-in units are rejected by the API
+                            (is_system), so disable rather than let the click
+                            fail with a toast the user can't act on. */}
                         <button
                           type="button"
                           onClick={() => startEdit(u)}
-                          className="p-1 rounded-full text-gray-400 hover:text-blue-600 hover:bg-blue-50"
-                          disabled={savingRow === u.id}
+                          className="p-1 rounded-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+                          disabled={savingRow === u.id || u.is_system}
+                          title={
+                            u.is_system
+                              ? "Satuan bawaan sistem tidak bisa diubah"
+                              : "Ubah nama satuan"
+                          }
                         >
                           <Pencil className="w-3 h-3" />
                         </button>
@@ -276,8 +259,13 @@ export default function UnitDropdown({
                         <button
                           type="button"
                           onClick={() => openConfirmDelete(u)}
-                          className="p-1 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50"
-                          disabled={savingRow === u.id}
+                          className="p-1 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+                          disabled={savingRow === u.id || u.is_system}
+                          title={
+                            u.is_system
+                              ? "Satuan bawaan sistem tidak bisa dihapus"
+                              : "Hapus satuan"
+                          }
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -329,32 +317,6 @@ export default function UnitDropdown({
                   </div>
                 );
               })}
-
-              {/* Tambah baru */}
-              <div className="mt-2 border-t pt-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="Tambah satuan baru (ex: pcs, box)"
-                    className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCreate}
-                    disabled={!newName.trim() || savingRow === "new"}
-                    className="inline-flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-                  >
-                    {savingRow === "new" ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Plus className="w-3 h-3" />
-                    )}
-                    Tambah
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         )}

@@ -33,16 +33,20 @@ export default function Payment({
 }) {
   const method = checkout?.payment_method ?? "cash";
   const customer = checkout?.customer_name ?? "General";
+  const buyerName = checkout?.buyer_name ?? "";
   const paid = checkout?.paid ?? "";
   const reference = checkout?.reference ?? "";
   const note = checkout?.note ?? "";
   const globalDiscountId = checkout?.global_discount_id ?? null;
   const member = checkout?.member ?? null;
+  // Name comes from the attached member (or will, once they tap Pasang Member).
+  const nameLocked = Boolean(member) || customer === "Member";
 
   const patchCheckout = (patch) => {
     onCheckoutChange?.({
       payment_method: method,
       customer_name: customer,
+      buyer_name: buyerName,
       paid,
       reference,
       note,
@@ -92,6 +96,7 @@ export default function Payment({
     onCheckoutChange({
       payment_method: method,
       customer_name: customer,
+      buyer_name: buyerName,
       paid: String(finalTotal || 0),
       reference,
       note,
@@ -102,6 +107,7 @@ export default function Payment({
     method,
     finalTotal,
     customer,
+    buyerName,
     reference,
     note,
     globalDiscountId,
@@ -129,6 +135,7 @@ export default function Payment({
         method === "cash" ? Number(paid || 0) : finalTotal,
       reference: reference?.trim() || null,
       customer_name: customer || null,
+      buyer_name: buyerName?.trim() || null,
       member_id: member?.id ?? null,
       note,
       global_discount_id: globalDiscountId,
@@ -183,7 +190,15 @@ export default function Payment({
         <div className="relative">
           <select
             value={customer}
-            onChange={(e) => patchCheckout({ customer_name: e.target.value })}
+            onChange={(e) => {
+              const next = e.target.value;
+              patchCheckout({
+                customer_name: next,
+                // Member attach is only for type Member. Switching away
+                // drops the attached member so the next Pay cannot mix them.
+                ...(next !== "Member" ? { member: null } : {}),
+              });
+            }}
             className="w-full h-11 appearance-none rounded-full border px-4 pr-9
                        text-sm bg-white border-gray-300
                        focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -200,17 +215,43 @@ export default function Payment({
         </div>
       </div>
 
+      <div className="mt-3">
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Customer name (optional)
+        </label>
+        <input
+          type="text"
+          value={buyerName}
+          onChange={(e) => {
+            if (nameLocked) return;
+            patchCheckout({ buyer_name: e.target.value });
+          }}
+          readOnly={nameLocked}
+          disabled={nameLocked}
+          className={`w-full h-11 rounded-full border px-4 text-sm
+                     border-gray-300 focus:outline-none
+                     focus:ring-2 focus:ring-blue-500
+                     ${nameLocked ? "bg-gray-100 text-gray-500 cursor-not-allowed" : "bg-white"}`}
+          placeholder={nameLocked ? "Pasang member untuk mengisi nama" : "Nama pelanggan…"}
+          maxLength={100}
+        />
+      </div>
+
       {/* ===== MEMBER (customer database) ===== */}
       <MemberPicker
         storeLocationId={storeLocationId}
         value={member}
         total={finalTotal}
+        disabled={customer !== "Member"}
         onChange={(m) =>
           patchCheckout({
             member: m,
             // Keep the free-text type in sync so History/receipt still reads
             // sensibly for a member sale.
             customer_name: m ? "Member" : customer,
+            // Prefill from the member. The name field is locked while a
+            // member is attached so it cannot be edited by accident.
+            ...(m ? { buyer_name: m.name || "" } : {}),
           })
         }
       />

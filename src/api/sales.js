@@ -141,6 +141,11 @@ export async function voidSale(saleId, payload = {}, signal) {
   return data;
 }
 
+export async function acknowledgeSaleReview(saleId, signal) {
+  const { data } = await api.post(`/api/sales/${saleId}/acknowledge-review`, {}, { signal });
+  return data;
+}
+
 /** Backend caps per_page (200 without items, 50 with). Walk pages for a full range. */
 const SALES_PAGE_SIZE = 200;
 const SALES_PAGE_SIZE_WITH_ITEMS = 50;

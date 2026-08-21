@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
 import { toAbsoluteUrl } from "../../api/client";
 import UnitDropdown from "./UnitDropdown";
+import { IDR, numInput } from "../../lib/fmt";
 
 /**
  * Props:
@@ -24,12 +25,16 @@ export default function UpdateProduct({
   const [form, setForm] = useState({
     name: "",
     price: "",
+    cost_price: "",
+    pack_size: "",
+    pack_label: "",
     category_id: "",
     sub_category_id: "",
     stock: "",
     sku: "",
     description: "",
     unit_id: "",
+    unit_name: "",
   });
 
   // ✅ stock / non-stock
@@ -58,21 +63,22 @@ export default function UpdateProduct({
         product.unit?.id ??
         null;
 
-      const stockRaw = product.stock;
-      const stockFormatted =
-        stockRaw === null || stockRaw === undefined || stockRaw === ""
-          ? ""
-          : Number(stockRaw).toFixed(2);
-
       setForm({
         name: product.name ?? "",
-        price: product.price ?? "",
+        // DECIMAL columns arrive from MySQL as padded strings ("100.00",
+        // "100.0000"). numInput drops the padding but keeps real decimals, so
+        // the field shows what the user actually typed.
+        price: numInput(product.price),
+        cost_price: numInput(product.cost_price),
+        pack_size: numInput(product.pack_size),
+        pack_label: product.pack_label ?? "",
         category_id: product.category_id ?? "",
         sub_category_id: product.sub_category_id ?? "",
-        stock: stockFormatted,
+        stock: numInput(product.stock),
         sku: product.sku ?? "",
         description: product.description ?? "",
         unit_id: unitId === null || unitId === undefined ? "" : String(unitId),
+        unit_name: product.unit?.name ?? product.unit_name ?? "",
       });
 
       setTrackInventory(tracked);
@@ -87,12 +93,16 @@ export default function UpdateProduct({
       setForm({
         name: "",
         price: "",
+        cost_price: "",
+        pack_size: "",
+        pack_label: "",
         category_id: "",
         sub_category_id: "",
         stock: "",
         sku: "",
         description: "",
         unit_id: "",
+        unit_name: "",
       });
       setTrackInventory(true);
       setFiles((prev) => {
@@ -102,6 +112,67 @@ export default function UpdateProduct({
       setSubmitting(false);
     }
   }, [open, product]);
+
+  // ===== Pack purchasing =====
+  // cost_price is stored exactly as typed, per stock unit — which for a packed
+  // product is the pack price. The hint derives the per-piece cost so the split
+  // can be eyeballed without mental arithmetic.
+  const packHint = useMemo(() => {
+    const size = Number(form.pack_size);
+    const cost = Number(form.cost_price);
+    if (!(size > 1) || !(cost > 0)) return null;
+
+    const label = form.pack_label?.trim() || "satuan kecil";
+
+    return `≈ ${IDR(cost / size)} per ${label} (isi ${size}).`;
+  }, [form.pack_size, form.cost_price, form.pack_label]);
+
+  // Buying at or above the sell price is the fingerprint of a pack price typed
+  // into a per-unit field — the exact mistake that zeroed margins catalogue-wide.
+  const costLooksLikePackPrice =
+    Number(form.cost_price) > 0 &&
+    Number(form.price) > 0 &&
+    Number(form.cost_price) >= Number(form.price);
+
+  /*
+   | The old "divide by pack size" quick-fix is gone on purpose.
+   |
+   | pack_size no longer rescales cost — stock is counted in packs, so the pack
+   | price IS the per-stock-unit cost. Dividing would understate COGS by
+   | pack_size×, reintroducing the 5000→50 bug. A packed ingredient also
+   | legitimately costs more than its sell price, so skip the warning there.
+   */
+  const showCostWarning =
+    costLooksLikePackPrice && !(Number(form.pack_size) > 1);
+
+  // The label is free text ("Pack", "Box"). A bare number there means someone
+  // mistook it for a second quantity field.
+  const packLabelLooksNumeric =
+    !!form.pack_label?.trim() && /^\d+([.,]\d+)?$/.test(form.pack_label.trim());
+
+  /*
+   | Shown only when the stock unit is a container (Pack/Box/Dus), because
+   | pack_size means "how many small units are inside 1 stock unit".
+   |
+   | Stock and cost stay in the container unit: buy 1 Pack @5.000 → stock +1
+   | Pack, cost 5.000/Pack. pack_size is NOT a cost divisor; it lets a recipe
+   | consume fractions of a pack (1 Batang = 1/100 Pack).
+   */
+  const stockUnitIsPack = /^(pack|packs|pak|box|dus|karton|carton|lusin)$/i.test(
+    (form.unit_name || "").trim()
+  );
+
+  const showPackFields = trackInventory && stockUnitIsPack;
+
+  // Hidden inputs must not submit stale values, so the payload is derived from
+  // the same flag that controls visibility.
+  const packPayload = useMemo(() => {
+    const size = Number(form.pack_size);
+    if (!showPackFields || !(size > 1)) {
+      return { pack_size: null, pack_label: null };
+    }
+    return { pack_size: size, pack_label: form.pack_label?.trim() || null };
+  }, [showPackFields, form.pack_size, form.pack_label]);
 
   // ===== Filter subcategory berdasarkan category =====
   const filteredSubs = useMemo(() => {
@@ -125,10 +196,11 @@ export default function UpdateProduct({
     }));
   };
 
-  const onChangeUnit = (unitId) => {
+  const onChangeUnit = (unitId, unitName) => {
     setForm((f) => ({
       ...f,
       unit_id: unitId ?? "",
+      unit_name: unitName ?? "",
     }));
   };
 
@@ -195,6 +267,13 @@ export default function UpdateProduct({
         id: product.id,
         name: form.name,
         price: form.price ? Number(form.price) : 0,
+        // Blank → null so an unknown cost stays unknown.
+        cost_price: form.cost_price === "" ? null : Number(form.cost_price),
+        // Only send pack config while its inputs are actually visible. Without
+        // this, switching the unit to Pack (or to a service) would keep silently
+        // submitting a stale divisor the user can no longer see or correct.
+        pack_size: packPayload.pack_size,
+        pack_label: packPayload.pack_label,
         sku: form.sku,
         description: form.description || null,
         category_id: form.category_id || null,
@@ -262,6 +341,33 @@ export default function UpdateProduct({
               min="0"
               required
             />
+          </Field>
+
+          <Field label="Harga Beli (Cost)">
+            <Input
+              type="number"
+              inputMode="numeric"
+              placeholder="80000"
+              value={form.cost_price}
+              onChange={onChange("cost_price")}
+              min="0"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Harga beli <strong>per 1 Unit</strong> yang dipilih di bawah. Kalau
+              Unit = Pack, isi harga <strong>per pack</strong> — sistem yang
+              membagi per isinya. Kosongkan jika belum diketahui.
+            </p>
+            {packHint && (
+              <p className="mt-1 text-xs text-blue-700">{packHint}</p>
+            )}
+            {showCostWarning && (
+              <p className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                Harga beli ({IDR(form.cost_price)}) lebih tinggi dari harga jual
+                ({IDR(form.price)}), jadi margin akan minus. Kalau produk ini
+                dibeli per pack, pilih <strong>Unit</strong> = Pack lalu isi
+                jumlah isinya — harga beli tetap harga per pack.
+              </p>
+            )}
           </Field>
 
           {/* Jenis Produk: Stock / Non-Stock */}
@@ -339,13 +445,59 @@ export default function UpdateProduct({
               <UnitDropdown
                 value={form.unit_id}
                 onChange={onChangeUnit}
-                placeholder="Pilih / kelola satuan"
+                placeholder="Pilih satuan"
                 initialLabel={
                   product?.unit?.name || product?.unit_name || ""
                 }
               />
             </Field>
           </div>
+
+          {/* Directly under Unit: it describes the unit that was just chosen. */}
+          {showPackFields && (
+            <Field label={`Jumlah Isi per ${form.unit_name || "Pack"}`}>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <span className="block text-[11px] text-gray-500 mb-1">
+                    Isi per {form.unit_name || "pack"} (angka)
+                  </span>
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="100"
+                    value={form.pack_size}
+                    onChange={onChange("pack_size")}
+                    min="0"
+                    step="any"
+                  />
+                </div>
+                <div className="flex-1">
+                  <span className="block text-[11px] text-gray-500 mb-1">
+                    Satuan isi (teks)
+                  </span>
+                  <Input
+                    placeholder="Pcs / Batang / Lembar"
+                    value={form.pack_label}
+                    onChange={onChange("pack_label")}
+                    maxLength={32}
+                  />
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Stok dihitung per <strong>{form.unit_name}</strong>. Isi ini
+                kalau 1 {form.unit_name} berisi beberapa satuan kecil — contoh:
+                sedotan 1 Pack isi <strong>100</strong> <strong>Batang</strong>.
+                Dipakai resep untuk memotong stok per batang.
+              </p>
+              {packLabelLooksNumeric && (
+                <p className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  "Satuan isi" berisi angka ({form.pack_label}). Kolom itu untuk
+                  teks seperti "Batang" atau "Pcs" — jumlahnya sudah diisi di
+                  kolom sebelah.
+                </p>
+              )}
+            </Field>
+          )}
 
           <Field label="SKU">
             <Input

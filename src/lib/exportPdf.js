@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { N } from "./fmt";
+import { IDR } from "./fmt";
 
 /* ============================================================
    Theme
@@ -26,13 +27,6 @@ const TABLE_TOP_MARGIN = 64;
 /* ============================================================
    Formatters
    ============================================================ */
-const IDR = (n) =>
-  Number(n || 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
-
 const fmtNum = (n) => Number(n || 0).toLocaleString("id-ID");
 
 const fmtPct = (n) => `${Number(n || 0).toFixed(1)}%`;

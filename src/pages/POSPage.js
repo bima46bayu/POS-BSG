@@ -49,6 +49,8 @@ const TAX_RATE = 0;
 const DEFAULT_CHECKOUT = {
   payment_method: "cash",
   customer_name: "General",
+  // Person the order is for. Distinct from customer_name (the type enum).
+  buyer_name: "",
   paid: "",
   reference: "",
   note: "",

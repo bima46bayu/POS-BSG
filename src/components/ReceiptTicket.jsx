@@ -5,16 +5,11 @@ import { getSale } from "../api/sales";
 import { getStoreLocation } from "../api/storeLocations";
 import { toAbsoluteUrl } from "../api/client";
 import { formatOptionsLabel } from "../api/productOptions";
+import { saleCustomerLabel } from "../utils/customerLabel";
+import { IDR as fmtIDR } from "../lib/fmt";
 
 const toNumber = (v) =>
   v == null ? 0 : Number(String(v).replace(/[^0-9.-]/g, ""));
-const fmtIDR = (n) =>
-  Number(n || 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
-
 // Ambil store dari berbagai bentuk relasi yang mungkin
 const pickStore = (obj) =>
   obj?.storeLocation || obj?.store_location || obj?.store || null;
@@ -119,7 +114,7 @@ export default function ReceiptTicket({
 
   const code = sale?.code || sale?.id;
   const cashier = sale?.cashier?.name || "—";
-  const customer = sale?.customer_name || "—";
+  const customer = saleCustomerLabel(sale);
   const createdAt = sale?.created_at
     ? new Date(sale.created_at)
     : new Date();

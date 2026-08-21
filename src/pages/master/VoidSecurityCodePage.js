@@ -1,47 +1,39 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock3, Copy, KeyRound, RefreshCw } from "lucide-react";
 import toast from "react-hot-toast";
 
-import { getVoidSecurityCodeStatus } from "../../api/appSettings";
+import {
+  getVoidSecurityCodeStatus,
+  rotateVoidSecurityCode,
+} from "../../api/appSettings";
 
 function formatCountdown(validUntil) {
   if (!validUntil) return "—";
   const end = new Date(validUntil).getTime();
-  const ms = Math.max(0, end - Date.now());
-  const m = Math.floor(ms / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
+  const totalSec = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 export default function VoidSecurityCodePage() {
+  const queryClient = useQueryClient();
   const [parentStoreId, setParentStoreId] = useState("");
   const [nowTick, setNowTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   const listQ = useQuery({
     queryKey: ["void-security-code", "list"],
     queryFn: ({ signal }) => getVoidSecurityCodeStatus({}, signal),
     refetchInterval: 30_000,
+    staleTime: 0,
   });
-
-  const validUntil = listQ.data?.items?.[0]?.valid_until;
-  const refetch = listQ.refetch;
 
   useEffect(() => {
     const id = setInterval(() => setNowTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    if (!validUntil) return undefined;
-    const ms = new Date(validUntil).getTime() - Date.now() + 800;
-    if (ms <= 0) {
-      refetch();
-      return undefined;
-    }
-    const t = setTimeout(() => refetch(), Math.min(ms, 60 * 60 * 1000));
-    return () => clearTimeout(t);
-  }, [validUntil, refetch]);
 
   const parentOptions = useMemo(
     () => (Array.isArray(listQ.data?.items) ? listQ.data.items : []),
@@ -54,6 +46,19 @@ export default function VoidSecurityCodePage() {
       null,
     [parentOptions, parentStoreId]
   );
+
+  const validUntil = selected?.valid_until ?? parentOptions[0]?.valid_until;
+
+  useEffect(() => {
+    if (!validUntil) return undefined;
+    const ms = new Date(validUntil).getTime() - Date.now() + 800;
+    if (ms <= 0) {
+      listQ.refetch();
+      return undefined;
+    }
+    const t = setTimeout(() => listQ.refetch(), Math.min(ms, 10 * 60 * 1000));
+    return () => clearTimeout(t);
+  }, [validUntil, listQ.refetch]);
 
   useEffect(() => {
     if (!parentStoreId && parentOptions.length === 1) {
@@ -72,6 +77,29 @@ export default function VoidSecurityCodePage() {
     }
   };
 
+  const handleRefresh = async () => {
+    if (refreshing || !parentStoreId) return;
+    setRefreshing(true);
+    try {
+      await rotateVoidSecurityCode(Number(parentStoreId));
+      await queryClient.invalidateQueries({
+        queryKey: ["void-security-code"],
+      });
+      const result = await listQ.refetch({ cancelRefetch: false });
+      if (result.error) {
+        toast.error("Gagal mengganti kode void");
+        return;
+      }
+      toast.success("Kode void diganti");
+    } catch {
+      toast.error("Gagal mengganti kode void");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const isBusy = refreshing || listQ.isFetching;
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="max-w-xl mx-auto">
@@ -85,9 +113,9 @@ export default function VoidSecurityCodePage() {
                 Kode Keamanan Void
               </h1>
               <p className="text-sm text-gray-600 mt-1">
-                Kode diganti otomatis setiap 1 jam (Asia/Jakarta). Tidak perlu
-                diset manual. Setiap parent store punya kode sendiri — semua
-                cabang di bawahnya memakai kode yang sama.
+                Kode diganti otomatis setiap 10 menit (Asia/Jakarta). Tekan
+                Refresh untuk mengganti kode sekarang. Setiap parent store punya
+                kode sendiri — semua cabang di bawahnya memakai kode yang sama.
               </p>
             </div>
           </div>
@@ -110,6 +138,12 @@ export default function VoidSecurityCodePage() {
                 ))}
               </select>
             </div>
+
+            {listQ.isError && (
+              <p className="text-sm text-red-600">
+                Gagal memuat kode. Coba Refresh atau muat ulang halaman.
+              </p>
+            )}
 
             {parentStoreId && selected && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
@@ -137,11 +171,12 @@ export default function VoidSecurityCodePage() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => refetch()}
-                    className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700"
+                    onClick={handleRefresh}
+                    disabled={isBusy}
+                    className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <RefreshCw
-                      className={`w-3.5 h-3.5 ${listQ.isFetching ? "animate-spin" : ""}`}
+                      className={`w-3.5 h-3.5 ${isBusy ? "animate-spin" : ""}`}
                     />
                     Refresh
                   </button>
@@ -151,7 +186,7 @@ export default function VoidSecurityCodePage() {
 
             {!parentStoreId && (
               <p className="text-sm text-slate-500">
-                Pilih parent store untuk melihat kode void jam ini.
+                Pilih parent store untuk melihat kode void saat ini.
               </p>
             )}
           </div>

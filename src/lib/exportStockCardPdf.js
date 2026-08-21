@@ -1,6 +1,7 @@
 // src/lib/exportStockCardPdf.js
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { IDR as fmtIDR } from "./fmt";
 
 /**
  * PDF: Stock Card
@@ -20,9 +21,6 @@ export function exportStockCardPdf(payload) {
     openingCost = 0,
     rows = [],
   } = payload || {};
-
-  const fmtIDR = (n) =>
-    Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
   const fmtNum = (n) => {
     const v = Number(n || 0);
     if (!Number.isFinite(v)) return "0";

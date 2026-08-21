@@ -25,6 +25,8 @@ import {
   ChefHat,
   KeyRound,
   SlidersHorizontal,
+  Layers,
+  LayoutGrid,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -33,6 +35,23 @@ const toAbs = (p) => (p?.startsWith("/") ? p : `/${String(p || "").replace(/^\/+
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const POPOVER_WIDTH = 240; // w-60
 const SAFE_MARGIN = 8;
+
+const MASTER_PATHS = new Set([
+  "/master/user",
+  "/master/member",
+  "/master/supplier",
+  "/master/store-location",
+  "/master/void-security-code",
+]);
+
+const SETUP_PATHS = new Set([
+  "/master/category",
+  "/master/sub-category",
+  "/master/recipe",
+  "/master/product-option",
+  "/master/additional-charge",
+  "/master/discount",
+]);
 
 export default function Sidebar({
   currentPage,
@@ -47,10 +66,11 @@ export default function Sidebar({
   // ====== STATE ======
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [masterOpenMobile, setMasterOpenMobile] = useState(false);
+  const [setupOpenMobile, setSetupOpenMobile] = useState(false);
   const [procurementOpenMobile, setProcurementOpenMobile] = useState(false); // NEW
 
-  // popover states (dipakai untuk MASTER & PURCHASE/GR)
-  const [openGroup, setOpenGroup] = useState(null); // 'master' | 'procurement' | null
+  // popover states (dipakai untuk MASTER, SETUP & PURCHASE/GR)
+  const [openGroup, setOpenGroup] = useState(null); // 'master' | 'setup' | 'procurement' | null
   const [hoverOpen, setHoverOpen] = useState(false);
   const [clickOpen, setClickOpen] = useState(false);
   const isOpen = !!openGroup && (hoverOpen || clickOpen);
@@ -87,6 +107,7 @@ export default function Sidebar({
   const logoSrcAbs = useMemo(() => toAbs(logoSrc), [logoSrc]);
 
   const masterTriggerRef = useRef(null);      // NEW: trigger untuk master group
+  const setupTriggerRef = useRef(null);       // trigger untuk menu/product setup group
   const procurementTriggerRef = useRef(null); // NEW: trigger untuk purchase/gr group
   const popoverRef = useRef(null);
   const openTimer = useRef(null);
@@ -121,6 +142,7 @@ export default function Sidebar({
 
       if (popoverRef.current.contains(target)) return;
       if (masterTriggerRef.current && masterTriggerRef.current.contains(target)) return;
+      if (setupTriggerRef.current && setupTriggerRef.current.contains(target)) return;
       if (procurementTriggerRef.current && procurementTriggerRef.current.contains(target)) return;
 
       setClickOpen(false);
@@ -135,10 +157,11 @@ export default function Sidebar({
     };
   }, [isOpen]);
 
-  // auto open accordion on /master/* dan /purchase|/gr (mobile)
+  // auto open accordion on master/setup routes dan /purchase|/gr (mobile)
   useEffect(() => {
     const p = location.pathname || "";
-    if (p.startsWith("/master/")) setMasterOpenMobile(true);
+    if (MASTER_PATHS.has(p)) setMasterOpenMobile(true);
+    if (SETUP_PATHS.has(p)) setSetupOpenMobile(true);
     if (p.startsWith("/purchase") || p.startsWith("/gr")) setProcurementOpenMobile(true);
   }, [location.pathname]);
 
@@ -155,29 +178,32 @@ export default function Sidebar({
 
   // ====== DATA ======
   const menuItems = [
-    { id: "home", label: "Home", icon: Home },
+    { id: "home", label: "Apps", icon: LayoutGrid },
+    { id: "dashboard", label: "Dashboard", icon: Home },
     { id: "pos", label: "POS", icon: CreditCard },
     { id: "products", label: "Catalog", icon: Package },
     { id: "inventory", label: "Inventory", icon: Archive },
     { id: "reconciliation", label: "Rekonsiliasi", icon: Scale },
-    // Purchase & GR DIKELUARKAN dari menu utama → akan masuk submenu
-    // { id: "purchase", label: "Purchase", icon: ShoppingCart },
-    // { id: "gr", label: "GR", icon: PackageCheck },
     { id: "history", label: "History", icon: Clock },
   ];
 
+  // People / org / security
   const masterItems = [
     { label: "User", path: "/master/user", icon: User },
+    { label: "Member & Customer", path: "/master/member", icon: Users },
+    { label: "Supplier", path: "/master/supplier", icon: Truck },
+    { label: "Store Location", path: "/master/store-location", icon: MapPin },
+    { label: "Kode Void", path: "/master/void-security-code", icon: KeyRound },
+  ];
+
+  // Menu / product configuration (split from Master — list was too long)
+  const setupItems = [
     { label: "Category", path: "/master/category", icon: Folder },
     { label: "Sub-Category", path: "/master/sub-category", icon: GitBranch },
     { label: "Product Recipe", path: "/master/recipe", icon: ChefHat },
     { label: "Product Options", path: "/master/product-option", icon: SlidersHorizontal },
-    { label: "Member & Customer", path: "/master/member", icon: Users },
     { label: "Additional Charge", path: "/master/additional-charge", icon: BadgeDollarSign },
     { label: "Discount", path: "/master/discount", icon: BadgePercent },
-    { label: "Supplier", path: "/master/supplier", icon: Truck },
-    { label: "Store Location", path: "/master/store-location", icon: MapPin },
-    { label: "Kode Void", path: "/master/void-security-code", icon: KeyRound },
   ];
 
   // NEW: submenu untuk Purchase / GR
@@ -187,10 +213,15 @@ export default function Sidebar({
   ];
 
   const allowedList = allowedPages?.length ? allowedPages : menuItems.map((i) => i.id);
-  const allowedSet = useMemo(() => new Set(allowedList), [allowedList]);
+  // Dashboard shares the same permission as the apps home ("home")
+  const allowedSet = useMemo(() => {
+    const s = new Set(allowedList);
+    if (s.has("home")) s.add("dashboard");
+    return s;
+  }, [allowedList]);
   const visibleItems = useMemo(
     () => menuItems.filter((i) => allowedSet.has(i.id)),
-    [menuItems, allowedSet]
+    [allowedSet]
   );
 
   const showMaster = allowedSet.has("master");
@@ -208,8 +239,10 @@ export default function Sidebar({
     setIsMobileMenuOpen(false);
   };
 
-  const isMasterGroupActive = () => (location.pathname || "").startsWith("/master/");
+  const isMasterGroupActive = () => MASTER_PATHS.has(location.pathname || "");
+  const isSetupGroupActive = () => SETUP_PATHS.has(location.pathname || "");
   const isMasterItemActive = (path) => (location.pathname || "") === path;
+  const isSetupItemActive = (path) => (location.pathname || "") === path;
 
   const isProcurementGroupActive = () => {
     const p = location.pathname || "";
@@ -220,6 +253,7 @@ export default function Sidebar({
   function positionPopover(group = openGroup) {
     let trg = null;
     if (group === "master") trg = masterTriggerRef.current;
+    if (group === "setup") trg = setupTriggerRef.current;
     if (group === "procurement") trg = procurementTriggerRef.current;
     if (!trg) return;
 
@@ -277,10 +311,17 @@ export default function Sidebar({
 
   // pilih isi popover berdasarkan group mana yang aktif
   const activePopoverItems =
-    openGroup === "master" ? masterItems : openGroup === "procurement" ? procurementItems : [];
+    openGroup === "master"
+      ? masterItems
+      : openGroup === "setup"
+        ? setupItems
+        : openGroup === "procurement"
+          ? procurementItems
+          : [];
 
   const isItemActive = (path) => {
     if (openGroup === "master") return isMasterItemActive(path);
+    if (openGroup === "setup") return isSetupItemActive(path);
     if (openGroup === "procurement") return isProcurementItemActive(path);
     return false;
   };
@@ -302,7 +343,7 @@ export default function Sidebar({
       <div className="hidden md:flex w-24 bg-white shadow-lg flex-col py-6 border-r border-gray-200 h-screen fixed top-0 left-0 z-40">
         {/* Logo */}
         <div className="flex items-center justify-center mb-6">
-          <Link to="/" aria-label="Go to home">
+          <Link to="/home" aria-label="Go to apps">
             <img
               src={logoSrcAbs}
               alt="Logo"
@@ -410,6 +451,36 @@ export default function Sidebar({
                   />
                   <FolderTree size={24} className="mb-1" />
                   <span className="text-xs font-medium">Master</span>
+                </div>
+              </div>
+            )}
+
+            {/* SETUP trigger (menu / product config) */}
+            {showMaster && (
+              <div className="w-full px-3 relative">
+                <div
+                  ref={setupTriggerRef}
+                  onClick={() => toggleByClick("setup")}
+                  onMouseEnter={() => openByHover("setup")}
+                  onMouseLeave={closeByHover}
+                  className={[
+                    "relative w-full flex flex-col items-center justify-center",
+                    "h-14 rounded-xl transition-colors duration-200 cursor-pointer",
+                    isSetupGroupActive()
+                      ? "bg-blue-50 text-blue-600 shadow-sm"
+                      : "text-gray-400 hover:text-gray-600 hover:bg-gray-50",
+                  ].join(" ")}
+                  aria-expanded={openGroup === "setup" && isOpen}
+                >
+                  <span
+                    className={[
+                      "absolute left-0 top-1/2 -translate-y-1/2",
+                      "w-[3px] h-8 rounded-r",
+                      isSetupGroupActive() ? "bg-blue-600" : "bg-transparent",
+                    ].join(" ")}
+                  />
+                  <Layers size={24} className="mb-1" />
+                  <span className="text-xs font-medium">Setup</span>
                 </div>
               </div>
             )}
@@ -637,20 +708,17 @@ export default function Sidebar({
                     "relative w-full flex items-center justify-between",
                     "px-4 py-4 rounded-xl transition-colors duration-200 mb-2",
                     "pl-5",
-                    (location.pathname || "").startsWith("/master/")
+                    isMasterGroupActive()
                       ? "bg-blue-50 text-blue-600"
                       : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
                   ].join(" ")}
                   aria-expanded={masterOpenMobile}
                 >
-                  {/* indikator kiri absolut */}
                   <span
                     className={[
                       "absolute left-0 top-1/2 -translate-y-1/2",
                       "w-[4px] h-7 rounded-r",
-                      (location.pathname || "").startsWith("/master/")
-                        ? "bg-blue-600"
-                        : "bg-transparent",
+                      isMasterGroupActive() ? "bg-blue-600" : "bg-transparent",
                     ].join(" ")}
                   />
                   <span className="flex items-center gap-3">
@@ -687,7 +755,80 @@ export default function Sidebar({
                                 : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
                             ].join(" ")}
                           >
-                            {/* indikator kiri absolut */}
+                            <span
+                              className={[
+                                "absolute left-0 top-1/2 -translate-y-1/2",
+                                "w-[3px] h-6 rounded-r",
+                                active ? "bg-blue-600" : "bg-transparent",
+                              ].join(" ")}
+                            />
+                            <Icon size={16} className="shrink-0 opacity-80" />
+                            <span>{mi.label}</span>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* SETUP accordion (mobile) */}
+            {allowedSet.has("master") && (
+              <div className="mt-2">
+                <button
+                  onClick={() => setSetupOpenMobile((v) => !v)}
+                  className={[
+                    "relative w-full flex items-center justify-between",
+                    "px-4 py-4 rounded-xl transition-colors duration-200 mb-2",
+                    "pl-5",
+                    isSetupGroupActive()
+                      ? "bg-blue-50 text-blue-600"
+                      : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
+                  ].join(" ")}
+                  aria-expanded={setupOpenMobile}
+                >
+                  <span
+                    className={[
+                      "absolute left-0 top-1/2 -translate-y-1/2",
+                      "w-[4px] h-7 rounded-r",
+                      isSetupGroupActive() ? "bg-blue-600" : "bg-transparent",
+                    ].join(" ")}
+                  />
+                  <span className="flex items-center gap-3">
+                    <Layers size={22} />
+                    <span className="font-medium text-base">Setup</span>
+                  </span>
+                  <ChevronDown
+                    size={18}
+                    className={`transition-transform ${
+                      setupOpenMobile ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+
+                <div
+                  className={`overflow-hidden transition-[max-height] duration-300 ease-in-out ${
+                    setupOpenMobile ? "max-h-96" : "max-h-0"
+                  }`}
+                >
+                  <ul className="pl-2">
+                    {setupItems.map((mi) => {
+                      const active = isSetupItemActive(mi.path);
+                      const Icon = mi.icon;
+                      return (
+                        <li key={mi.path} className="mb-1">
+                          <Link
+                            to={mi.path}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={[
+                              "relative flex items-center gap-2 w-full",
+                              "px-4 py-3 rounded-lg text-sm pl-5",
+                              active
+                                ? "bg-blue-50 text-blue-600"
+                                : "text-gray-700 hover:bg-gray-50 hover:text-gray-900",
+                            ].join(" ")}
+                          >
                             <span
                               className={[
                                 "absolute left-0 top-1/2 -translate-y-1/2",

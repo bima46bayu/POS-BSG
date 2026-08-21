@@ -13,17 +13,12 @@ import {
 } from "../../api/stockReconciliation";
 import { listStoreLocations as listStoreOptions } from "../../api/users"; // dropdown store
 import { STORAGE_KEY } from "../../api/client";
+import { IDR as fmtIDR } from "../../lib/fmt";
 import { useNavigate } from "react-router-dom";
 
 const PER_PAGE = 10;
 
 /* ===== helpers ===== */
-const fmtIDR = (n) =>
-  (Number(n ?? 0) || 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
 
 const ymd = (s) => {
   if (!s) return "";

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Search, Package, ChevronRight, ArrowLeft, History } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { IDR } from '../lib/fmt';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 
 import { listPurchases, listReceipts, getReceipt } from '../api/purchases';
@@ -12,13 +13,6 @@ import { listStoreLocations } from '../api/storeLocations';
 
 const BRANCH_STORAGE_KEY = 'gr_store_id';
 const PARENT_STORAGE_KEY = 'gr_parent_store_id';
-
-const IDR = (n) =>
-  Number(n || 0).toLocaleString('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  });
 
 const DONE_STATUSES = new Set(['closed', 'completed']);
 const SKIP_STATUSES = new Set(['canceled', 'cancelled']);

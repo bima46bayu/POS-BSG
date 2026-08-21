@@ -16,7 +16,9 @@ import toast from "react-hot-toast";
 
 import DataTable from "../../components/data-table/DataTable";
 import ConfirmDialog from "../../components/common/ConfirmDialog";
-
+import StoreScopeFilter from "../../components/common/StoreScopeFilter";
+import { useStoreScopeFilter } from "../../hooks/useStoreScopeFilter";
+import { getMe } from "../../api/users";
 import { listStoreLocations } from "../../api/storeLocations";
 import {
   listDiscounts,
@@ -26,6 +28,13 @@ import {
 } from "../../api/discounts";
 
 const PER_PAGE = 10;
+const BRANCH_STORAGE_KEY = "discount_store_id";
+const PARENT_STORAGE_KEY = "discount_parent_store_id";
+
+const storeLabel = (s) => {
+  if (!s) return "—";
+  return `${s.code ? `${s.code} — ` : ""}${s.name || ""}`.trim() || "—";
+};
 
 /* ===== Utils ===== */
 const fmtDateTime = (s) => {
@@ -229,7 +238,14 @@ function FilterPopover({ value, onChange }) {
 }
 
 /* ===== Add Modal ===== */
-function AddDiscountModal({ open, loading, onClose, onSubmit, stores = [] }) {
+function AddDiscountModal({
+  open,
+  loading,
+  onClose,
+  onSubmit,
+  storeId,
+  storeName = "",
+}) {
   const [form, setForm] = useState({
     name: "",
     scope: "GLOBAL",
@@ -251,10 +267,10 @@ function AddDiscountModal({ open, loading, onClose, onSubmit, stores = [] }) {
         max_amount: "",
         min_subtotal: "",
         active: true,
-        store_location_id: "",
+        store_location_id: storeId || "",
       });
     }
-  }, [open]);
+  }, [open, storeId]);
 
   const set = (k) => (e) =>
     setForm((p) => ({
@@ -298,19 +314,12 @@ function AddDiscountModal({ open, loading, onClose, onSubmit, stores = [] }) {
 
         <div>
           <label className="block text-sm font-medium mb-1">Store Location</label>
-          <select
-            value={form.store_location_id}
-            onChange={set("store_location_id")}
-            className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
-          >
-            <option value="">Pilih store…</option>
-            {stores.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.code ? `${s.code} - ` : ""}{s.name}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-[11px] text-gray-500">Diskon dibuat per store (wajib).</p>
+          <div className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-800">
+            {storeName || "Pilih cabang di halaman"}
+          </div>
+          <p className="mt-1 text-[11px] text-gray-500">
+            Diskon ini hanya untuk cabang yang sedang dipilih.
+          </p>
         </div>
 
         <div>
@@ -588,6 +597,13 @@ export default function MasterDiscountPage() {
     return () => clearTimeout(id);
   }, [searchTerm]);
 
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: ({ signal }) => getMe(signal),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
   // store list
   const { data: storeRes } = useQuery({
     queryKey: ["store-locations", { page: 1, per_page: 500 }],
@@ -598,7 +614,32 @@ export default function MasterDiscountPage() {
   const storesRaw = storeRes?.items ?? storeRes?.data ?? storeRes ?? [];
   const stores = useMemo(() => (Array.isArray(storesRaw) ? storesRaw : []), [storesRaw]);
 
-  // discounts list
+  const {
+    parentFilterId,
+    storeFilterId,
+    effectiveStoreId,
+    canPickStore,
+    needsStoreSelection,
+    activeStoreLabel,
+    handleParentChange,
+    handleBranchChange,
+  } = useStoreScopeFilter({
+    branchStorageKey: BRANCH_STORAGE_KEY,
+    parentStorageKey: PARENT_STORAGE_KEY,
+    me,
+    stores,
+  });
+
+  const selectedStore = useMemo(
+    () => stores.find((s) => Number(s.id) === Number(effectiveStoreId)) || null,
+    [stores, effectiveStoreId]
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [effectiveStoreId]);
+
+  // discounts list — one store at a time
   const { data: res, isLoading } = useQuery({
     queryKey: [
       "discounts",
@@ -606,23 +647,25 @@ export default function MasterDiscountPage() {
         page: currentPage,
         per_page: PER_PAGE,
         q: debouncedSearch,
+        store_location_id: effectiveStoreId,
         ...filters,
       },
     ],
+    enabled: effectiveStoreId != null,
     queryFn: ({ signal }) =>
       listDiscounts(
         {
           page: currentPage,
           per_page: PER_PAGE,
-          q: debouncedSearch, // backend pakai q
+          q: debouncedSearch,
           scope: filters.scope || undefined,
           kind: filters.kind || undefined,
           active: filters.active === "" ? undefined : filters.active,
+          store_location_id: effectiveStoreId,
+          exact_store: 1,
         },
         signal
       ),
-    keepPreviousData: true,
-    placeholderData: (prev) => prev,
     refetchOnWindowFocus: false,
   });
 
@@ -667,7 +710,7 @@ export default function MasterDiscountPage() {
             : null,
         min_subtotal: payload.min_subtotal !== "" ? Number(payload.min_subtotal) : null,
         active: !!payload.active,
-        store_location_id: Number(payload.store_location_id),
+        store_location_id: Number(payload.store_location_id || effectiveStoreId),
       };
       return createDiscount(body, signal);
     },
@@ -720,7 +763,7 @@ export default function MasterDiscountPage() {
       {
         key: "name",
         header: "Name",
-        width: "280px",
+        width: "240px",
         sticky: "left",
         cell: (r) => {
           const truncateWords = (text, limit = 5) => {
@@ -736,6 +779,21 @@ export default function MasterDiscountPage() {
                 {truncateWords(r.name, 5)}
               </span>
             </div>
+          );
+        },
+      },
+      {
+        key: "store",
+        header: "Store",
+        width: "180px",
+        cell: (r) => {
+          const s =
+            r.store_location ||
+            stores.find((x) => Number(x.id) === Number(r.store_location_id));
+          return (
+            <span className="text-xs text-gray-800" title={storeLabel(s)}>
+              {storeLabel(s)}
+            </span>
           );
         },
       },
@@ -787,7 +845,7 @@ export default function MasterDiscountPage() {
           ),
       },
     ],
-    []
+    [stores]
   );
 
   return (
@@ -796,9 +854,31 @@ export default function MasterDiscountPage() {
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <h2 className="text-lg font-semibold text-gray-800">Discounts</h2>
         <p className="text-sm text-gray-500">
-          Kelola master diskon (GLOBAL / ITEM) per store location.
+          Kelola master diskon (GLOBAL / ITEM) per cabang. Pilih store dulu
+          supaya daftar tidak tercampur.
         </p>
+        <div className="mt-3">
+          <StoreScopeFilter
+            stores={stores}
+            me={me}
+            parentId={parentFilterId}
+            branchId={storeFilterId}
+            onParentChange={handleParentChange}
+            onBranchChange={(id) => {
+              handleBranchChange(id);
+              setCurrentPage(1);
+            }}
+            canPickStore={canPickStore}
+            lockedLabel={activeStoreLabel}
+          />
+        </div>
       </div>
+
+      {needsStoreSelection && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
+          Pilih parent store dan cabang untuk melihat diskon store itu saja.
+        </div>
+      )}
 
       {/* Controls (filter jadi popover seperti contoh) */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -828,7 +908,8 @@ export default function MasterDiscountPage() {
           <div className="ml-auto">
             <button
               onClick={() => setShowAdd(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+              disabled={effectiveStoreId == null}
+              className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
               Add Discount
@@ -841,7 +922,7 @@ export default function MasterDiscountPage() {
       <div className="bg-white border border-gray-200 rounded-lg">
         <div className="w-full overflow-x-auto">
           <div className="min-w-full inline-block align-middle">
-            {isLoading ? (
+            {isLoading && effectiveStoreId != null ? (
               <div className="p-3">
                 {[...Array(8)].map((_, i) => (
                   <div key={i} className="grid grid-cols-12 items-center gap-2 py-2 border-b last:border-0">
@@ -912,7 +993,8 @@ export default function MasterDiscountPage() {
         open={showAdd}
         onClose={() => setShowAdd(false)}
         loading={mCreate.isPending}
-        stores={stores}
+        storeId={effectiveStoreId}
+        storeName={storeLabel(selectedStore) || activeStoreLabel}
         onSubmit={(payload) => mCreate.mutate({ payload })}
       />
 

@@ -1,7 +1,9 @@
 import React, { useMemo } from "react";
 import { computeAdditionalCharges } from "../../utils/additionalCharges";
+import { rupiah } from "../../lib/fmt";
 
-const money = (n) => `Rp${Number(n || 0).toLocaleString("id-ID")}`;
+// Compact "Rp1.000" (no space) -- the POS summary column is narrow.
+const money = (n) => rupiah(n, { space: false });
 
 export default function OrderSummary({
   items = [],

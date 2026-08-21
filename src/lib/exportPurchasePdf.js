@@ -1,6 +1,7 @@
 // src/lib/exportPurchasePdf.js
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { IDR as fmtIDR } from "./fmt";
 
 export async function exportPurchasePdf({
   logoUrl = "/images/LogoBSG.png",
@@ -21,8 +22,6 @@ export async function exportPurchasePdf({
   headerMaxWidthRatio = 0.5,
 } = {}) {
   const safe = (v, d = "-") => (v == null || v === "" ? d : String(v));
-  const fmtIDR = (n) =>
-    Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
   const fmtNum = (n) => Number(n || 0).toLocaleString("id-ID");
   const fmtDate = (s) => {
     if (!s) return "-";

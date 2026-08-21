@@ -290,7 +290,7 @@ export default function HomePage() {
     }
     if (filters.onlyDiscount && !hasDiscount(s)) return false;
     if (filters.search) {
-      const hay = `${s?.code || ""} ${s?.customer_name || ""} ${s?.cashier?.name || ""} ${JSON.stringify(s?.items || [])}`.toLowerCase();
+      const hay = `${s?.code || ""} ${s?.customer_name || ""} ${s?.buyer_name || ""} ${s?.cashier?.name || ""} ${JSON.stringify(s?.items || [])}`.toLowerCase();
       if (!hay.includes(filters.search.toLowerCase())) return false;
     }
     return true;

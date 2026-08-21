@@ -4,14 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listPurchases, getPurchase } from "../../api/purchases";
 import DataTable from "../data-table/DataTable";
 import { Check, X as XIcon, Eye, Calendar, Loader2 } from "lucide-react";
+import { IDR as formatIDR } from "../../lib/fmt";
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-const formatIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
 const formatDateTime = (s) =>
   s
     ? new Date(s).toLocaleString("id-ID", {

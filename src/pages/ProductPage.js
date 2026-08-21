@@ -38,6 +38,7 @@ import DataTable from "../components/data-table/DataTable";
 import ImportExcelModal from "../components/products/ImportExcelModal";
 import StoreScopeFilter from "../components/common/StoreScopeFilter";
 import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
+import { IDR as formatIDR } from "../lib/fmt";
 import {
   CATEGORIES_DIRTY_EVENT,
   CATEGORIES_DIRTY_KEY,
@@ -93,14 +94,6 @@ const badgeClass = (n) => {
   if (v <= 5) return "bg-yellow-100 text-yellow-800";
   return "bg-blue-100 text-blue-800";
 };
-
-const formatIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
-
 const formatDateTime = (s) => {
   if (!s) return "-";
   try {

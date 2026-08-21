@@ -174,6 +174,17 @@ export async function createProduct(body = {}, signal) {
     if (body.sku) fd.append("sku", body.sku);
     fd.append("name", body.name ?? "");
     fd.append("price", String(toNum(body.price)));
+    // Purchase cost, used for inventory valuation/COGS. Omitted when blank so
+    // the backend stores NULL ("unknown") rather than a misleading 0.
+    if (body.cost_price != null && String(body.cost_price) !== "") {
+      fd.append("cost_price", String(toNum(body.cost_price)));
+    }
+    // Pack purchasing reference data. cost_price is always sent per stock unit,
+    // so there is no pack-price flag: the purchase form converts at order time.
+    if (body.pack_size != null && String(body.pack_size) !== "") {
+      fd.append("pack_size", String(toNum(body.pack_size)));
+      if (body.pack_label) fd.append("pack_label", String(body.pack_label));
+    }
     fd.append("stock", String(normalizedStock));
     if (body.description != null) fd.append("description", body.description);
     if (body.category_id != null) fd.append("category_id", String(body.category_id));
@@ -212,6 +223,17 @@ export async function createProduct(body = {}, signal) {
   const payload = {
     name: body.name ?? "",
     price: toNum(body.price),
+    // Purchase cost (inventory valuation). Blank → null, not 0.
+    cost_price:
+      body.cost_price === "" || body.cost_price == null
+        ? null
+        : toNum(body.cost_price),
+    // Pack purchasing: pack_size null → product is bought in its stock unit.
+    pack_size:
+      body.pack_size === "" || body.pack_size == null
+        ? null
+        : toNum(body.pack_size),
+    pack_label: toNull(body.pack_label),
     stock: normalizedStock,
     sku: body.sku ?? "",
     description: toNull(body.description),
@@ -277,6 +299,18 @@ export async function updateProduct(id, body = {}, signal) {
   const payload = {
     name: body.name ?? "",
     price: toNum(body.price),
+    // Purchase cost (inventory valuation). Blank → null, not 0.
+    cost_price:
+      body.cost_price === "" || body.cost_price == null
+        ? null
+        : toNum(body.cost_price),
+    // Pack purchasing. Update always sends cost_price already per stock unit
+    // (the form converts before submitting), so there is no pack-price flag here.
+    pack_size:
+      body.pack_size === "" || body.pack_size == null
+        ? null
+        : toNum(body.pack_size),
+    pack_label: toNull(body.pack_label),
     stock: normalizedStock,
     sku: body.sku ?? "",
     description: toNull(body.description),

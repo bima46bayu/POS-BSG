@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { IDR as fmtIDR } from "../../lib/fmt";
 import DataTable from "../data-table/DataTable";
 import {
   getReconciliation,
@@ -19,21 +20,23 @@ import {
   bulkUpdateReconciliationItems,
   downloadTemplate, // pastikan ada; rute /{id}/template juga didukung di sisi API
 } from "../../api/stockReconciliation";
+import { listUnits } from "../../api/units";
+import {
+  compatibleUnits,
+  convertQty,
+  formatQtyInput,
+  matchUnitId,
+  unitNameById,
+} from "../../lib/units";
 
 const PER_PAGE = 10;
 
 // simpan draft isian per-reconciliation
 const DRAFT_KEY = (rid) => `recon_draft_${rid}`;
-// simpan posisi halaman terakhir (client-side)
+const UNIT_KEY = (rid) => `recon_units_${rid}`;
 const PAGE_KEY = (rid) => `recon_page_${rid}`;
 
 /* ===== helpers ===== */
-const fmtIDR = (n) =>
-  (Number(n ?? 0) || 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
 
 const fmtQty = (n) =>
   Number(n ?? 0).toLocaleString("id-ID", {
@@ -127,7 +130,8 @@ export default function ReconciliationDetail({ id, onBack }) {
 
   // search + edit + paging
   const [q, setQ] = useState("");
-  const [draft, setDraft] = useState({}); // { rowKey: physical_qty }
+  const [draft, setDraft] = useState({}); // { rowKey: qty in selected unit }
+  const [unitByRow, setUnitByRow] = useState({}); // { rowKey: unitId }
   const [dirty, setDirty] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage] = useState(PER_PAGE);
@@ -140,6 +144,12 @@ export default function ReconciliationDetail({ id, onBack }) {
     queryKey: ["recon:detail", id],
     queryFn: () => getReconciliation(id),
     enabled: !!id,
+  });
+
+  const { data: units = [] } = useQuery({
+    queryKey: ["units-for-reconciliation"],
+    queryFn: () => listUnits({ per_page: 200 }),
+    staleTime: 120_000,
   });
 
   // normalisasi respons
@@ -172,18 +182,32 @@ export default function ReconciliationDetail({ id, onBack }) {
   // siapkan draft dari server + merge dengan draft tersimpan + pulihkan halaman
   useEffect(() => {
     if (!isLoading && rawItems?.length) {
-      // ambil draft tersimpan (kalau ada)
       let saved = {};
+      let savedUnits = {};
       try {
         const raw = localStorage.getItem(DRAFT_KEY(id));
         saved = raw ? JSON.parse(raw) : {};
       } catch {}
+      try {
+        const rawU = localStorage.getItem(UNIT_KEY(id));
+        savedUnits = rawU ? JSON.parse(rawU) : {};
+      } catch {}
 
       const init = {};
+      const initUnits = {};
       for (const it of rawItems) {
         const key = it.id ?? `${it.product_id}-${it.sku}`;
-        if (saved[key] != null) {
-          init[key] = saved[key];
+        const stockUom = uomLabel(it);
+        if (savedUnits[key]) initUnits[key] = String(savedUnits[key]);
+
+        if (saved[key] != null && saved[key] !== "") {
+          const raw = saved[key];
+          if (raw && typeof raw === "object") {
+            init[key] = raw.qty ?? "";
+            if (raw.unitId) initUnits[key] = String(raw.unitId);
+          } else {
+            init[key] = raw;
+          }
         } else {
           const v =
             it.physical_qty != null
@@ -191,14 +215,14 @@ export default function ReconciliationDetail({ id, onBack }) {
               : it.real_stock != null
               ? Number(it.real_stock)
               : null;
-          init[key] = Number.isFinite(v) ? v : null;
+          init[key] = Number.isFinite(v) ? formatQtyInput(v) : "";
         }
       }
 
       setDraft(init);
+      setUnitByRow((prev) => ({ ...initUnits, ...prev }));
       setDirty(false);
 
-      // pulihkan halaman terakhir (kalau ada)
       try {
         const last = Number(localStorage.getItem(PAGE_KEY(id)) || "1");
         setPage(Number.isFinite(last) && last > 0 ? last : 1);
@@ -208,31 +232,79 @@ export default function ReconciliationDetail({ id, onBack }) {
     }
   }, [isLoading, rawItems, id]);
 
+  // Default UOM dropdown to the product stock unit once the unit list is ready.
+  useEffect(() => {
+    if (!units.length || !rawItems?.length) return;
+    setUnitByRow((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const it of rawItems) {
+        const key = it.id ?? `${it.product_id}-${it.sku}`;
+        if (next[key]) continue;
+        const stockUom = uomLabel(it);
+        const allowed = compatibleUnits(units, stockUom === "-" ? "" : stockUom);
+        const def = matchUnitId(allowed, stockUom);
+        if (def) {
+          next[key] = def;
+          changed = true;
+        }
+      }
+      if (changed) persistUnits(next);
+      return changed ? next : prev;
+    });
+  }, [units, rawItems, id]);
+
   // jika status sudah APPLIED saat load → hapus draft local
   useEffect(() => {
     if ((rec.status || "").toUpperCase() === "APPLIED") {
       try {
         localStorage.removeItem(DRAFT_KEY(id));
+        localStorage.removeItem(UNIT_KEY(id));
       } catch {}
       setDirty(false);
     }
   }, [rec.status, id]);
 
+  const persistUnits = (next) => {
+    try {
+      localStorage.setItem(UNIT_KEY(id), JSON.stringify(next));
+    } catch {}
+  };
+
+  const persistDraft = (next) => {
+    try {
+      localStorage.setItem(DRAFT_KEY(id), JSON.stringify(next));
+    } catch {}
+  };
+
   // filter by search + normalisasi untuk tabel
   const rowsAll = useMemo(() => {
-    const base = (rawItems || []).map((r) => ({
-      ...r,
-      _rid: r.id ?? `${r.product_id}-${r.sku ?? ""}`,
-      _sku: r.sku ?? "",
-      _name: r.product_name ?? r.name ?? "-",
-      _uom: uomLabel(r),
-      _sys: Number(r.system_qty ?? r.system_stock ?? 0),
-      _avg: Number(r.avg_cost ?? 0),
-    }));
+    const base = (rawItems || []).map((r) => {
+      const stockUom = uomLabel(r);
+      const allowed = compatibleUnits(units, stockUom === "-" ? "" : stockUom);
+      return {
+        ...r,
+        _rid: r.id ?? `${r.product_id}-${r.sku ?? ""}`,
+        _sku: r.sku ?? "",
+        _name: r.product_name ?? r.name ?? "-",
+        _uom: stockUom,
+        _units: allowed,
+        _sys: Number(r.system_qty ?? r.system_stock ?? 0),
+        _avg: Number(r.avg_cost ?? 0),
+      };
+    });
     if (!q) return base;
     const s = q.toLowerCase();
     return base.filter((it) => it._sku.toLowerCase().includes(s) || it._name.toLowerCase().includes(s));
-  }, [rawItems, q]);
+  }, [rawItems, q, units]);
+
+  const rowUnitId = (row) => {
+    const fallback = matchUnitId(row._units, row._uom);
+    return unitByRow[row._rid] ? String(unitByRow[row._rid]) : fallback;
+  };
+
+  const rowUnitName = (row) =>
+    unitNameById(row._units, rowUnitId(row)) || row._uom;
 
   // pagination client-side
   const lastPage = Math.max(1, Math.ceil(rowsAll.length / perPage));
@@ -243,10 +315,32 @@ export default function ReconciliationDetail({ id, onBack }) {
   /* ============== handlers: edit + pagination (persist) ============== */
   const handleEditQty = (rowKey, value) => {
     setDraft((prev) => {
-      const next = { ...prev, [rowKey]: value === "" ? null : Number(value) };
-      try {
-        localStorage.setItem(DRAFT_KEY(id), JSON.stringify(next));
-      } catch {}
+      const next = { ...prev, [rowKey]: value };
+      persistDraft(next);
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const handleUnitChange = (row, nextUnitId) => {
+    const prevId = rowUnitId(row);
+    const prevName = unitNameById(row._units, prevId) || row._uom;
+    const nextName = unitNameById(row._units, nextUnitId) || row._uom;
+    const raw = draft[row._rid];
+    const n = raw === "" || raw == null ? NaN : Number(raw);
+    const converted = Number.isFinite(n) ? convertQty(n, prevName, nextName) : raw;
+
+    setUnitByRow((prev) => {
+      const next = { ...prev, [row._rid]: String(nextUnitId) };
+      persistUnits(next);
+      return next;
+    });
+    setDraft((prev) => {
+      const next = {
+        ...prev,
+        [row._rid]: Number.isFinite(converted) ? formatQtyInput(converted) : converted ?? "",
+      };
+      persistDraft(next);
       return next;
     });
     setDirty(true);
@@ -286,6 +380,7 @@ export default function ReconciliationDetail({ id, onBack }) {
       // bersihkan draft + flag dirty
       try {
         localStorage.removeItem(DRAFT_KEY(id));
+        localStorage.removeItem(UNIT_KEY(id));
       } catch {}
       setDirty(false);
 
@@ -305,7 +400,14 @@ export default function ReconciliationDetail({ id, onBack }) {
     try {
       const payload = [];
       for (const it of rowsAll) {
-        const edited = draft[it._rid];
+        const editedRaw = draft[it._rid];
+        const entered =
+          editedRaw === "" || editedRaw == null ? null : Number(editedRaw);
+        const selectedName = rowUnitName(it);
+        const edited =
+          entered == null || !Number.isFinite(entered)
+            ? null
+            : convertQty(entered, selectedName, it._uom);
         const current =
           it.physical_qty != null
             ? Number(it.physical_qty)
@@ -380,20 +482,26 @@ export default function ReconciliationDetail({ id, onBack }) {
     {
       key: "_uom",
       header: "UOM",
-      width: "80px",
-      cell: (row) => <span className="text-gray-700">{row._uom}</span>,
+      width: "90px",
+      cell: (row) => (
+        <span className="text-gray-700">{rowUnitName(row) || row._uom}</span>
+      ),
     },
     {
       key: "_sys",
       header: "System Stock",
       width: "140px",
       align: "right",
-      cell: (row) => (
-        <span>
-          {fmtQty(row._sys)}
-          {row._uom && row._uom !== "-" ? ` ${row._uom}` : ""}
-        </span>
-      ),
+      cell: (row) => {
+        const selectedName = rowUnitName(row);
+        const shown = convertQty(row._sys, row._uom, selectedName);
+        return (
+          <span>
+            {fmtQty(shown)}
+            {selectedName && selectedName !== "-" ? ` ${selectedName}` : ""}
+          </span>
+        );
+      },
     },
     {
       key: "_total",
@@ -412,11 +520,13 @@ export default function ReconciliationDetail({ id, onBack }) {
     {
       key: "__form",
       header: "Form Real Stock",
-      width: "200px",
+      width: "240px",
       sticky: "right",
       className: "sticky right-0 z-20 bg-white",
       cell: (row) => {
-        const value = draft[row._rid] ?? null;
+        const value = draft[row._rid] ?? "";
+        const selectedName = rowUnitName(row);
+        const allowed = row._units || [];
         return (
           <div className="sticky right-0 z-20 bg-white pr-2">
             <div className="flex items-center justify-end gap-2">
@@ -425,14 +535,27 @@ export default function ReconciliationDetail({ id, onBack }) {
                 inputMode="decimal"
                 step="any"
                 min={0}
-                className="w-28 px-3 py-2 rounded-lg border border-gray-200 text-right focus:outline-none focus:ring-1 focus:ring-blue-600"
+                className="w-24 px-3 py-2 rounded-lg border border-gray-200 text-right focus:outline-none focus:ring-1 focus:ring-blue-600"
                 placeholder="0.05"
                 value={value ?? ""}
                 onChange={(e) => handleEditQty(row._rid, e.target.value)}
                 disabled={rec.status !== "DRAFT"}
               />
-              {row._uom && row._uom !== "-" ? (
-                <span className="text-xs text-gray-500 w-8">{row._uom}</span>
+              {allowed.length ? (
+                <select
+                  value={rowUnitId(row)}
+                  onChange={(e) => handleUnitChange(row, e.target.value)}
+                  disabled={rec.status !== "DRAFT"}
+                  className="w-[5.5rem] px-1.5 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50"
+                >
+                  {allowed.map((u) => (
+                    <option key={u.id} value={String(u.id)}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              ) : selectedName && selectedName !== "-" ? (
+                <span className="text-xs text-gray-500 w-8">{selectedName}</span>
               ) : null}
             </div>
           </div>
@@ -580,6 +703,7 @@ export default function ReconciliationDetail({ id, onBack }) {
       <div className="mt-3 text-xs text-gray-500">
         * Data belum disimpan sampai Anda menekan <b>Proses</b>. Tombol tersebut akan menyimpan perubahan
         kolom <i>Form Real Stock</i> sekaligus melakukan penyesuaian stok (layers & ledger).
+        Untuk Kg/L, pilih satuan <b>g</b> atau <b>Ml</b> seperti di Waste — nilai dikonversi ke satuan stok saat Proses.
       </div>
 
       {/* Modal Import */}

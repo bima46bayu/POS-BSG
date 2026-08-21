@@ -3,7 +3,7 @@ import "./App.css";
 import { Toaster } from "react-hot-toast";
 
 import LoginPages from "./components/LoginPages";
-import Sidebar from "./components/Sidebar";
+import AppsTopBar from "./components/AppsTopBar";
 
 import POSPage from "./pages/POSPage";
 import ProductPage from "./pages/ProductPage";
@@ -12,11 +12,14 @@ import InventoryProductSummaryPage from "./pages/InventorySummaryPage";
 import PurchasePage from "./pages/PurchasePage";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
+import AppsHomePage from "./pages/AppsHomePage";
 import GRPage from "./pages/GRPage";
 import UnauthorizedPage from "./pages/UnauthorizedPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import StockReconciliationPage from "./pages/StockReconciliationPage";
 import StockWriteOffPage from "./pages/StockWriteOffPage";
+import StockReviewPage from "./pages/StockReviewPage";
+import MemberStorePage from "./pages/MemberStorePage";
 
 // Payment Request
 import PaymentRequestPage from "./pages/payment-request/PaymentRequestPage";
@@ -37,15 +40,12 @@ import MasterDiscountPage from "./pages/master/MasterDiscountPage";
 import AdditionalChargePage from "./pages/master/AdditionalChargePage";
 import MasterProductOptionPage from "./pages/master/MasterProductOptionPage";
 import MasterMemberPage from "./pages/master/MasterMemberPage";
+import MasterLoyaltyRewardPage from "./pages/master/MasterLoyaltyRewardPage";
 import VoidSecurityCodePage from "./pages/master/VoidSecurityCodePage";
 
 /* ===== AUTH / API ===== */
 import { isLoggedIn, logoutRequest } from "./api/auth";
-import {
-  STORAGE_KEY,
-  installUnauthorizedRedirect,
-  onUnauthorized,
-} from "./api/client";
+import { STORAGE_KEY, installUnauthorizedRedirect } from "./api/client";
 
 import {
   Routes,
@@ -55,25 +55,16 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getAllowedPages } from "./utils/roles";
 
-/* ===== REACT QUERY ===== */
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: (failureCount, err) => {
-        if (err?.name === "CanceledError") return false;
-        if (err?.response?.status === 401) return false;
-        return failureCount < 2;
-      },
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+/* ===== REACT QUERY =====
+ * Shared instance from ./queryClient. index.js already wraps the tree in a
+ * QueryClientProvider, so App must not create a second client. */
+import { queryClient } from "./queryClient";
 
 const PAGE_PATH = {
   home: "/home",
+  dashboard: "/dashboard",
   pos: "/pos",
   products: "/products",
   inventory: "/inventory/products",
@@ -128,23 +119,19 @@ function AppShell() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  /* unauthorized handler */
+  /* unauthorized handler
+   * Single strategy: cancel + clear the query cache, then show the "Sesi
+   * Berakhir" page. We deliberately do NOT flip loggedIn to false here -- that
+   * would unmount the router subtree and render the login screen instead, so
+   * the /unauthorized page would never be seen. UnauthorizedPage itself is what
+   * returns the user to login. */
   useEffect(() => {
     if (!loggedIn) return;
-    const off1 = installUnauthorizedRedirect({
+    return installUnauthorizedRedirect({
       queryClient,
       navigate,
       loginPath: "/unauthorized",
     });
-    const off2 = onUnauthorized(() => {
-      localStorage.removeItem(STORAGE_KEY);
-      setLoggedIn(false);
-      setRole("kasir");
-    });
-    return () => {
-      off1();
-      off2();
-    };
   }, [loggedIn, navigate]);
 
   /* redirect /master → default master page */
@@ -167,50 +154,61 @@ function AppShell() {
           const r = getRoleFromStorage();
           setRole(r);
 
-          const first =
-            (getAllowedPages(r)[0]) || "pos";
-          navigate(PAGE_PATH[first] || "/pos", { replace: true });
+          navigate(PAGE_PATH.home, { replace: true });
         }}
       />
     );
   }
 
-  const handleNavigate = (pageKey) => {
-    if (!allowedPages.includes(pageKey)) return;
-    navigate(PAGE_PATH[pageKey] || "/pos");
+  const handleLogout = async () => {
+    await logoutRequest();
+    queryClient.clear();
+    setLoggedIn(false);
+    setRole("kasir");
+    navigate("/", { replace: true });
   };
 
-  const getActivePageKey = () => {
-    const p = location.pathname;
-    if (p.startsWith("/inventory")) return "inventory";
-    if (p.startsWith("/master")) return "master";
-    if (p === PAGE_PATH.purchase || p === PAGE_PATH.gr) return null;
+  const isAppsHome = location.pathname === PAGE_PATH.home;
 
-    for (const [k, v] of Object.entries(PAGE_PATH)) {
-      if (p === v) return k;
-    }
+  const moduleTitle = (() => {
+    const p = location.pathname || "";
+    if (p === PAGE_PATH.dashboard) return "Dashboard";
+    if (p === PAGE_PATH.pos) return "Point of Sale";
+    if (p === PAGE_PATH.products) return "Catalog";
+    if (p.startsWith("/inventory/write-off")) return "Waste / Write-off";
+    if (p.startsWith("/inventory/reconciliation")) return "Reconciliation";
+    if (p.startsWith("/inventory")) return "Inventory";
+    if (p === PAGE_PATH.purchase) return "Purchase";
+    if (p === PAGE_PATH.gr) return "Goods Receipt";
+    if (p === PAGE_PATH.history) return "History";
+    if (p.startsWith("/stock-review")) return "Stock Review";
+    if (p.startsWith("/member-store")) return "Member Store";
+    if (p.startsWith("/payment-requests")) return "Payment Requests";
+    if (p.startsWith("/master/user")) return "User";
+    if (p.startsWith("/master/member")) return "Member & Customer";
+    if (p.startsWith("/master/category")) return "Category";
+    if (p.startsWith("/master/sub-category")) return "Sub-Category";
+    if (p.startsWith("/master/recipe")) return "Product Recipe";
+    if (p.startsWith("/master/product-option")) return "Product Options";
+    if (p.startsWith("/master/additional-charge")) return "Additional Charge";
+    if (p.startsWith("/master/discount")) return "Discount";
+    if (p.startsWith("/master/loyalty-rewards")) return "Point Rewards";
+    if (p.startsWith("/master/supplier")) return "Supplier";
+    if (p.startsWith("/master/store-location")) return "Store Location";
+    if (p.startsWith("/master/void-security-code")) return "Kode Void";
+    if (p.startsWith("/master")) return "Master";
     return null;
-  };
+  })();
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar
-        currentPage={getActivePageKey() || undefined}
-        onNavigate={handleNavigate}
-        userRole={role}
-        allowedPages={allowedPages}
-        onLogout={async () => {
-          await logoutRequest();
-          queryClient.clear();
-          setLoggedIn(false);
-          setRole("kasir");
-          navigate("/", { replace: true });
-        }}
-      />
+    <div className="flex min-h-screen flex-col">
+      {!isAppsHome && (
+        <AppsTopBar onLogout={handleLogout} title={moduleTitle} />
+      )}
 
-      <div className="flex-1 md:ml-24">
+      <div className="flex-1">
         <Routes>
-          <Route path="/" element={<Navigate to={PAGE_PATH.pos} replace />} />
+          <Route path="/" element={<Navigate to={PAGE_PATH.home} replace />} />
 
           {/* ===== PAYMENT REQUEST ===== */}
           <Route
@@ -272,6 +270,18 @@ function AppShell() {
           {/* ===== CORE ===== */}
           <Route
             path={PAGE_PATH.home}
+            element={
+              <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
+                <AppsHomePage
+                  allowedPages={allowedPages}
+                  onLogout={handleLogout}
+                />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path={PAGE_PATH.dashboard}
             element={
               <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
                 <HomePage />
@@ -342,6 +352,24 @@ function AppShell() {
             }
           />
 
+          <Route
+            path="/stock-review"
+            element={
+              <ProtectedRoute pageKey="history" allowedPages={allowedPages}>
+                <StockReviewPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/member-store"
+            element={
+              <ProtectedRoute pageKey="pos" allowedPages={allowedPages}>
+                <MemberStorePage />
+              </ProtectedRoute>
+            }
+          />
+
           {/* ===== MASTER (ADMIN ONLY) ===== */}
           <Route
             path="/master/user"
@@ -372,6 +400,14 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterDiscountPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/loyalty-rewards"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterLoyaltyRewardPage />
               </ProtectedRoute>
             }
           />
@@ -471,9 +507,5 @@ function AppShell() {
 }
 
 export default function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <AppShell />
-    </QueryClientProvider>
-  );
+  return <AppShell />;
 }

@@ -1,13 +1,6 @@
 import React from "react";
 import { X } from "lucide-react";
-
-const fmtIDR = (n) =>
-  Number(n ?? 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
-
+import { IDR as fmtIDR } from "../../lib/fmt";
 // helper warna badge metode pembayaran
 const paymentBadgeClass = (method) => {
   const m = String(method || "").toLowerCase();

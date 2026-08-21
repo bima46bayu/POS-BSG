@@ -1,4 +1,13 @@
 // src/lib/fmt.js
+
+// Money formatting comes in three flavours across the app. They render
+// differently, so they are separate exports rather than one "correct" one:
+//
+//   IDR(1000)      -> "Rp 1.000"  (locale currency style; most screens)
+//   rupiah(1000)   -> "Rp 1.000"  (manual prefix; same visual result)
+//   IDRPlain(1000) -> "1.000"     (digits only; payment-request + GR pages)
+//
+// Prefer IDR for new code.
 export const IDR = (n) =>
   Number(n || 0).toLocaleString("id-ID", {
     style: "currency",
@@ -6,8 +15,43 @@ export const IDR = (n) =>
     maximumFractionDigits: 0,
   });
 
+/** Digits only, no currency symbol, no decimals. */
+export const IDRPlain = (n) =>
+  Number(n || 0).toLocaleString("id-ID", { maximumFractionDigits: 0 });
+
+/**
+ * Manual "Rp" prefix. Pass { space: false } for the compact POS variant
+ * ("Rp1.000") used where horizontal room is tight.
+ */
+export const rupiah = (n, { space = true } = {}) =>
+  `Rp${space ? " " : ""}${Number(n || 0).toLocaleString("id-ID")}`;
+
 export const N = (v) =>
   v == null ? 0 : Number(String(v).replace(/[^0-9.-]/g, "")) || 0;
+
+/**
+ * Numeric value for a form <input>, with pointless trailing zeros removed.
+ *
+ * MySQL hands back DECIMAL columns as padded strings — `price` becomes
+ * "100.00" and `pack_size` becomes "100.0000" — so edit forms were showing
+ * noise like "5000.00" where the user only ever typed 5000. Significant
+ * decimals survive ("0.50" -> "0.5", "1.5" -> "1.5"); only the padding goes.
+ *
+ * Returns "" for null/blank so an unknown value stays an empty field rather
+ * than becoming a 0 that looks deliberately entered.
+ */
+export const numInput = (v) => {
+  if (v === null || v === undefined || v === "") return "";
+
+  const n = Number(v);
+  // Non-numeric input is passed through untouched rather than blanked, so a
+  // bad value stays visible and fixable instead of silently disappearing.
+  if (!Number.isFinite(n)) return String(v);
+
+  // Number->String would switch to exponent notation past 1e21, which is not a
+  // valid <input type="number"> value.
+  return Math.abs(n) >= 1e21 ? String(v) : String(n);
+};
 
 export const shortIDR = (v) =>
   v >= 1e9 ? (v / 1e9).toFixed(1) + "M"
