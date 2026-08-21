@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, UploadCloud, X as XIcon } from "lucide-react";
 import UnitDropdown from "./UnitDropdown";
 import { getNextSku } from "../../api/products";
+import { IDR } from "../../lib/fmt";
 
 /**
  * Props:
@@ -26,15 +27,68 @@ export default function AddProduct({
   const [form, setForm] = useState({
     name: "",
     price: "",
+    cost_price: "",
+    pack_size: "",
+    pack_label: "",
     category_id: "",
     sub_category_id: "",
     stock: "",
     sku: "",
     description: "",
     unit_id: "",
+    unit_name: "",
   });
 
   const [trackInventory, setTrackInventory] = useState(true); // ✅ stock / non-stock
+
+  const packSize = Number(form.pack_size) > 1 ? Number(form.pack_size) : null;
+  const packLabel = form.pack_label?.trim();
+
+  // cost_price is per stock unit, which for a packed product IS the pack price.
+  // Showing the derived per-piece cost lets the user sanity-check the split
+  // without doing the division themselves.
+  const packHint = useMemo(() => {
+    const cost = Number(form.cost_price);
+    if (!packSize || !(cost > 0)) return null;
+
+    return `≈ ${IDR(cost / packSize)} per ${packLabel || "satuan kecil"} (isi ${packSize}).`;
+  }, [packSize, packLabel, form.cost_price]);
+
+  // Buying at or above the sell price is the fingerprint of a pack price entered
+  // as a unit cost — exactly what zeroed margins across the catalogue.
+  const costLooksLikePackPrice =
+    Number(form.cost_price) > 0 &&
+    Number(form.price) > 0 &&
+    Number(form.cost_price) >= Number(form.price);
+
+  /*
+   | Deliberately NOT offering a "divide by pack size" fix any more.
+   |
+   | pack_size no longer rescales cost: stock is counted in packs, so the pack
+   | price IS the per-stock-unit cost. Dividing it here would understate COGS by
+   | pack_size× — the same 5000→50 corruption reported earlier, just relocated.
+   | For a packed ingredient, cost >= sell price is also normal (it is bought by
+   | the pack and rarely sold as one), so the warning is suppressed there.
+   */
+  const showCostWarning = costLooksLikePackPrice && !packSize;
+
+  /*
+   | Shown only when the stock unit is a container (Pack/Box/Dus), because
+   | pack_size now means "how many small units are inside 1 stock unit".
+   |
+   | Stock and cost stay in the container unit: buy 1 Pack @5.000 → stock +1
+   | Pack, cost 5.000/Pack. pack_size is NOT a cost divisor; it exists so a
+   | recipe can consume fractions of a pack (1 Batang = 1/100 Pack).
+   */
+  const stockUnitIsPack = /^(pack|packs|pak|box|dus|karton|carton|lusin)$/i.test(
+    (form.unit_name || "").trim()
+  );
+
+  const showPackFields = trackInventory && stockUnitIsPack;
+
+  // Keep the payload in lockstep with visibility so hidden inputs can never
+  // submit a stale divisor the user cannot see.
+  const effectivePackSize = showPackFields ? packSize : null;
 
   const [files, setFiles] = useState([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -96,12 +150,16 @@ export default function AddProduct({
       setForm({
         name: "",
         price: "",
+        cost_price: "",
+        pack_size: "",
+        pack_label: "",
         category_id: "",
         sub_category_id: "",
         stock: "",
         sku: "",
         description: "",
         unit_id: "",
+        unit_name: "",
       });
       setTrackInventory(true);
       setSkuLoading(false);
@@ -181,6 +239,13 @@ export default function AddProduct({
       const payload = {
         ...form,
         price: form.price ? Number(form.price) : 0,
+        // Left blank → null, so inventory valuation reads "unknown" instead of
+        // silently treating the sell price (or 0) as the cost.
+        cost_price: form.cost_price === "" ? null : Number(form.cost_price),
+        // Pack info. pack_size <= 1 is a no-op divisor, so send null and let the
+        // product stay "unpacked" rather than storing a meaningless 1.
+        pack_size: effectivePackSize,
+        pack_label: effectivePackSize ? packLabel || null : null,
         stock: form.stock ? Number(form.stock) : 0,
         images: files.map((f) => f.file),
         store_location_id: storeLocationId,
@@ -246,6 +311,31 @@ export default function AddProduct({
               min="0"
               required
             />
+          </Field>
+
+          <Field label="Harga Beli (Cost)">
+            <Input
+              type="number"
+              inputMode="numeric"
+              placeholder="80000"
+              value={form.cost_price}
+              onChange={onChange("cost_price")}
+              min="0"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Harga beli <strong>per 1 Unit</strong> yang dipilih di bawah. Kalau
+              Unit = Pack, isi harga <strong>per pack</strong> (misal 5.000/pack)
+              — sistem yang membagi per isinya. Kosongkan jika belum diketahui.
+            </p>
+            {packHint && <p className="mt-1 text-xs text-blue-700">{packHint}</p>}
+            {showCostWarning && (
+              <p className="mt-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                Harga beli ({IDR(form.cost_price)}) lebih tinggi dari harga jual
+                ({IDR(form.price)}), jadi margin akan minus. Kalau produk ini
+                dibeli per pack, pilih <strong>Unit</strong> = Pack lalu isi
+                jumlah isinya — harga beli tetap harga per pack.
+              </p>
+            )}
           </Field>
 
           {/* Jenis Produk: Stock / Non-Stock */}
@@ -321,13 +411,58 @@ export default function AddProduct({
             <Field label="Unit">
               <UnitDropdown
                 value={form.unit_id}
-                onChange={(id) =>
-                  setForm((f) => ({ ...f, unit_id: id ?? "" }))
+                onChange={(id, name) =>
+                  setForm((f) => ({
+                    ...f,
+                    unit_id: id ?? "",
+                    unit_name: name ?? "",
+                  }))
                 }
-                placeholder="Pilih / kelola satuan"
+                placeholder="Pilih satuan"
               />
             </Field>
           </div>
+
+          {/* Sits directly under Unit because it only becomes relevant once a
+              unit is picked, and it describes that unit. */}
+          {showPackFields && (
+            <Field label={`Jumlah Isi per ${form.unit_name || "Pack"}`}>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <span className="block text-[11px] text-gray-500 mb-1">
+                    Isi per {form.unit_name || "pack"} (angka)
+                  </span>
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="100"
+                    value={form.pack_size}
+                    onChange={onChange("pack_size")}
+                    min="0"
+                    step="any"
+                  />
+                </div>
+                <div className="flex-1">
+                  <span className="block text-[11px] text-gray-500 mb-1">
+                    Satuan isi (teks)
+                  </span>
+                  <Input
+                    placeholder="Pcs / Batang / Lembar"
+                    value={form.pack_label}
+                    onChange={onChange("pack_label")}
+                    maxLength={32}
+                  />
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                Stok dihitung per <strong>{form.unit_name}</strong>. Isi ini
+                kalau 1 {form.unit_name} berisi beberapa satuan kecil — contoh:
+                sedotan 1 Pack isi <strong>100</strong>{" "}
+                <strong>Batang</strong>. Dipakai resep untuk memotong stok per
+                batang.
+              </p>
+            </Field>
+          )}
 
           <Field label="SKU">
             <Input

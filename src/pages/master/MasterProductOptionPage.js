@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { rupiah } from "../../lib/fmt";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, X, Edit, Trash2, SlidersHorizontal, Package } from "lucide-react";
 import toast from "react-hot-toast";
@@ -24,7 +25,6 @@ import { listUnits } from "../../api/units";
 const BRANCH_STORAGE_KEY = "product_option_store_id";
 const PARENT_STORAGE_KEY = "product_option_parent_store_id";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 
 function productUnitId(product) {
   return product?.unit_id ?? product?.unit?.id ?? "";

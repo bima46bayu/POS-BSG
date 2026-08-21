@@ -1,9 +1,9 @@
 // src/components/pos/OptionPickerModal.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { rupiah } from "../../lib/fmt";
 import { X } from "lucide-react";
 import { sumOptionsPrice } from "../../api/productOptions";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 
 /**
  * Modal pilih opsi item (Sugar Level, Ice Level, dll) sebelum masuk cart.

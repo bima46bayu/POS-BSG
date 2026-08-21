@@ -1,5 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 
+// Single shared client for the whole app. Do not create another QueryClient:
+// nesting two QueryClientProviders means the inner one serves all components,
+// so anything clearing the outer client silently does nothing.
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -9,7 +12,12 @@ export const queryClient = new QueryClient({
       gcTime: 30 * 60 * 1000,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
-      retry: 1,
+      retry: (failureCount, err) => {
+        if (err?.name === "CanceledError") return false;
+        // A 401 will not fix itself by retrying; the session is gone.
+        if (err?.response?.status === 401) return false;
+        return failureCount < 2;
+      },
     },
   },
 });

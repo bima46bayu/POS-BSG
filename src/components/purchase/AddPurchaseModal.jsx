@@ -14,6 +14,36 @@ import { getMyProfile } from "../../api/users";
 
 const toNum = (v) => Number(v || 0);
 
+/** Stock units per pack, or null when the product isn't bought in packs. */
+function packSizeOf(product) {
+  const size = Number(product?.pack_size);
+  return Number.isFinite(size) && size > 1 ? size : null;
+}
+
+/** Label for what is INSIDE one pack ("Batang", "Pcs"), not the pack itself. */
+function packLabelOf(product) {
+  return product?.pack_label?.trim() || "isi";
+}
+
+/**
+ * Pre-fill for a PO line's price.
+ *
+ * Purchasing always happens in the product's stock unit — if a product is
+ * bought by the pack, its Unit *is* "Pack" and cost_price is already the pack
+ * price. So no scaling happens here, and the old pack/unit dropdown is gone:
+ * that dropdown existed only because stock used to be counted in pieces while
+ * buying happened in packs, which is exactly the mismatch that confused buyers.
+ *
+ * Returns "" (not 0) when no cost is on file: a blank field prompts for the real
+ * supplier price, whereas 0 looks like an answer and books zero-cost stock.
+ */
+function packAwareCost(product) {
+  const cost = Number(product?.cost_price);
+  if (!Number.isFinite(cost) || cost <= 0) return "";
+
+  return cost;
+}
+
 /** Satuan from product master (same source as Add Product). */
 function productUnitLabel(p) {
   if (!p) return "—";
@@ -177,9 +207,13 @@ export default function AddPurchaseModal({ open, onClose, storeLocationId: store
           ? {
               ...r,
               product_id: productId,
-              unit_price: r.unit_price
-                ? r.unit_price
-                : toNum(p?.purchase_price ?? p?.price ?? 0),
+              // Pre-fill from the COST, never the sell price.
+              // `purchase_price` has never existed as a column, so the old
+              // `p.purchase_price ?? p.price` fallback silently stamped the
+              // sell price onto every PO line — 1,042 of them in production,
+              // which is what made COGS equal revenue and zeroed all margins.
+              // Blank when no cost is known, so the buyer types the real one.
+              unit_price: r.unit_price ? r.unit_price : packAwareCost(p),
             }
           : r
       )
@@ -245,6 +279,8 @@ export default function AddPurchaseModal({ open, onClose, storeLocationId: store
   }, [activeProductRow]);
 
   // subtotal per item & grand total
+  // Qty and price are always in the SAME unit (both per pack, or both per
+  // stock unit), so the product is the line total either way — no scaling here.
   const subTotals = useMemo(
     () =>
       items.map((it) => {
@@ -304,6 +340,9 @@ export default function AddPurchaseModal({ open, onClose, storeLocationId: store
       order_date: orderDate,
       expected_date: expectedDate || null,
       notes,
+      // Qty and price are already in the product's stock unit (Pack for
+      // pack-bought goods), so they pass through untouched. No pack scaling
+      // here — pack_size is a recipe concern, not a purchasing one.
       items: items.map((it) => ({
         product_id: Number(it.product_id),
         qty_order: Number(it.qty_order),
@@ -558,9 +597,23 @@ export default function AddPurchaseModal({ open, onClose, storeLocationId: store
                             }
                             className="w-24 px-2 py-1.5 border rounded-lg text-right text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/70"
                           />
+                          {/* Show the contents this resolves to, so the buyer can
+                              sanity-check against the invoice. Purely
+                              informational — nothing is rescaled. */}
+                          {packSizeOf(selectedProduct) &&
+                            toNum(it.qty_order) > 0 && (
+                              <div className="mt-1 text-[11px] text-slate-500 whitespace-nowrap">
+                                ={" "}
+                                {toNum(it.qty_order) *
+                                  packSizeOf(selectedProduct)}{" "}
+                                {packLabelOf(selectedProduct)}
+                              </div>
+                            )}
                         </td>
 
-                        {/* Satuan (from product master) */}
+                        {/* Satuan is always the product's stock unit now. A
+                            pack-bought product has Unit = Pack, so there is
+                            nothing to choose and no conversion to get wrong. */}
                         <td className="p-2 align-top">
                           <div
                             className="px-2 py-1.5 text-sm text-slate-700"
@@ -729,13 +782,19 @@ export default function AddPurchaseModal({ open, onClose, storeLocationId: store
                     <span className="text-[11px] text-slate-500 flex justify-between gap-2">
                       <span>{p.sku ? `SKU: ${p.sku}` : "Tanpa SKU"}</span>
                       <span>
-                        {Number(
-                          p.purchase_price ?? p.price ?? 0
-                        ).toLocaleString("id-ID", {
-                          style: "currency",
-                          currency: "IDR",
-                          maximumFractionDigits: 0,
-                        })}
+                        {p.cost_price != null
+                          ? `${Number(p.cost_price).toLocaleString("id-ID", {
+                              style: "currency",
+                              currency: "IDR",
+                              maximumFractionDigits: 0,
+                            })}/${productUnitLabel(p)}${
+                              Number(p.pack_size) > 1
+                                ? ` · isi ${Number(p.pack_size)}/${
+                                    p.pack_label || "pack"
+                                  }`
+                                : ""
+                            }`
+                          : "Cost belum diisi"}
                       </span>
                     </span>
                   </button>

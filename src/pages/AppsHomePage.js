@@ -27,6 +27,7 @@ import {
   Truck,
   MapPin,
   KeyRound,
+  Gift,
 } from "lucide-react";
 
 const BG =
@@ -106,6 +107,22 @@ const ROOT_APPS = [
     color: "#875A7B",
     path: "/history",
     need: "history",
+  },
+  {
+    id: "stock-review",
+    label: "Stock Review",
+    icon: Scale,
+    color: "#B45F06",
+    path: "/stock-review",
+    need: "history",
+  },
+  {
+    id: "member-store",
+    label: "Member Store",
+    icon: Gift,
+    color: "#674EA7",
+    path: "/member-store",
+    need: "pos",
   },
   {
     id: "master",
@@ -278,6 +295,14 @@ const FOLDERS = {
         icon: BadgePercent,
         color: "#CC0000",
         path: "/master/discount",
+        need: "master",
+      },
+      {
+        id: "s-rewards",
+        label: "Point Rewards",
+        icon: Gift,
+        color: "#674EA7",
+        path: "/master/loyalty-rewards",
         need: "master",
       },
     ],

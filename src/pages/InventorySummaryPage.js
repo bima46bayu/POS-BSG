@@ -11,6 +11,7 @@ import { canSwitchStores } from "../utils/roles";
 import DataTable from "../components/data-table/DataTable";
 import ExportPdfModal from "../components/common/ExportPdfModal";
 import { exportStockCardPdf } from "../lib/exportStockCardPdf";
+import { IDR as fmtIDR } from "../lib/fmt";
 
 /* ===================== Konstanta ===================== */
 const PER_PAGE = 10;
@@ -18,8 +19,6 @@ const MAX_PAGES = 200;
 const STORAGE_KEY = "inventory_store_id";
 
 /* ===================== Formatter ===================== */
-const fmtIDR = (n) =>
-  Number(n || 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 const fmtNum = (n) => {
   const v = Number(n || 0);
   if (!Number.isFinite(v)) return "0";

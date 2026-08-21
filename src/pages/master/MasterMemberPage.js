@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { rupiah } from "../../lib/fmt";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
@@ -14,12 +15,9 @@ import toast from "react-hot-toast";
 
 import DataTable from "../../components/data-table/DataTable";
 import ConfirmDialog from "../../components/common/ConfirmDialog";
-import StoreScopeFilter from "../../components/common/StoreScopeFilter";
-import { useStoreScopeFilter } from "../../hooks/useStoreScopeFilter";
 import PointSettingsModal from "../../components/members/PointSettingsModal";
 import MemberPointsModal from "../../components/members/MemberPointsModal";
 import { getMe } from "../../api/users";
-import { listStoreLocations } from "../../api/storeLocations";
 
 import {
   listMembers,
@@ -30,10 +28,6 @@ import {
   getPointSettings,
 } from "../../api/members";
 
-const BRANCH_STORAGE_KEY = "member_store_id";
-const PARENT_STORAGE_KEY = "member_parent_store_id";
-
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 
 const fmtDate = (v) => {
   if (!v) return "—";
@@ -118,11 +112,9 @@ function MemberModal({ open, onClose, onSubmit, loading, initial, storeId }) {
       initial_points: "",
     });
 
-    if (storeId != null) {
-      nextMemberCode({ store_location_id: storeId })
-        .then((code) => setForm((f) => ({ ...f, code })))
-        .catch(() => {});
-    }
+    nextMemberCode(storeId != null ? { store_location_id: storeId } : undefined)
+      .then((code) => setForm((f) => ({ ...f, code })))
+      .catch(() => {});
   }, [open, initial, storeId]);
 
   if (!open) return null;
@@ -323,23 +315,7 @@ export default function MasterMemberPage() {
   const qc = useQueryClient();
 
   const [me, setMe] = useState(null);
-  const [stores, setStores] = useState([]);
-
-  const {
-    parentFilterId,
-    storeFilterId,
-    effectiveStoreId,
-    canPickStore,
-    needsStoreSelection,
-    activeStoreLabel,
-    handleParentChange,
-    handleBranchChange,
-  } = useStoreScopeFilter({
-    branchStorageKey: BRANCH_STORAGE_KEY,
-    parentStorageKey: PARENT_STORAGE_KEY,
-    me,
-    stores,
-  });
+  const homeStoreId = me?.store_location_id ?? me?.store_location?.id ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -355,22 +331,6 @@ export default function MasterMemberPage() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!canPickStore) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await listStoreLocations({ page: 1, per_page: 200 });
-        if (!cancelled) setStores(res?.items || []);
-      } catch {
-        if (!cancelled) setStores([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [canPickStore]);
 
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -392,12 +352,10 @@ export default function MasterMemberPage() {
   }, [search]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["members", effectiveStoreId, debounced, page],
-    enabled: effectiveStoreId != null,
+    queryKey: ["members", debounced, page],
     queryFn: ({ signal }) =>
       listMembers(
         {
-          store_location_id: effectiveStoreId,
           search: debounced || undefined,
           page,
           per_page: 25,
@@ -416,7 +374,10 @@ export default function MasterMemberPage() {
 
   const mCreate = useMutation({
     mutationFn: (payload) =>
-      createMember({ ...payload, store_location_id: effectiveStoreId }),
+      createMember({
+        ...payload,
+        ...(homeStoreId ? { store_location_id: homeStoreId } : {}),
+      }),
     onSuccess: () => {
       toast.success("Member ditambahkan");
       setShowAdd(false);
@@ -563,8 +524,8 @@ export default function MasterMemberPage() {
               Member & Customer
             </h2>
             <p className="text-sm text-gray-500">
-              Database pelanggan + poin loyalitas. Satu kartu berlaku di semua
-              cabang dalam satu parent store.
+              Satu kartu member berlaku di semua cabang. Poin ikut ke mana saja
+              member belanja.
             </p>
           </div>
 
@@ -581,31 +542,12 @@ export default function MasterMemberPage() {
             ) : null}
           </button>
         </div>
-
-        <div className="mt-3">
-          <StoreScopeFilter
-            stores={stores}
-            me={me}
-            parentId={parentFilterId}
-            branchId={storeFilterId}
-            onParentChange={handleParentChange}
-            onBranchChange={handleBranchChange}
-            canPickStore={canPickStore}
-            lockedLabel={activeStoreLabel}
-          />
-        </div>
       </div>
 
       {settings && settings.enabled === false && (
         <div className="bg-gray-100 border text-gray-700 text-sm rounded-lg px-4 py-3">
           Program poin sedang <b>dimatikan</b>. Transaksi tidak menambah poin
           sampai diaktifkan lagi di <b>Konversi Poin</b>.
-        </div>
-      )}
-
-      {needsStoreSelection && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
-          Pilih parent store dan cabang untuk mengelola member.
         </div>
       )}
 
@@ -622,7 +564,6 @@ export default function MasterMemberPage() {
 
         <button
           onClick={() => setShowAdd(true)}
-          disabled={effectiveStoreId == null}
           className="flex items-center gap-2 px-4 py-2 text-sm text-white bg-blue-600 rounded-lg disabled:opacity-50"
         >
           <Plus className="w-4 h-4" />
@@ -670,7 +611,7 @@ export default function MasterMemberPage() {
 
       <MemberModal
         open={showAdd}
-        storeId={effectiveStoreId}
+        storeId={homeStoreId}
         onClose={() => setShowAdd(false)}
         loading={mCreate.isPending}
         onSubmit={(payload) => mCreate.mutate(payload)}
@@ -678,7 +619,7 @@ export default function MasterMemberPage() {
 
       <MemberModal
         open={!!editTarget}
-        storeId={effectiveStoreId}
+        storeId={homeStoreId}
         initial={editTarget}
         onClose={() => setEditTarget(null)}
         loading={mUpdate.isPending}

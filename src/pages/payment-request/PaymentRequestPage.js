@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { IDRPlain as fmtIDR } from "../../lib/fmt";
 import {
   Plus,
   Landmark,
@@ -43,9 +44,6 @@ const fmtDateTime = (s) => {
     return s;
   }
 };
-
-const fmtIDR = (v) =>
-  Number(v || 0).toLocaleString("id-ID", { maximumFractionDigits: 0 });
 
 const calcTotalsFromItems = (items = []) => {
   return items.reduce(

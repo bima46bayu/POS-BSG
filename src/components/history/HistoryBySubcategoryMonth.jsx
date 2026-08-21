@@ -1,18 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Calendar, Check, Loader2 } from "lucide-react";
 import { getSubcategoryMonthlyReport } from "../../api/categories";
+import { IDR as rupiah } from "../../lib/fmt";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-
-const rupiah = (n) =>
-  new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    minimumFractionDigits: 0,
-  }).format(n || 0);
 
 function calcTotal(rows) {
   return rows.reduce(

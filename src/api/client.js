@@ -15,8 +15,20 @@ export function onUnauthorized(fn) {
   unauthorizedHandlers.push(fn);
   return () => { unauthorizedHandlers = unauthorizedHandlers.filter(h => h !== fn); };
 }
+
+// Guard against a burst of parallel 401s (e.g. a page firing 6 queries at once)
+// producing six redirects. Reset once the app has navigated.
+let emitting401 = false;
 function emitUnauthorized() {
-  unauthorizedHandlers.forEach(h => { try { h(); } catch {} });
+  if (emitting401) return;
+  emitting401 = true;
+  try {
+    unauthorizedHandlers.forEach(h => { try { h(); } catch {} });
+  } finally {
+    // Release on the next tick so the in-flight 401 wave is collapsed into one
+    // notification, but a genuinely new 401 later still gets handled.
+    setTimeout(() => { emitting401 = false; }, 0);
+  }
 }
 
 // REQUEST: selalu pakai token terbaru
@@ -36,28 +48,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// RESPONSE: tahan spam 401 (once-only guard) + JANGAN lempar error
-let isEmitting401 = false;
+// RESPONSE: satu jalur penanganan 401 lewat pub/sub di atas.
+// Sebelumnya di sini ada window.location.replace("/") yang mem-reload penuh,
+// sehingga subscriber onUnauthorized tidak pernah jalan dan cache React Query
+// tidak pernah dibersihkan. Sekarang emit saja, biar UI yang menavigasi.
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    const status = err?.response?.status;
-
-    if (status === 401) {
+    if (err?.response?.status === 401) {
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch {}
-
-      // ⬇️ TAMBAHKAN INI
-      if (!window.__redirecting401) {
-        window.__redirecting401 = true;
-
-        setTimeout(() => {
-          window.location.replace("/"); // halaman login
-        }, 100);
-      }
-
-      return Promise.reject(err);
+      emitUnauthorized();
     }
 
     return Promise.reject(err);

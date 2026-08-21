@@ -23,6 +23,7 @@ import { listStoreLocations } from "../api/storeLocations";
 import { useNavigate } from "react-router-dom";
 import StoreScopeFilter from "../components/common/StoreScopeFilter";
 import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
+import { IDR as formatIDR } from "../lib/fmt";
 
 const PER_PAGE = 10;
 const STORAGE_KEY = "inventory_store_id";
@@ -32,12 +33,6 @@ const toNum = (v) =>
   Number(v ?? 0).toLocaleString("id-ID", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 4,
-  });
-const formatIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
   });
 const labelFromMap = (m, id) =>
   id == null

@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { IDR as fmtIDR } from "../../lib/fmt";
 import DataTable from "../data-table/DataTable";
 import {
   getReconciliation,
@@ -36,12 +37,6 @@ const UNIT_KEY = (rid) => `recon_units_${rid}`;
 const PAGE_KEY = (rid) => `recon_page_${rid}`;
 
 /* ===== helpers ===== */
-const fmtIDR = (n) =>
-  (Number(n ?? 0) || 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
 
 const fmtQty = (n) =>
   Number(n ?? 0).toLocaleString("id-ID", {

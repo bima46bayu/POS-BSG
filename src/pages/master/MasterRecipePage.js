@@ -84,8 +84,29 @@ function unitFamily(name) {
   return "other";
 }
 
-/** Units that can convert to the ingredient's catalog (stock) unit. */
-function compatibleUnits(allUnits, stockUnitName) {
+/** Generic words for "one piece", accepted when pack_label is blank. */
+const CONTENTS_ALIASES = [
+  "pcs",
+  "pc",
+  "piece",
+  "pieces",
+  "batang",
+  "lembar",
+  "buah",
+  "biji",
+];
+
+/**
+ * Units that can convert to the ingredient's catalog (stock) unit.
+ *
+ * `ingredient` is optional; when given, a pack-stocked product also accepts its
+ * contents unit (Pack of 100 Batang → "Batang" is selectable). Without this the
+ * dropdown would only ever offer "Pack", making it impossible to write the
+ * per-straw recipe the pack exists to support.
+ *
+ * Kept in sync with RecipeService::matchesContentsUnit() on the backend.
+ */
+function compatibleUnits(allUnits, stockUnitName, ingredient = null) {
   if (!stockUnitName) return allUnits;
   const family = unitFamily(stockUnitName);
   if (family === "mass") {
@@ -94,8 +115,20 @@ function compatibleUnits(allUnits, stockUnitName) {
   if (family === "volume") {
     return allUnits.filter((u) => unitFamily(u.name) === "volume");
   }
+
   const stockKey = normalizeUnitKey(stockUnitName);
-  return allUnits.filter((u) => normalizeUnitKey(u.name) === stockKey);
+  const packSize = Number(ingredient?.pack_size);
+  const isPacked = Number.isFinite(packSize) && packSize > 1;
+
+  if (!isPacked) {
+    return allUnits.filter((u) => normalizeUnitKey(u.name) === stockKey);
+  }
+
+  const label = String(ingredient?.pack_label || "").toLowerCase().trim();
+  const allowed = new Set([stockKey, ...CONTENTS_ALIASES]);
+  if (label) allowed.add(normalizeUnitKey(label));
+
+  return allUnits.filter((u) => allowed.has(normalizeUnitKey(u.name)));
 }
 
 function RecipeModal({
@@ -243,7 +276,7 @@ function RecipeModal({
             {items.map((row, idx) => {
               const ing = productById(ingredientProducts, row.ingredient_product_id);
               const stockUnit = productUnit(ing);
-              const rowUnits = compatibleUnits(units, stockUnit);
+              const rowUnits = compatibleUnits(units, stockUnit, ing);
               return (
               <div key={idx} className="space-y-1">
               <div className="flex gap-2 items-start">
@@ -267,10 +300,17 @@ function RecipeModal({
                   <option value="">Select ingredient</option>
                   {ingredientProducts.map((p) => {
                     const u = productUnit(p);
+                    const size = Number(p.pack_size);
+                    // Surface the pack contents so it's obvious a per-piece
+                    // unit is available for this ingredient.
+                    const packNote =
+                      Number.isFinite(size) && size > 1
+                        ? `, isi ${size}`
+                        : "";
                     return (
                       <option key={p.id} value={p.id}>
                         {p.name}
-                        {u ? ` (stock: ${u})` : ""}
+                        {u ? ` (stock: ${u}${packNote})` : ""}
                       </option>
                     );
                   })}
@@ -323,6 +363,8 @@ function RecipeModal({
           <p className="text-xs text-gray-500 mt-2">
             Recipe unit must match the ingredient&apos;s stock type: weight (Kg/Gram) or volume
             (L/Ml). Example: 200 Gram flour if stock is Kg; 150 Ml water if stock is L/Ml.
+            Ingredients stocked per pack can also be used per piece (e.g. 1 Pcs
+            of a 100-per-Pack straw = 1/100 pack).
           </p>
         </div>
       </div>

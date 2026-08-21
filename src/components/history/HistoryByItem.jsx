@@ -11,6 +11,7 @@ import { getCategories, getSubCategories } from "../../api/categories";
 import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import * as XLSX from "xlsx";
 import HistoryItemDetailModal from "./HistoryItemDetailModal";
+import { IDR as formatIDR } from "../../lib/fmt";
 
 const PER_PAGE = 10;
 
@@ -24,8 +25,6 @@ const PAYMENT_METHOD_OPTIONS = [
 ];
 
 const toNumber = (v) => (v == null ? 0 : Number(v));
-const formatIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
 const todayStr = () => {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");

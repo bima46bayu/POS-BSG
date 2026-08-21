@@ -1,4 +1,5 @@
 import React, { memo, useMemo } from "react";
+import { numInput } from "../../lib/fmt";
 
 const ProductCard = memo(function ProductCard({
   id,
@@ -28,15 +29,16 @@ const ProductCard = memo(function ProductCard({
       ? makeQty <= 0
       : isStockTracked && Number(stock) <= 0;
 
-  // Always show can-make count for recipes (not only when low)
+  // Always show can-make count for recipes (not only when low).
+  // MySQL DECIMAL pads stock as "4.0000"; strip that, keep real fractions.
   const stockLabel =
     makeQty != null
-      ? `Can make ${makeQty}`
+      ? `Can make ${numInput(makeQty) || makeQty}`
       : !isStockTracked
       ? "Unlimited stock"
       : outOfStock
       ? "Out of stock"
-      : `${stock} in stock`;
+      : `${numInput(stock) || stock} in stock`;
 
   return (
     <div

@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
+import { rupiah } from "../../lib/fmt";
 import { X, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getPointSettings, updatePointSettings } from "../../api/members";
 
-const rupiah = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
 
 /** Quick presets so the admin does not have to reason about the number. */
 const PRESETS = [1000, 5000, 10000, 25000, 50000];

@@ -29,7 +29,7 @@ import { fetchPayees } from "../../api/payees";
 import { fetchBankAccounts } from "../../api/bankAccounts";
 import { getPaymentRequestPdfLink } from "../../api/paymentRequestPdf";
 
-const fmtIDR = (v) => Number(v || 0).toLocaleString("id-ID");
+import { IDRPlain as fmtIDR } from "../../lib/fmt";
 
 /* ================= MODAL BASE ================= */
 function Modal({ open, title, onClose, children, footer }) {

@@ -11,13 +11,12 @@ import useAnchoredPopover from "../../lib/useAnchoredPopover";
 import ConfirmDialog from "../common/ConfirmDialog";
 import SaleDetailModal from "../sales/SaleDetailModal";
 import { exportTransactionHistoryPDF } from "../../lib/exportPdf";
+import { saleCustomerLabel } from "../../utils/customerLabel";
+import { IDR as formatIDR } from "../../lib/fmt";
 
 const PER_PAGE = 10;
 
 const toNumber = (v) => (v == null ? 0 : Number(v));
-const formatIDR = (v) =>
-  Number(v ?? 0).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 });
-
 const formatDateTime = (s) => {
   if (!s) return "-";
   try {
@@ -247,7 +246,10 @@ export default function HistoryByTransaction({
 
       if (searchTerm.trim()) {
         const q = searchTerm.trim().toLowerCase();
-        list = list.filter((r) => String(r.code || "").toLowerCase().includes(q));
+        list = list.filter((r) => {
+          const hay = `${r.code || ""} ${saleCustomerLabel(r)}`.toLowerCase();
+          return hay.includes(q);
+        });
       }
 
       if (sortKey) {
@@ -408,10 +410,12 @@ export default function HistoryByTransaction({
       ewallet: "bg-purple-100 text-purple-800 border-purple-200",
       transfer: "bg-yellow-100 text-yellow-800 border-yellow-200",
       QRIS: "bg-orange-100 text-orange-800 border-orange-200",
+      points: "bg-violet-100 text-violet-800 border-violet-200",
       "-": "bg-gray-100 text-gray-800 border-gray-200",
     };
     const label = (k) =>
       k === "QRIS" ? "QRIS" :
+      k === "points" ? "Poin" :
       k === "ewallet" ? "E-Wallet" :
       k === "transfer" ? "Bank Transfer" :
       k.charAt(0).toUpperCase() + k.slice(1);
@@ -499,7 +503,7 @@ export default function HistoryByTransaction({
     },
     { key: "code", header: "Transaction", sticky: "left", cell: (row) => <CodeCell row={row} />, className: "font-medium" },
     { key: "created_at", header: "Tanggal", cell: (row) => <DateCell row={row} /> },
-    { key: "customer_name", header: "Customer", cell: (row) => <TextCell title={row.customer_name || "General"}>{row.customer_name || "General"}</TextCell> },
+    { key: "customer_name", header: "Customer", cell: (row) => <TextCell title={saleCustomerLabel(row)}>{saleCustomerLabel(row)}</TextCell> },
     { key: "status", header: "Status", className: "hidden sm:table-cell", cell: (row) => <StatusBadge status={row.status} /> },
     {
       key: "subtotal",
@@ -575,7 +579,7 @@ export default function HistoryByTransaction({
         return {
           "Transaction Number": r.code || r.number || "-",
           Tanggal: formatDateTime(r.created_at),
-          Customer: r.customer_name || "General",
+          Customer: saleCustomerLabel(r),
           Status: r.status === "void" ? "Void" : "Completed",
           "Sub Total": formatIDR(r.final_total),
           Pay: formatIDR(pay),

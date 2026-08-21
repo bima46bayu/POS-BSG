@@ -27,6 +27,8 @@ const TYPE_LABEL = {
   EARN: { text: "Dapat poin", cls: "bg-emerald-50 text-emerald-700" },
   REVOKE: { text: "Void", cls: "bg-red-50 text-red-700" },
   ADJUST: { text: "Penyesuaian", cls: "bg-amber-50 text-amber-700" },
+  REDEEM: { text: "Tukar poin", cls: "bg-violet-50 text-violet-700" },
+  REDEEM_VOID: { text: "Void tukar poin", cls: "bg-red-50 text-red-700" },
 };
 
 /**

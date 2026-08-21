@@ -7,6 +7,7 @@ const handlePayment = useCallback(
     payment_method,
     paid_amount,
     customer_name,
+    buyer_name,
     note,
     reference,
     // datang dari <Payment />
@@ -37,6 +38,7 @@ const handlePayment = useCallback(
 
     const payload = {
       customer_name: customer_name || null,
+      buyer_name: buyer_name?.trim() || null,
       subtotal: subtotalCalc,
       discount: discountCalc,   // rupiah
       tax: taxCalc,

@@ -19,6 +19,7 @@ import {
   listWriteOffs,
 } from "../api/stockWriteOffs";
 import { listUnits } from "../api/units";
+import { IDR } from "../lib/fmt";
 
 const BRANCH_STORAGE_KEY = "write_off_store_id";
 const PARENT_STORAGE_KEY = "write_off_parent_store_id";
@@ -39,14 +40,6 @@ const REASON_STYLE = {
   DAMAGED: "bg-orange-50 text-orange-700 border-orange-200",
   OTHER: "bg-slate-50 text-slate-700 border-slate-200",
 };
-
-const IDR = (v) =>
-  Number(v || 0).toLocaleString("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  });
-
 const fmtDateTime = (s) =>
   s
     ? new Date(s).toLocaleString("id-ID", {

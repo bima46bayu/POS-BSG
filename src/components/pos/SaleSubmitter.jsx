@@ -204,6 +204,7 @@ export default function SaleSubmitter({
 
     const payload = {
       customer_name: p.customer_name || null,
+      buyer_name: p.buyer_name?.trim() || null,
       // Member (customer database). Only the id travels — poin dihitung server.
       member_id: p.member_id ?? null,
       note: p.note || null,
