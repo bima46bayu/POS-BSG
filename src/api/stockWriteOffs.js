@@ -10,6 +10,18 @@ export async function listWriteOffs(params = {}, signal) {
   };
 }
 
+/** One entry per "Catat Write-off" document, each with its product lines. */
+export async function listWriteOffBatches(params = {}, signal) {
+  const { data } = await api.get("/api/stock-write-offs/batches", {
+    params,
+    signal,
+  });
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    meta: data?.meta ?? null,
+  };
+}
+
 export async function getWriteOffSummary(params = {}, signal) {
   const { data } = await api.get("/api/stock-write-offs/summary", {
     params,
@@ -47,5 +59,38 @@ export async function submitWriteOff(id, signal) {
 
 export async function deleteWriteOff(id, signal) {
   const { data } = await api.delete(`/api/stock-write-offs/${id}`, { signal });
+  return data;
+}
+
+/** Saves every line as ONE draft document. */
+export async function createWriteOffBatch(payload, signal) {
+  const { data } = await api.post("/api/stock-write-offs", payload, { signal });
+  return data;
+}
+
+/** Replaces the lines of a draft document — omitted lines are deleted. */
+export async function updateWriteOffBatch(batchUid, payload, signal) {
+  const { data } = await api.put(
+    `/api/stock-write-offs/batches/${batchUid}`,
+    payload,
+    { signal }
+  );
+  return data;
+}
+
+export async function submitWriteOffBatch(batchUid, signal) {
+  const { data } = await api.post(
+    `/api/stock-write-offs/batches/${batchUid}/submit`,
+    {},
+    { signal }
+  );
+  return data;
+}
+
+export async function deleteWriteOffBatch(batchUid, signal) {
+  const { data } = await api.delete(
+    `/api/stock-write-offs/batches/${batchUid}`,
+    { signal }
+  );
   return data;
 }

@@ -16,7 +16,7 @@ const PARENT_STORAGE_KEY = 'gr_parent_store_id';
 
 const DONE_STATUSES = new Set(['closed', 'completed']);
 const SKIP_STATUSES = new Set(['canceled', 'cancelled']);
-const OPEN_STATUSES = new Set(['approved', 'partially_received', 'partial', 'pending']);
+const OPEN_STATUSES = new Set(['approved', 'partially_received', 'partial']);
 
 const isDone = (status) => DONE_STATUSES.has(String(status || '').toLowerCase());
 const isOpenForGr = (status) => OPEN_STATUSES.has(String(status || '').toLowerCase());

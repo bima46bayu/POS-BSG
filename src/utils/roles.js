@@ -88,7 +88,7 @@ export const DEFAULT_ALLOWED = {
     "history",
     "master",
   ],
-  [ROLES.KASIR]: ["home", "pos", "history"],
+  [ROLES.KASIR]: ["home", "pos", "history", "purchase", "gr", "inventory"],
 };
 
 export function getAllowedPages(role) {

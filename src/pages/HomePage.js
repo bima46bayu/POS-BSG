@@ -571,15 +571,17 @@ export default function HomePage() {
               <span className="text-sm font-medium">Matriks Harian</span>
             </button>
 
-            {/* Tombol Payment Request */}
-            <button
-              onClick={() => navigate("/payment-requests")}
-              className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              title="Payment Request"
-            >
-              <FileText className="w-4 h-4" />
-              <span className="text-sm font-medium">Payment Request</span>
-            </button>
+            {/* Tombol Payment Request — management only */}
+            {!isCashier && (
+              <button
+                onClick={() => navigate("/payment-requests")}
+                className="inline-flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                title="Payment Request"
+              >
+                <FileText className="w-4 h-4" />
+                <span className="text-sm font-medium">Payment Request</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

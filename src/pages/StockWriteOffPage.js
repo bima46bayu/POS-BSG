@@ -11,15 +11,20 @@ import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
 import { getProducts } from "../api/products";
 import {
-  createWriteOff,
-  updateWriteOff,
-  submitWriteOff,
-  deleteWriteOff,
+  createWriteOffBatch,
+  updateWriteOffBatch,
+  submitWriteOffBatch,
+  deleteWriteOffBatch,
   getWriteOffSummary,
-  listWriteOffs,
+  listWriteOffBatches,
 } from "../api/stockWriteOffs";
 import { listUnits } from "../api/units";
 import { IDR } from "../lib/fmt";
+import {
+  compatibleUnits,
+  formatUnitLabel,
+  matchUnitId,
+} from "../lib/units";
 
 const BRANCH_STORAGE_KEY = "write_off_store_id";
 const PARENT_STORAGE_KEY = "write_off_parent_store_id";
@@ -58,45 +63,24 @@ function productUnitId(p) {
   return p?.unit_id ?? p?.unit?.id ?? "";
 }
 
-function normalizeUnitKey(name) {
-  const key = String(name || "").toLowerCase().trim();
-  const map = {
-    kg: "kg",
-    kilogram: "kg",
-    kilograms: "kg",
-    g: "g",
-    gr: "g",
-    gram: "g",
-    grams: "g",
-    l: "l",
-    liter: "l",
-    litre: "l",
-    ltr: "l",
-    ml: "ml",
-    milliliter: "ml",
-    millilitre: "ml",
-  };
-  return map[key] || key;
+function defaultQtyUnitId(product, units) {
+  const allowed = compatibleUnits(units, productUnitName(product));
+  const stockId = productUnitId(product);
+  if (stockId && allowed.some((u) => String(u.id) === String(stockId))) {
+    return String(stockId);
+  }
+  return matchUnitId(allowed, productUnitName(product));
 }
 
-function unitFamily(name) {
-  const key = normalizeUnitKey(name);
-  if (key === "kg" || key === "g") return "mass";
-  if (key === "l" || key === "ml") return "volume";
-  return "other";
-}
-
-function compatibleUnits(allUnits, stockUnitName) {
-  if (!stockUnitName) return allUnits;
-  const family = unitFamily(stockUnitName);
-  if (family === "mass") {
-    return allUnits.filter((u) => unitFamily(u.name) === "mass");
-  }
-  if (family === "volume") {
-    return allUnits.filter((u) => unitFamily(u.name) === "volume");
-  }
-  const stockKey = normalizeUnitKey(stockUnitName);
-  return allUnits.filter((u) => normalizeUnitKey(u.name) === stockKey);
+function unitsForProduct(units, product) {
+  const allowed = compatibleUnits(units, productUnitName(product));
+  const preferred = defaultQtyUnitId(product, units);
+  return [...allowed].sort((a, b) => {
+    const aHit = String(a.id) === String(preferred) ? 0 : 1;
+    const bHit = String(b.id) === String(preferred) ? 0 : 1;
+    if (aHit !== bHit) return aHit - bHit;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
 }
 
 function writeOffUnitLabel(r) {
@@ -109,44 +93,50 @@ function writeOffUnitLabel(r) {
   );
 }
 
+function emptyWriteOffRow(reason = "WASTE") {
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    productId: "",
+    qty: "",
+    qtyUnitId: "",
+    reason,
+    note: "",
+  };
+}
+
 function WriteOffModal({ open, onClose, storeId, onSubmit, saving, initial }) {
   const isEdit = !!initial;
-  const [productId, setProductId] = useState("");
-  const [qty, setQty] = useState("");
-  const [qtyUnitId, setQtyUnitId] = useState("");
-  const [reason, setReason] = useState("WASTE");
-  const [note, setNote] = useState("");
+  const [rows, setRows] = useState(() => [emptyWriteOffRow()]);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    if (initial) {
-      setProductId(String(initial.product_id || initial.product?.id || ""));
-      setQty(String(initial.qty ?? ""));
-      setQtyUnitId(
-        String(
-          initial.qty_unit_id ??
-            initial.qty_unit?.id ??
-            initial.qtyUnit?.id ??
-            initial.product?.unit_id ??
-            initial.product?.unit?.id ??
-            ""
-        )
+    const lines = Array.isArray(initial?.items) ? initial.items : [];
+    if (lines.length) {
+      setRows(
+        lines.map((line) => ({
+          key: `edit-${line.id}`,
+          id: line.id,
+          productId: String(line.product_id || line.product?.id || ""),
+          qty: String(line.qty ?? ""),
+          qtyUnitId: String(
+            line.qty_unit_id ??
+              line.qty_unit?.id ??
+              line.qtyUnit?.id ??
+              line.product?.unit_id ??
+              line.product?.unit?.id ??
+              ""
+          ),
+          reason: line.reason || "WASTE",
+          note: line.note || "",
+        }))
       );
-      setReason(initial.reason || "WASTE");
-      setNote(initial.note || "");
-      setSearch(initial.product?.name || "");
-      setDebounced(initial.product?.name || "");
     } else {
-      setProductId("");
-      setQty("");
-      setQtyUnitId("");
-      setReason("WASTE");
-      setNote("");
-      setSearch("");
-      setDebounced("");
+      setRows([emptyWriteOffRow()]);
     }
+    setSearch("");
+    setDebounced("");
   }, [open, initial]);
 
   useEffect(() => {
@@ -179,63 +169,117 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving, initial }) {
 
   const units = unitsQ.data || [];
   const products = productsQ.data?.items || [];
-  const selectedFromList = products.find(
-    (p) => String(p.id) === String(productId)
-  );
-  const selected =
-    selectedFromList ||
-    (initial && String(initial.product_id) === String(productId)
-      ? initial.product
-      : null);
-  const productOptions =
-    selected && !selectedFromList
-      ? [selected, ...products]
-      : products;
 
-  const stockUnitName = productUnitName(selected);
-  const qtyUnits = useMemo(
-    () => compatibleUnits(units, stockUnitName),
-    [units, stockUnitName]
-  );
-  const defaultUnitId = String(productUnitId(selected) || qtyUnits[0]?.id || "");
+  const selectedProducts = rows
+    .map((row) => {
+      const fromList = products.find((p) => String(p.id) === String(row.productId));
+      if (fromList) return fromList;
+      const fromInitial = (initial?.items || []).find(
+        (line) =>
+          String(line.product_id || line.product?.id) === String(row.productId)
+      );
+      return fromInitial?.product || null;
+    })
+    .filter(Boolean);
 
-  // When product changes, default unit to stock unit if empty / incompatible.
+  const productOptions = [
+    ...selectedProducts.filter(
+      (p, i, arr) => arr.findIndex((x) => String(x.id) === String(p.id)) === i
+    ),
+    ...products.filter(
+      (p) => !selectedProducts.some((s) => String(s.id) === String(p.id))
+    ),
+  ];
+
+  const updateRow = (key, patch) => {
+    setRows((prev) =>
+      prev.map((row) => (row.key === key ? { ...row, ...patch } : row))
+    );
+  };
+
+  const addRow = () => {
+    const lastReason = rows[rows.length - 1]?.reason || "WASTE";
+    setRows((prev) => [...prev, emptyWriteOffRow(lastReason)]);
+  };
+
+  const removeRow = (key) => {
+    setRows((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.key !== key)));
+  };
+
+  const findProduct = (productId) => {
+    if (!productId) return null;
+    return (
+      productOptions.find((p) => String(p.id) === String(productId)) ||
+      products.find((p) => String(p.id) === String(productId)) ||
+      null
+    );
+  };
+
   useEffect(() => {
-    if (!open || !productId) return;
-    const allowed = qtyUnits.some((u) => String(u.id) === String(qtyUnitId));
-    if (!qtyUnitId || !allowed) {
-      if (defaultUnitId) setQtyUnitId(defaultUnitId);
-    }
-  }, [open, productId, defaultUnitId, qtyUnits, qtyUnitId]);
+    if (!open || !units.length) return;
+    setRows((prev) => {
+      let changed = false;
+      const next = prev.map((row) => {
+        if (!row.productId) return row;
+        const product = findProduct(row.productId);
+        if (!product) return row;
+        const allowed = compatibleUnits(units, productUnitName(product));
+        const currentOk =
+          row.qtyUnitId &&
+          allowed.some((u) => String(u.id) === String(row.qtyUnitId));
+        if (currentOk) return row;
+        const nextId = defaultQtyUnitId(product, units);
+        if (!nextId || nextId === row.qtyUnitId) return row;
+        changed = true;
+        return { ...row, qtyUnitId: nextId };
+      });
+      return changed ? next : prev;
+    });
+  }, [open, units, products]);
 
   if (!open) return null;
 
   const submit = (e) => {
     e.preventDefault();
-    if (!productId) return toast.error("Pilih produk dulu");
-    const n = Number(qty);
-    if (!Number.isFinite(n) || n <= 0) return toast.error("Qty harus > 0");
-    if (!qtyUnitId) return toast.error("Pilih satuan (Unit)");
-    onSubmit({
-      ...(isEdit ? { id: initial.id } : { store_location_id: storeId }),
-      product_id: Number(productId),
-      qty: n,
-      qty_unit_id: Number(qtyUnitId),
-      reason,
-      note: note.trim() || undefined,
-    });
+    const items = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.productId) {
+        toast.error(`Baris ${i + 1}: pilih produk`);
+        return;
+      }
+      const n = Number(row.qty);
+      if (!Number.isFinite(n) || n <= 0) {
+        toast.error(`Baris ${i + 1}: qty harus > 0`);
+        return;
+      }
+      if (!row.qtyUnitId) {
+        toast.error(`Baris ${i + 1}: pilih satuan (Unit)`);
+        return;
+      }
+      items.push({
+        ...(row.id ? { id: row.id } : {}),
+        product_id: Number(row.productId),
+        qty: n,
+        qty_unit_id: Number(row.qtyUnitId),
+        reason: row.reason,
+        note: String(row.note || "").trim() || undefined,
+      });
+    }
+    onSubmit(items);
   };
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl w-full max-w-lg shadow-xl border">
+      <div className="bg-white rounded-xl w-full max-w-3xl shadow-xl border max-h-[90vh] flex flex-col">
         <div className="px-5 py-3 border-b flex items-center justify-between">
           <div>
             <h3 className="font-semibold text-gray-900">
               {isEdit ? "Edit Draft Write-off" : "Catat Write-off (Draft)"}
             </h3>
             <p className="text-xs text-gray-500">
-              Disimpan sebagai draft — stok belum berkurang sampai di-Submit.
+              Semua baris tersimpan jadi satu catatan draft — stok belum
+              berkurang sampai di-Submit.
             </p>
           </div>
           <button
@@ -246,7 +290,7 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving, initial }) {
           </button>
         </div>
 
-        <form onSubmit={submit} className="p-5 space-y-4">
+        <form onSubmit={submit} className="p-5 space-y-4 overflow-y-auto">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Cari produk
@@ -262,105 +306,150 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving, initial }) {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Produk
-            </label>
-            <select
-              value={productId}
-              onChange={(e) => {
-                setProductId(e.target.value);
-                setQtyUnitId("");
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-            >
-              <option value="">
-                {productsQ.isFetching ? "Memuat produk..." : "-- Pilih Produk --"}
-              </option>
-              {productOptions.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.sku ? ` (${p.sku})` : ""}
-                </option>
-              ))}
-            </select>
-            {selected && (
-              <p className="text-xs text-gray-500 mt-1">
-                Stok saat ini: <b>{selected.stock ?? "-"}</b>
-                {stockUnitName ? ` ${stockUnitName}` : ""}
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-[1fr_5.5rem_1fr] gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Qty
-              </label>
-              <input
-                type="number"
-                min={0}
-                step="any"
-                inputMode="decimal"
-                placeholder="50"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Unit
-              </label>
-              <select
-                value={qtyUnitId}
-                onChange={(e) => setQtyUnitId(e.target.value)}
-                disabled={!productId}
-                className="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50"
+          {rows.map((row, idx) => {
+            const selected = productOptions.find(
+              (p) => String(p.id) === String(row.productId)
+            );
+            const stockUnitName = productUnitName(selected);
+            const qtyUnits = unitsForProduct(units, selected);
+            return (
+              <div
+                key={row.key}
+                className="rounded-lg border border-gray-200 p-3 space-y-3"
               >
-                <option value="">Unit</option>
-                {qtyUnits.map((u) => (
-                  <option key={u.id} value={String(u.id)}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Alasan
-              </label>
-              <select
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-              >
-                {REASONS.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {stockUnitName ? (
-            <p className="text-[11px] text-gray-500 -mt-2">
-              Boleh isi dalam satuan kecil (contoh <b>g</b> / <b>Ml</b>). Saat
-              Submit dikonversi ke stok (<b>{stockUnitName}</b>).
-            </p>
-          ) : null}
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-gray-600">
+                    Baris {idx + 1}
+                  </div>
+                  {rows.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeRow(row.key)}
+                      className="p-1 text-red-600 hover:bg-red-50 rounded"
+                      title="Hapus baris"
+                    >
+                      <Trash className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Produk
+                  </label>
+                  <select
+                    value={row.productId}
+                    onChange={(e) => {
+                      const productId = e.target.value;
+                      const product = productOptions.find(
+                        (p) => String(p.id) === String(productId)
+                      );
+                      updateRow(row.key, {
+                        productId,
+                        qtyUnitId: product
+                          ? defaultQtyUnitId(product, units)
+                          : "",
+                      });
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="">
+                      {productsQ.isFetching
+                        ? "Memuat produk..."
+                        : "-- Pilih Produk --"}
+                    </option>
+                    {productOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                        {p.sku ? ` (${p.sku})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {selected && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Stok saat ini: <b>{selected.stock ?? "-"}</b>
+                      {stockUnitName ? ` ${formatUnitLabel(stockUnitName)}` : ""}
+                    </p>
+                  )}
+                </div>
+                <div className="grid grid-cols-[1fr_6.5rem_1fr] gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Qty
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      inputMode="decimal"
+                      placeholder="50"
+                      value={row.qty}
+                      onChange={(e) => updateRow(row.key, { qty: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unit
+                    </label>
+                    <select
+                      value={
+                        qtyUnits.some(
+                          (u) => String(u.id) === String(row.qtyUnitId)
+                        )
+                          ? String(row.qtyUnitId)
+                          : ""
+                      }
+                      onChange={(e) =>
+                        updateRow(row.key, { qtyUnitId: e.target.value })
+                      }
+                      disabled={!row.productId}
+                      className="w-full px-2 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-50"
+                    >
+                      {!row.productId && <option value="">—</option>}
+                      {qtyUnits.map((u) => (
+                        <option key={u.id} value={String(u.id)}>
+                          {formatUnitLabel(u.name)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Alasan
+                    </label>
+                    <select
+                      value={row.reason}
+                      onChange={(e) =>
+                        updateRow(row.key, { reason: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      {REASONS.map((r) => (
+                        <option key={r.value} value={r.value}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <input
+                  value={row.note}
+                  onChange={(e) => updateRow(row.key, { note: e.target.value })}
+                  placeholder="Catatan (opsional)"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+            );
+          })}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Catatan (opsional)
-            </label>
-            <input
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="Contoh: rusak saat penyimpanan"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
+          <button
+            type="button"
+            onClick={addRow}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-50"
+          >
+            <Plus className="w-4 h-4" />
+            Tambah baris
+          </button>
 
           <div className="flex justify-end gap-3 pt-2">
             <button
@@ -380,7 +469,7 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving, initial }) {
                 ? "Menyimpan..."
                 : isEdit
                   ? "Simpan Perubahan"
-                  : "Simpan Draft"}
+                  : `Simpan Draft (${rows.length} produk)`}
             </button>
           </div>
         </form>
@@ -388,7 +477,6 @@ function WriteOffModal({ open, onClose, storeId, onSubmit, saving, initial }) {
     </div>
   );
 }
-
 
 export default function StockWriteOffPage() {
   const qc = useQueryClient();
@@ -478,7 +566,7 @@ export default function StockWriteOffPage() {
   const listQ = useQuery({
     enabled: effectiveStoreId != null,
     queryKey: ["write-offs", params],
-    queryFn: ({ signal }) => listWriteOffs(params, signal),
+    queryFn: ({ signal }) => listWriteOffBatches(params, signal),
     keepPreviousData: true,
   });
 
@@ -508,10 +596,22 @@ export default function StockWriteOffPage() {
     qc.invalidateQueries({ queryKey: ["products"], exact: false });
   };
 
-  const createM = useMutation({
-    mutationFn: (payload) => createWriteOff(payload),
-    onSuccess: () => {
-      toast.success("Draft tersimpan — stok belum berkurang. Submit bila sudah benar.");
+  const saveM = useMutation({
+    mutationFn: async (items) => {
+      if (editTarget?.batch_uid) {
+        await updateWriteOffBatch(editTarget.batch_uid, { items });
+      } else {
+        await createWriteOffBatch({
+          store_location_id: effectiveStoreId,
+          items,
+        });
+      }
+      return items.length;
+    },
+    onSuccess: (n) => {
+      toast.success(
+        `Draft tersimpan (${n} produk) — stok belum berkurang. Submit bila sudah benar.`
+      );
       setModalOpen(false);
       setEditTarget(null);
       invalidateAll();
@@ -524,24 +624,8 @@ export default function StockWriteOffPage() {
     },
   });
 
-  const updateM = useMutation({
-    mutationFn: ({ id, ...payload }) => updateWriteOff(id, payload),
-    onSuccess: () => {
-      toast.success("Draft diperbarui");
-      setModalOpen(false);
-      setEditTarget(null);
-      invalidateAll();
-    },
-    onError: (e) => {
-      const res = e?.response?.data;
-      const msg =
-        res?.errors?.qty?.[0] || res?.message || "Gagal memperbarui draft";
-      toast.error(msg);
-    },
-  });
-
   const submitM = useMutation({
-    mutationFn: (id) => submitWriteOff(id),
+    mutationFn: (batchUid) => submitWriteOffBatch(batchUid),
     onSuccess: () => {
       toast.success("Write-off di-submit — stok berkurang (FIFO)");
       invalidateAll();
@@ -555,7 +639,7 @@ export default function StockWriteOffPage() {
   });
 
   const deleteM = useMutation({
-    mutationFn: (id) => deleteWriteOff(id),
+    mutationFn: (batchUid) => deleteWriteOffBatch(batchUid),
     onSuccess: () => {
       toast.success("Draft dihapus");
       invalidateAll();
@@ -581,64 +665,71 @@ export default function StockWriteOffPage() {
         header: "Status",
         width: "110px",
         cell: (r) => {
-          const draft = (r.status || "submitted") === "draft";
+          const status = r.status || "submitted";
+          const style =
+            status === "draft"
+              ? "bg-amber-50 text-amber-800 border-amber-200"
+              : status === "partial"
+                ? "bg-blue-50 text-blue-700 border-blue-200"
+                : "bg-emerald-50 text-emerald-700 border-emerald-200";
+          const label =
+            status === "draft"
+              ? "Draft"
+              : status === "partial"
+                ? "Sebagian"
+                : "Submitted";
           return (
             <span
-              className={`inline-flex px-2 py-0.5 rounded-full border text-xs font-medium ${
-                draft
-                  ? "bg-amber-50 text-amber-800 border-amber-200"
-                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
-              }`}
+              className={`inline-flex px-2 py-0.5 rounded-full border text-xs font-medium ${style}`}
             >
-              {draft ? "Draft" : "Submitted"}
+              {label}
             </span>
           );
         },
       },
       {
-        key: "product",
+        key: "items",
         header: "Produk",
         cell: (r) => (
-          <div className="min-w-0">
-            <div className="font-medium text-gray-900 truncate">
-              {r.product?.name || `#${r.product_id}`}
-            </div>
-            {r.product?.sku && (
-              <div className="text-xs text-gray-500">{r.product.sku}</div>
-            )}
+          <div className="min-w-0 space-y-1">
+            {(r.items || []).map((line) => {
+              const uom = writeOffUnitLabel(line);
+              return (
+                <div key={line.id} className="flex items-start gap-2">
+                  <span className="font-medium text-gray-900 truncate">
+                    {line.product?.name || `#${line.product_id}`}
+                  </span>
+                  <span
+                    className={`inline-flex shrink-0 px-2 py-0.5 rounded-full border text-[11px] font-medium ${
+                      REASON_STYLE[line.reason] || REASON_STYLE.OTHER
+                    }`}
+                  >
+                    {REASONS.find((x) => x.value === line.reason)?.label ||
+                      line.reason}
+                  </span>
+                  <span className="shrink-0 text-gray-700">
+                    {Number(line.qty).toLocaleString("id-ID", {
+                      maximumFractionDigits: 4,
+                    })}
+                    {uom ? ` ${formatUnitLabel(uom)}` : ""}
+                  </span>
+                  {line.note && (
+                    <span className="text-xs text-gray-500 truncate">
+                      {line.note}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ),
       },
       {
-        key: "reason",
-        header: "Alasan",
-        width: "120px",
-        cell: (r) => (
-          <span
-            className={`inline-flex px-2 py-0.5 rounded-full border text-xs font-medium ${
-              REASON_STYLE[r.reason] || REASON_STYLE.OTHER
-            }`}
-          >
-            {REASONS.find((x) => x.value === r.reason)?.label || r.reason}
-          </span>
-        ),
-      },
-      {
-        key: "qty",
-        header: "Qty",
+        key: "items_count",
+        header: "Baris",
         align: "right",
-        width: "110px",
-        cell: (r) => {
-          const uom = writeOffUnitLabel(r);
-          return (
-            <span className="font-medium">
-              {Number(r.qty).toLocaleString("id-ID", {
-                maximumFractionDigits: 4,
-              })}
-              {uom ? ` ${uom}` : ""}
-            </span>
-          );
-        },
+        width: "80px",
+        cell: (r) => r.items_count ?? (r.items || []).length,
       },
       {
         key: "total_cost",
@@ -659,13 +750,6 @@ export default function StockWriteOffPage() {
         cell: (r) => r.user?.name || "-",
       },
       {
-        key: "note",
-        header: "Catatan",
-        cell: (r) => (
-          <span className="text-gray-600">{r.note || "-"}</span>
-        ),
-      },
-      {
         key: "actions",
         header: "Aksi",
         width: "180px",
@@ -675,7 +759,8 @@ export default function StockWriteOffPage() {
             return <span className="text-xs text-gray-400">Terkunci</span>;
           }
           const busy =
-            submitM.isPending || updateM.isPending || deleteM.isPending;
+            submitM.isPending || saveM.isPending || deleteM.isPending;
+          const lines = r.items_count ?? (r.items || []).length;
           return (
             <div className="flex items-center gap-1">
               <button
@@ -698,10 +783,10 @@ export default function StockWriteOffPage() {
                 onClick={() => {
                   if (
                     window.confirm(
-                      `Submit write-off ${r.product?.name || ""} (${r.qty})? Stok akan berkurang.`
+                      `Submit write-off ini (${lines} produk)? Stok akan berkurang.`
                     )
                   ) {
-                    submitM.mutate(r.id);
+                    submitM.mutate(r.batch_uid);
                   }
                 }}
                 className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg hover:bg-emerald-100 disabled:opacity-50"
@@ -715,7 +800,7 @@ export default function StockWriteOffPage() {
                 disabled={busy}
                 onClick={() => {
                   if (window.confirm("Hapus draft write-off ini?")) {
-                    deleteM.mutate(r.id);
+                    deleteM.mutate(r.batch_uid);
                   }
                 }}
                 className="inline-flex items-center gap-1 px-2 py-1 text-xs border border-rose-200 text-rose-700 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50"
@@ -727,7 +812,7 @@ export default function StockWriteOffPage() {
         },
       },
     ],
-    [submitM.isPending, updateM.isPending, deleteM.isPending]
+    [submitM.isPending, saveM.isPending, deleteM.isPending]
   );
 
   const summary = summaryQ.data;
@@ -891,7 +976,7 @@ export default function StockWriteOffPage() {
               }
               currentPage={page}
               onPageChange={setPage}
-              getRowKey={(row) => row.id}
+              getRowKey={(row) => row.batch_uid}
             />
           </div>
         </>
@@ -905,15 +990,8 @@ export default function StockWriteOffPage() {
         }}
         storeId={effectiveStoreId}
         initial={editTarget}
-        saving={createM.isPending || updateM.isPending}
-        onSubmit={(payload) => {
-          if (payload.id) {
-            const { id, ...rest } = payload;
-            updateM.mutate({ id, ...rest });
-          } else {
-            createM.mutate(payload);
-          }
-        }}
+        saving={saveM.isPending}
+        onSubmit={(items) => saveM.mutate(items)}
       />
     </div>
   );
