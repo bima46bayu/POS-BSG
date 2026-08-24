@@ -71,6 +71,17 @@ export function matchUnitId(units, stockUnitName) {
   return found ? String(found.id) : list[0] ? String(list[0].id) : "";
 }
 
+/** Display label for a unit name (Ml → ml, liter → L). */
+export function formatUnitLabel(name) {
+  const key = normalizeUnitKey(name);
+  if (key === "l") return "L";
+  if (key === "ml") return "ml";
+  if (key === "kg") return "kg";
+  if (key === "g") return "g";
+  const raw = String(name || "").trim();
+  return raw || key;
+}
+
 export function unitNameById(units, id) {
   const u = (Array.isArray(units) ? units : []).find(
     (x) => String(x.id) === String(id)

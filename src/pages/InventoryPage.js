@@ -24,6 +24,7 @@ import { useNavigate } from "react-router-dom";
 import StoreScopeFilter from "../components/common/StoreScopeFilter";
 import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
 import { IDR as formatIDR } from "../lib/fmt";
+import { hasManagementAccess } from "../utils/roles";
 
 const PER_PAGE = 10;
 const STORAGE_KEY = "inventory_store_id";
@@ -657,15 +658,16 @@ export default function InventoryProductsPage() {
               Waste
             </button>
 
-            {/* Reconciliation */}
-            <button
-              onClick={() => navigate("/inventory/reconciliation")}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-              title="Stock Reconciliation"
-            >
-              <ListChecks className="w-4 h-4" />
-              Reconciliation
-            </button>
+            {hasManagementAccess(me?.role) && (
+              <button
+                onClick={() => navigate("/inventory/reconciliation")}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+                title="Stock Reconciliation"
+              >
+                <ListChecks className="w-4 h-4" />
+                Reconciliation
+              </button>
+            )}
           </div>
         </div>
       </div>

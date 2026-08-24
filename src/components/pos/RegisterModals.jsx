@@ -229,11 +229,57 @@ function SoldItemsBlock({ items, compact, expanded = false, onToggleExpanded, fo
   );
 }
 
+function formatQty(value) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString("id-ID", { maximumFractionDigits: 4 });
+}
+
+/** Recipe ingredients whose stock went down during the session. */
+function IngredientUsageBlock({ items, compact = false, forPrint = false }) {
+  if (!items?.length) return null;
+
+  return (
+    <div className={compact ? "text-[10px]" : "text-xs"}>
+      <div
+        className={
+          compact
+            ? "font-semibold text-gray-800 mb-1"
+            : "text-sm font-semibold text-gray-800 mb-2"
+        }
+      >
+        Ingredients Used
+      </div>
+      <ul className={compact ? "space-y-1" : "space-y-1.5 max-h-48 overflow-y-auto"}>
+        {items.map((item) => (
+          <li key={item.product_id} className="flex justify-between gap-2">
+            <span
+              className={
+                forPrint
+                  ? "min-w-0 flex-1 break-words"
+                  : "min-w-0 flex-1 truncate"
+              }
+              title={item.product_name}
+            >
+              {item.product_name}
+            </span>
+            <span className="shrink-0 font-medium tabular-nums">
+              -{formatQty(item.qty)}
+              {item.unit ? ` ${item.unit}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function RegisterSummaryTicket({
   session,
   summary,
   totals,
   soldItems,
+  ingredientUsage = [],
   forPrint = false,
   soldItemsExpanded = false,
   onToggleSoldItems,
@@ -381,6 +427,17 @@ function RegisterSummaryTicket({
         </>
       )}
 
+      {ingredientUsage.length > 0 && (
+        <>
+          <div className="border-t border-dashed border-gray-300 my-2" />
+          <IngredientUsageBlock
+            items={ingredientUsage}
+            compact
+            forPrint={forPrint}
+          />
+        </>
+      )}
+
       <div className="border-t border-dashed border-gray-300 my-3" />
       <div className="text-center text-[11px] text-gray-500 space-y-0.5">
         <div>End of register</div>
@@ -479,6 +536,11 @@ export function RegisterSummaryModal({
     if (Array.isArray(fromApi) && fromApi.length > 0) return fromApi;
     return aggregateSoldItemsFromSales(data.sales);
   }, [data]);
+
+  const ingredientUsage = useMemo(
+    () => (Array.isArray(data?.ingredient_usage) ? data.ingredient_usage : []),
+    [data]
+  );
 
   const visibleSales = useMemo(() => {
     const list = data?.sales ?? [];
@@ -650,6 +712,7 @@ export function RegisterSummaryModal({
             summary={summary}
             totals={totals}
             soldItems={soldItems}
+            ingredientUsage={ingredientUsage}
             soldItemsExpanded={soldItemsExpanded}
             onToggleSoldItems={() => setSoldItemsExpanded((v) => !v)}
             className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-xs text-gray-800 shadow-sm"
@@ -667,6 +730,7 @@ export function RegisterSummaryModal({
             summary={summary}
             totals={totals}
             soldItems={soldItems}
+            ingredientUsage={ingredientUsage}
             forPrint
           />
         </div>

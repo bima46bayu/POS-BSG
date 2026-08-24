@@ -214,7 +214,7 @@ function AppShell() {
           <Route
             path="/payment-requests"
             element={
-              <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <PaymentRequestPage />
               </ProtectedRoute>
             }
@@ -223,7 +223,7 @@ function AppShell() {
           <Route
             path="/payment-requests/detail/:id"
             element={
-              <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <PaymentRequestDetailPage />
               </ProtectedRoute>
             }
@@ -472,7 +472,7 @@ function AppShell() {
           <Route
             path="/inventory/reconciliation"
             element={
-              <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <StockReconciliationPage />
               </ProtectedRoute>
             }
@@ -480,7 +480,7 @@ function AppShell() {
           <Route
             path="/inventory/reconciliation/:id"
             element={
-              <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <StockReconciliationPage />
               </ProtectedRoute>
             }

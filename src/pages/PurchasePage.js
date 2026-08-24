@@ -24,6 +24,7 @@ import { approvePurchase, cancelPurchase } from "../api/purchases";
 import { getMe } from "../api/users";
 import { listStoreLocations } from "../api/storeLocations";
 import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
+import { hasManagementAccess } from "../utils/roles";
 
 const STORAGE_KEY = "purchase_store_id";
 const PARENT_STORAGE_KEY = "purchase_parent_store_id";
@@ -185,6 +186,8 @@ export default function PurchasePage() {
     [canGR, getRemainCount]
   );
 
+  const canManagePO = hasManagementAccess(me?.role);
+
   const onApprove = useCallback(
     (row) => approveMut.mutate(row.id),
     [approveMut]
@@ -198,11 +201,11 @@ export default function PurchasePage() {
     () => ({
       onDetailPO: onDetail,
       onGR,
-      onApprovePO: onApprove,
-      onCancelPO: onCancel,
+      onApprovePO: canManagePO ? onApprove : undefined,
+      onCancelPO: canManagePO ? onCancel : undefined,
       actingId,
     }),
-    [onDetail, onGR, onApprove, onCancel, actingId]
+    [onDetail, onGR, onApprove, onCancel, actingId, canManagePO]
   );
 
   const effectiveFilters = useMemo(() => {

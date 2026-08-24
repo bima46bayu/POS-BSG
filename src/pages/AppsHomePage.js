@@ -160,7 +160,7 @@ const FOLDERS = {
         icon: Scale,
         color: "#6AA84F",
         path: "/inventory/reconciliation",
-        need: "inventory",
+        need: "master",
       },
       {
         id: "inv-waste",
@@ -197,7 +197,7 @@ const FOLDERS = {
         icon: FileText,
         color: "#3D85C6",
         path: "/payment-requests",
-        need: "home",
+        need: "master",
       },
     ],
   },

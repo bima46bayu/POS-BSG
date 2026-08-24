@@ -233,33 +233,33 @@ export default function PoBySupplierTable({
 
           return (
             <div className="sticky right-0 bg-white border-l border-gray-200 flex items-center justify-center gap-1 px-2 py-1.5">
-              {isDraft && (
-                <>
-                  <button
-                    onClick={() => onApprovePO?.(r)}
-                    disabled={busy}
-                    className="px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                    title="Approve"
-                  >
-                    {busy ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Check className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => onCancelPO?.(r)}
-                    disabled={busy}
-                    className="px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                    title="Tolak"
-                  >
-                    {busy ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <XIcon className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </>
+              {isDraft && onApprovePO && (
+                <button
+                  onClick={() => onApprovePO(r)}
+                  disabled={busy}
+                  className="px-2 py-1 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                  title="Approve"
+                >
+                  {busy ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              )}
+              {isDraft && onCancelPO && (
+                <button
+                  onClick={() => onCancelPO(r)}
+                  disabled={busy}
+                  className="px-2 py-1 text-xs font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                  title="Tolak"
+                >
+                  {busy ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <XIcon className="w-3.5 h-3.5" />
+                  )}
+                </button>
               )}
               <button
                 onMouseEnter={() => prefetchDetail(r.id)} // prefetch biar modal cepat
