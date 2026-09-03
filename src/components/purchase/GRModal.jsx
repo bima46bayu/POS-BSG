@@ -21,7 +21,7 @@ function remainOf(row) {
   return 0;
 }
 
-export default function GRModal({ open, onClose, purchaseId }) {
+export default function GRModal({ open, onClose, purchaseId, onOpenHistory }) {
   const qc = useQueryClient();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -29,6 +29,7 @@ export default function GRModal({ open, onClose, purchaseId }) {
     queryKey: ["for-receipt", purchaseId],
     queryFn: ({ queryKey, signal }) => getForReceipt(queryKey[1], signal),
     retry: false,
+    staleTime: 0,
     refetchOnWindowFocus: false,
   });
 
@@ -43,8 +44,9 @@ export default function GRModal({ open, onClose, purchaseId }) {
       setHeaderNotes("");
       setQtyMap({});
       setCondMap({});
+      if (purchaseId != null && purchaseId !== "") refetch();
     }
-  }, [open]);
+  }, [open, purchaseId, refetch]);
 
   // bentuk respons yang kamu kirim:
   // { purchase_id, purchase_number, items: [...] }
@@ -94,6 +96,7 @@ export default function GRModal({ open, onClose, purchaseId }) {
       qc.invalidateQueries({ queryKey: ["purchases"] });
       qc.invalidateQueries({ queryKey: ["purchase", headerPurchaseId] });
       qc.invalidateQueries({ queryKey: ["receipts"] });
+      qc.invalidateQueries({ queryKey: ["for-receipt"] });
       // POS caches products/stock — force a fresh catalog after stock comes in.
       qc.invalidateQueries({ queryKey: ["products"], exact: false });
       qc.invalidateQueries({ queryKey: ["inventory-products"], exact: false });
@@ -216,6 +219,7 @@ export default function GRModal({ open, onClose, purchaseId }) {
                 <thead className="bg-gray-50 text-gray-600">
                   <tr>
                     <th className="p-2 text-left">Product</th>
+                    <th className="p-2 text-right">Received</th>
                     <th className="p-2 text-right">Remain</th>
                     <th className="p-2 text-right">Receive Now</th>
                     <th className="p-2 text-left">Condition Notes</th>
@@ -238,6 +242,9 @@ export default function GRModal({ open, onClose, purchaseId }) {
                               {row.pack_label || "isi"}
                             </span>
                           )}
+                        </td>
+                        <td className="p-2 text-right">
+                          {num(row?.qty_received_so_far) ?? 0}
                         </td>
                         <td className="p-2 text-right">{remain}</td>
                         <td className="p-2 text-right">
@@ -284,7 +291,19 @@ export default function GRModal({ open, onClose, purchaseId }) {
           )}
         </div>
 
-        <div className="p-5 border-t flex items-center justify-end gap-2">
+        <div className="p-5 border-t flex items-center justify-between gap-2">
+          {onOpenHistory ? (
+            <button
+              type="button"
+              onClick={onOpenHistory}
+              className="text-sm text-blue-700 hover:underline"
+            >
+              Riwayat GR / koreksi harga
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-2">
           <button onClick={onClose} className="px-4 py-2 border rounded">
             Cancel
           </button>
@@ -305,6 +324,7 @@ export default function GRModal({ open, onClose, purchaseId }) {
           >
             {mutation.isLoading ? "Processing..." : "Confirm GR"}
           </button>
+          </div>
         </div>
       </div>
     </div>

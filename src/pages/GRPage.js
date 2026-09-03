@@ -1,15 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Package, ChevronRight, ArrowLeft, History } from 'lucide-react';
+import { Search, Package, ChevronRight, ArrowLeft, History, Flag } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { IDR } from '../lib/fmt';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
-import { listPurchases, listReceipts, getReceipt } from '../api/purchases';
+import {
+  listPurchases,
+  listReceipts,
+} from '../api/purchases';
 import GRModal from '../components/purchase/GRModal';
+import GRHistoryModal from '../components/purchase/GRHistoryModal';
 import StoreScopeFilter from '../components/common/StoreScopeFilter';
 import { useStoreScopeFilter } from '../hooks/useStoreScopeFilter';
 import { getMe } from '../api/users';
 import { listStoreLocations } from '../api/storeLocations';
+import { hasManagementAccess } from '../utils/roles';
 
 const BRANCH_STORAGE_KEY = 'gr_store_id';
 const PARENT_STORAGE_KEY = 'gr_parent_store_id';
@@ -21,161 +27,87 @@ const OPEN_STATUSES = new Set(['approved', 'partially_received', 'partial']);
 const isDone = (status) => DONE_STATUSES.has(String(status || '').toLowerCase());
 const isOpenForGr = (status) => OPEN_STATUSES.has(String(status || '').toLowerCase());
 
-function GRHistoryModal({ open, onClose, purchase, storeLocationId }) {
-  const purchaseId = purchase?.id;
-
-  const { data, isLoading, isError, error } = useQuery({
-    enabled: open && purchaseId != null,
-    queryKey: [
-      'receipts',
-      {
-        purchase_id: purchaseId,
-        per_page: 50,
-        ...(storeLocationId != null ? { store_location_id: storeLocationId } : {}),
-      },
-    ],
-    queryFn: ({ signal, queryKey }) => listReceipts(queryKey[1], signal),
+function ManualReviewQueue({ enabled, storeLocationId, onOpen }) {
+  const { data, isLoading } = useQuery({
+    enabled,
+    queryKey: ['receipts', 'review-flagged', storeLocationId],
+    queryFn: ({ signal }) =>
+      listReceipts(
+        {
+          review_flagged: 1,
+          per_page: 50,
+          ...(storeLocationId != null ? { store_location_id: storeLocationId } : {}),
+        },
+        signal
+      ),
     retry: 1,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
   });
 
-  const receipts = data?.data || data?.items || [];
-  const [selectedId, setSelectedId] = useState(null);
-
-  const detailQuery = useQuery({
-    enabled: open && selectedId != null,
-    queryKey: ['receipt', selectedId],
-    queryFn: ({ signal }) => getReceipt(selectedId, signal),
-    retry: 1,
-    refetchOnWindowFocus: false,
-  });
-
-  useEffect(() => {
-    if (open) setSelectedId(null);
-  }, [open, purchaseId]);
-
-  if (!open) return null;
-
-  const detail = detailQuery.data;
+  const items = data?.data || data?.items || [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] my-6 flex flex-col shadow-xl">
-        <div className="p-5 border-b flex items-center justify-between">
-          <div>
-            <div className="text-base font-semibold">Riwayat Goods Receipt</div>
-            <div className="text-xs text-slate-500 mt-0.5">
-              {purchase?.purchase_number || `PO #${purchaseId}`}
-            </div>
-          </div>
-          <button onClick={onClose} className="px-3 py-1.5 border rounded-lg text-sm hover:bg-slate-50">
-            Tutup
-          </button>
+    <div className="mb-6 bg-white rounded-xl border border-amber-200 overflow-hidden">
+      <div className="px-5 py-3 border-b border-amber-100 bg-amber-50 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Flag className="w-4 h-4 text-amber-700" />
+          <h2 className="font-semibold text-amber-950">Manual Review</h2>
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-200 text-amber-900">
+            {isLoading ? '…' : items.length}
+          </span>
         </div>
-
-        <div className="p-5 overflow-y-auto space-y-4">
-          {isLoading && <p className="text-sm text-slate-600">Memuat riwayat GR...</p>}
-          {isError && (
-            <p className="text-sm text-red-600">
-              {error?.response?.data?.message || error?.message || 'Gagal memuat riwayat'}
-            </p>
-          )}
-          {!isLoading && !isError && receipts.length === 0 && (
-            <p className="text-sm text-slate-600">Belum ada dokumen GR untuk PO ini.</p>
-          )}
-
-          {receipts.length > 0 && (
-            <div className="border rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="p-2.5 text-left">GR Number</th>
-                    <th className="p-2.5 text-left">Tanggal</th>
-                    <th className="p-2.5 text-left">Status</th>
-                    <th className="p-2.5 text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {receipts.map((gr) => (
-                    <tr key={gr.id} className="border-t">
-                      <td className="p-2.5 font-medium">{gr.gr_number || `#${gr.id}`}</td>
-                      <td className="p-2.5">
-                        {gr.received_date
-                          ? new Date(gr.received_date).toLocaleDateString('id-ID')
-                          : '-'}
-                      </td>
-                      <td className="p-2.5 capitalize">{gr.status || '-'}</td>
-                      <td className="p-2.5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedId(gr.id)}
-                          className="text-blue-600 hover:underline text-sm"
-                        >
-                          Detail
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {selectedId != null && (
-            <div className="border rounded-lg p-4 bg-slate-50">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-sm">
-                  Detail {detail?.gr_number || `GR #${selectedId}`}
-                </h4>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(null)}
-                  className="text-xs text-slate-500 hover:text-slate-800"
-                >
-                  Sembunyikan
-                </button>
-              </div>
-              {detailQuery.isLoading && <p className="text-sm text-slate-600">Memuat detail...</p>}
-              {detailQuery.isError && (
-                <p className="text-sm text-red-600">Gagal memuat detail GR.</p>
-              )}
-              {detail && (
-                <div className="space-y-2 text-sm">
-                  {detail.notes && (
-                    <p className="text-slate-600">
-                      Notes: <span className="text-slate-900">{detail.notes}</span>
-                    </p>
-                  )}
-                  <div className="border rounded overflow-hidden bg-white">
-                    <table className="w-full text-sm">
-                      <thead className="bg-white text-slate-600 border-b">
-                        <tr>
-                          <th className="p-2 text-left">Produk</th>
-                          <th className="p-2 text-right">Qty</th>
-                          <th className="p-2 text-left">Kondisi</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(detail.items || []).map((it) => (
-                          <tr key={it.id} className="border-t">
-                            <td className="p-2">
-                              {it.purchase_item?.product
-                                ? `${it.purchase_item.product.sku || ''} ${it.purchase_item.product.name || ''}`.trim()
-                                : `Item #${it.purchase_item_id}`}
-                            </td>
-                            <td className="p-2 text-right">{it.qty_received}</td>
-                            <td className="p-2">{it.condition_notes || '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <p className="text-xs text-amber-800 hidden sm:block">
+          GR yang di-flag karena stok sudah terpakai / perlu dicek manual
+        </p>
       </div>
+      {isLoading && <p className="px-5 py-4 text-sm text-slate-600">Memuat antrian review...</p>}
+      {!isLoading && items.length === 0 && (
+        <p className="px-5 py-4 text-sm text-slate-600">Tidak ada GR menunggu review di cabang ini.</p>
+      )}
+      {!isLoading && items.length > 0 && (
+        <div className="overflow-x-auto max-h-72 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-600 sticky top-0">
+              <tr>
+                <th className="p-2.5 text-left">GR</th>
+                <th className="p-2.5 text-left">PO</th>
+                <th className="p-2.5 text-left">Supplier</th>
+                <th className="p-2.5 text-left">Alasan</th>
+                <th className="p-2.5 text-left">Di-flag</th>
+                <th className="p-2.5 text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((gr) => (
+                <tr key={gr.id} className="border-t">
+                  <td className="p-2.5 font-medium whitespace-nowrap">{gr.gr_number || `#${gr.id}`}</td>
+                  <td className="p-2.5 whitespace-nowrap">
+                    {gr.purchase?.purchase_number || (gr.purchase_id ? `PO #${gr.purchase_id}` : '-')}
+                  </td>
+                  <td className="p-2.5">{gr.purchase?.supplier?.name || '-'}</td>
+                  <td className="p-2.5 max-w-xs truncate" title={gr.review_reason || ''}>
+                    {gr.review_reason || '-'}
+                  </td>
+                  <td className="p-2.5 whitespace-nowrap text-slate-600">
+                    {gr.review_flagged_at
+                      ? new Date(gr.review_flagged_at).toLocaleString('id-ID')
+                      : '-'}
+                  </td>
+                  <td className="p-2.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(gr)}
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      Buka
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -199,6 +131,7 @@ export default function GRPage() {
   const [grModalOpen, setGrModalOpen] = useState(false);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState(null);
   const [historyPurchase, setHistoryPurchase] = useState(null);
+  const [historyReceiptId, setHistoryReceiptId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -278,6 +211,7 @@ export default function GRPage() {
     setView('suppliers');
     setSearchTerm('');
     setHistoryPurchase(null);
+    setHistoryReceiptId(null);
     setGrModalOpen(false);
     if (searchParams.get('view') === 'orders' || searchParams.get('supplier_id')) {
       navigate('/gr', { replace: true });
@@ -361,9 +295,14 @@ export default function GRPage() {
     navigate({ pathname: '/gr', search: `?view=orders&supplier_id=${supplier.id}` });
   };
 
+  const openHistory = (purchase, receiptId = null) => {
+    setHistoryReceiptId(receiptId);
+    setHistoryPurchase(purchase);
+  };
+
   const handlePOClick = (purchase) => {
     if (isDone(purchase.status)) {
-      setHistoryPurchase(purchase);
+      openHistory(purchase);
       return;
     }
     setSelectedPurchaseId(purchase.id);
@@ -465,6 +404,19 @@ export default function GRPage() {
           <div className="mb-6 p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-sm">
             Akun ini belum terhubung ke cabang. Hubungi admin untuk assign store.
           </div>
+        )}
+
+        {canLoadPurchases && (
+          <ManualReviewQueue
+            enabled={canLoadPurchases}
+            storeLocationId={effectiveStoreId}
+            onOpen={(gr) => {
+              const purchase = gr.purchase
+                ? { id: gr.purchase.id, purchase_number: gr.purchase.purchase_number }
+                : { id: gr.purchase_id };
+              openHistory(purchase, gr.id);
+            }}
+          />
         )}
 
         {canLoadPurchases && isLoading && (
@@ -586,22 +538,34 @@ export default function GRPage() {
                           </div>
                           <div className="flex items-center gap-3">
                             {getStatusBadge(po.status)}
+                            {Number(po.reversed_gr_count || 0) > 0 && (
+                              <span className="px-3 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                GR reversed
+                              </span>
+                            )}
+                            {Number(po.cost_adjustment_count || 0) > 0 && (
+                              <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700">
+                                Cost adj.
+                              </span>
+                            )}
+                            {!done && (
+                              <button
+                                onClick={() => handlePOClick(po)}
+                                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors text-sm font-medium"
+                              >
+                                Goods Receipt
+                              </button>
+                            )}
                             <button
-                              onClick={() => handlePOClick(po)}
+                              onClick={() => openHistory(po)}
                               className={`px-4 py-2 rounded-lg transition-colors text-sm font-medium inline-flex items-center gap-2 ${
                                 done
                                   ? 'bg-slate-800 text-white hover:bg-slate-900'
-                                  : 'bg-blue-600 text-white hover:bg-blue-700'
+                                  : 'border border-slate-300 text-slate-800 hover:bg-slate-50'
                               }`}
                             >
-                              {done ? (
-                                <>
-                                  <History className="w-4 h-4" />
-                                  Lihat Riwayat GR
-                                </>
-                              ) : (
-                                'Goods Receipt'
-                              )}
+                              <History className="w-4 h-4" />
+                              Riwayat GR
                             </button>
                           </div>
                         </div>
@@ -647,12 +611,27 @@ export default function GRPage() {
         )}
       </div>
 
-      <GRModal open={grModalOpen} onClose={handleGRModalClose} purchaseId={selectedPurchaseId} />
+      <GRModal
+        open={grModalOpen}
+        onClose={handleGRModalClose}
+        purchaseId={selectedPurchaseId}
+        onOpenHistory={() => {
+          const po = selectedSupplier?.purchases?.find((p) => p.id === selectedPurchaseId)
+            || { id: selectedPurchaseId };
+          handleGRModalClose();
+          openHistory(po);
+        }}
+      />
       <GRHistoryModal
         open={!!historyPurchase}
-        onClose={() => setHistoryPurchase(null)}
+        onClose={() => {
+          setHistoryPurchase(null);
+          setHistoryReceiptId(null);
+        }}
         purchase={historyPurchase}
         storeLocationId={effectiveStoreId}
+        canManage={hasManagementAccess(me?.role)}
+        initialReceiptId={historyReceiptId}
       />
     </div>
   );
