@@ -42,6 +42,7 @@ import MasterProductOptionPage from "./pages/master/MasterProductOptionPage";
 import MasterMemberPage from "./pages/master/MasterMemberPage";
 import MasterLoyaltyRewardPage from "./pages/master/MasterLoyaltyRewardPage";
 import VoidSecurityCodePage from "./pages/master/VoidSecurityCodePage";
+import ActivityLogPage from "./pages/master/ActivityLogPage";
 
 /* ===== AUTH / API ===== */
 import { isLoggedIn, logoutRequest } from "./api/auth";
@@ -55,7 +56,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import { getAllowedPages } from "./utils/roles";
+import { getAllowedPages, isHqAdmin } from "./utils/roles";
 
 /* ===== REACT QUERY =====
  * Shared instance from ./queryClient. index.js already wraps the tree in a
@@ -196,6 +197,8 @@ function AppShell() {
     if (p.startsWith("/master/supplier")) return "Supplier";
     if (p.startsWith("/master/store-location")) return "Store Location";
     if (p.startsWith("/master/void-security-code")) return "Kode Void";
+    if (p.startsWith("/master/otp-log")) return "Activity Log";
+    if (p.startsWith("/master/activity-log")) return "Activity Log";
     if (p.startsWith("/master")) return "Master";
     return null;
   })();
@@ -274,6 +277,7 @@ function AppShell() {
               <ProtectedRoute pageKey="home" allowedPages={allowedPages}>
                 <AppsHomePage
                   allowedPages={allowedPages}
+                  role={role}
                   onLogout={handleLogout}
                 />
               </ProtectedRoute>
@@ -466,6 +470,18 @@ function AppShell() {
                 <VoidSecurityCodePage />
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/master/activity-log"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                {isHqAdmin(role) ? <ActivityLogPage /> : <Navigate to="/home" replace />}
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/otp-log"
+            element={<Navigate to="/master/activity-log" replace />}
           />
 
           {/* ===== RECONCILIATION ===== */}

@@ -28,7 +28,9 @@ import {
   MapPin,
   KeyRound,
   Gift,
+  ScrollText,
 } from "lucide-react";
+import { isHqAdmin } from "../utils/roles";
 
 const BG =
   "linear-gradient(165deg, #F5FAF7 0%, #E3F3EA 45%, #EDF7F1 100%)";
@@ -244,6 +246,15 @@ const FOLDERS = {
         path: "/master/void-security-code",
         need: "master",
       },
+      {
+        id: "m-activity",
+        label: "Activity Log",
+        icon: ScrollText,
+        color: "#3D85C6",
+        path: "/master/activity-log",
+        need: "master",
+        needRole: "admin",
+      },
     ],
   },
   setup: {
@@ -309,7 +320,8 @@ const FOLDERS = {
   },
 };
 
-function isAllowed(app, allowedSet) {
+function isAllowed(app, allowedSet, role) {
+  if (app.needRole === "admin" && !isHqAdmin(role)) return false;
   if (app.needAny) return app.needAny.some((k) => allowedSet.has(k));
   if (app.need) return allowedSet.has(app.need);
   return true;
@@ -317,6 +329,7 @@ function isAllowed(app, allowedSet) {
 
 export default function AppsHomePage({
   allowedPages = [],
+  role,
   onLogout,
   logoSrc = "/images/LogoBSG.png",
 }) {
@@ -325,15 +338,15 @@ export default function AppsHomePage({
   const allowedSet = useMemo(() => new Set(allowedPages), [allowedPages]);
 
   const rootApps = useMemo(
-    () => ROOT_APPS.filter((a) => isAllowed(a, allowedSet)),
-    [allowedSet]
+    () => ROOT_APPS.filter((a) => isAllowed(a, allowedSet, role)),
+    [allowedSet, role]
   );
 
   const folderDef = folder ? FOLDERS[folder] : null;
   const folderApps = useMemo(() => {
     if (!folderDef) return [];
-    return folderDef.apps.filter((a) => isAllowed(a, allowedSet));
-  }, [folderDef, allowedSet]);
+    return folderDef.apps.filter((a) => isAllowed(a, allowedSet, role));
+  }, [folderDef, allowedSet, role]);
 
   const openApp = (app) => {
     if (app.folder) {

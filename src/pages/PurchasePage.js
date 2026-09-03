@@ -16,6 +16,7 @@ import PoByItemTable from "../components/purchase/PoByItemTable";
 
 import PurchaseDetailDrawer from "../components/purchase/PurchaseDetailDrawer";
 import GRModal from "../components/purchase/GRModal";
+import GRHistoryModal from "../components/purchase/GRHistoryModal";
 import AddPurchaseModal from "../components/purchase/AddPurchaseModal";
 import SupplierBreakdownDrawer from "../components/purchase/SupplierBreakdownDrawer";
 import StoreScopeFilter from "../components/common/StoreScopeFilter";
@@ -107,6 +108,7 @@ export default function PurchasePage() {
 
   const [grOpen, setGrOpen] = useState(false);
   const [grPurchaseId, setGrPurchaseId] = useState(null);
+  const [historyPurchase, setHistoryPurchase] = useState(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [actingId, setActingId] = useState(null);
@@ -343,12 +345,27 @@ export default function PurchasePage() {
           setGrPurchaseId(purchaseId);
           setGrOpen(true);
         }}
+        onOpenHistory={(purchase) => setHistoryPurchase(purchase)}
+        canManage={canManagePO}
       />
 
       <GRModal
         open={grOpen}
         onClose={() => setGrOpen(false)}
         purchaseId={grPurchaseId}
+        onOpenHistory={() => {
+          const po = { id: grPurchaseId };
+          setGrOpen(false);
+          setHistoryPurchase(po);
+        }}
+      />
+
+      <GRHistoryModal
+        open={!!historyPurchase}
+        onClose={() => setHistoryPurchase(null)}
+        purchase={historyPurchase}
+        storeLocationId={effectiveStoreId}
+        canManage={canManagePO}
       />
 
       <AddPurchaseModal

@@ -3,16 +3,17 @@
 // (POPUP modal) — Download PO (PDF) + supplier + me/store-location fallback
 // =============================
 import React, { useEffect, useMemo, useState } from "react";
-import { X, Calendar, Download } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { X, Calendar, Download, History, Trash2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 
-import { getPurchase } from "../../api/purchases";
+import { getPurchase, updatePurchase, cancelPurchaseItem } from "../../api/purchases";
 import { getSupplier } from "../../api/suppliers";
 import { getStoreLocation } from "../../api/storeLocations";
 import { getMe } from "../../api/users";              // ⬅️ ambil profil user aktif
 
 import { exportPurchasePdf } from "../../lib/exportPurchasePdf";
+import { IDR } from "../../lib/fmt";
 import Pill from "./Pill";
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -40,6 +41,10 @@ const formatDate = (s) => {
 };
 
 function remainOfItem(it) {
+  const cancelled = ["cancelled", "canceled"].includes(
+    String(it?.status || "").toLowerCase()
+  );
+  if (cancelled) return 0;
   const r = Number(it?.qty_remaining);
   if (Number.isFinite(r)) return Math.max(0, r);
   const order = num(it?.qty_order);
@@ -57,7 +62,11 @@ export default function PurchaseDetailDrawer({
   onClose,
   purchaseId,
   onReceiveItem,
+  onOpenHistory,
+  canManage = false,
 }) {
+  const qc = useQueryClient();
+
   // 1) Purchase
   const { data: purchase, isLoading, isError, error, refetch } = useQuery({
     enabled: !!open && purchaseId != null && purchaseId !== "",
@@ -130,13 +139,109 @@ export default function PurchaseDetailDrawer({
         "—",
       qty_order: num(it.qty_order),
       qty_received_so_far: num(it.qty_received_so_far ?? it.qty_received),
+      qty_reversed: num(it.qty_reversed),
       qty_remaining: remainOfItem(it),
       unit_price: Number(it.unit_price || 0),
+      adjusted_unit_cost:
+        it.adjusted_unit_cost == null || it.adjusted_unit_cost === ""
+          ? null
+          : Number(it.adjusted_unit_cost),
       line_total: Number(it.line_total || num(it.qty_order) * Number(it.unit_price || 0)),
+      cogs_delta: Number(it.cogs_delta || 0),
+      status: String(it.status || "open").toLowerCase(),
+      cancelled: ["cancelled", "canceled"].includes(String(it.status || "").toLowerCase()),
+      cancelled_note: it.cancelled_note || it.delete_lock?.message || null,
+      delete_lock: it.delete_lock || {},
     }));
   }, [purchase]);
 
   const [downloading, setDownloading] = useState(false);
+  const [priceDraft, setPriceDraft] = useState({});
+
+  const priceEditable = !!purchase?.price_editable;
+  const priceLock = purchase?.price_edit_lock;
+  const story = purchase?.receipt_story || {};
+  const hasStory = !!(story.has_reversed || story.has_cost_adjustment);
+  const showReversedCol = items.some((it) => it.qty_reversed > 0);
+  const colCount = 8 + (showReversedCol ? 1 : 0) + (canManage ? 1 : 0);
+
+  useEffect(() => {
+    if (!purchase?.items) {
+      setPriceDraft({});
+      return;
+    }
+    const next = {};
+    for (const it of purchase.items) {
+      next[it.id ?? it.purchase_item_id] = String(it.unit_price ?? "");
+    }
+    setPriceDraft(next);
+  }, [purchase]);
+
+  const savePricesMut = useMutation({
+    mutationFn: (payload) => updatePurchase(purchaseId, payload),
+    onSuccess: () => {
+      toast.success("Harga PO disimpan");
+      qc.invalidateQueries({ queryKey: ["purchase", purchaseId] });
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+    },
+    onError: (e) =>
+      toast.error(
+        e?.response?.data?.errors?.unit_price?.[0] ||
+          e?.response?.data?.message ||
+          "Gagal menyimpan harga PO"
+      ),
+  });
+
+  const cancelLineMut = useMutation({
+    mutationFn: (itemId) => cancelPurchaseItem(purchaseId, itemId),
+    onSuccess: (res) => {
+      toast.success(res?.message || "Baris PO dibatalkan");
+      qc.invalidateQueries({ queryKey: ["purchase", purchaseId] });
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["for-receipt"] });
+      qc.invalidateQueries({ queryKey: ["receipts"] });
+    },
+    onError: (e) => {
+      const data = e?.response?.data;
+      toast.error(data?.message || "Baris PO tidak bisa dihapus");
+      if (data?.recommended_action && onOpenHistory && purchase) {
+        onOpenHistory(purchase);
+      }
+    },
+  });
+
+  function handleCancelLine(it) {
+    const lock = it.delete_lock || {};
+    if (it.cancelled) return;
+    if (lock.deletable === false) {
+      toast.error(lock.message || "Baris ini tidak bisa dihapus.");
+      if (lock.recommended_action && onOpenHistory && purchase) {
+        onOpenHistory(purchase);
+      }
+      return;
+    }
+    const ok = window.confirm(
+      lock.code === "LINE_UNTOUCHED"
+        ? "Batalkan baris ini? Baris PO tetap tercatat (cancelled). GR/layer yang belum terpakai dihapus dan stok kembali 0."
+        : "Batalkan baris ini? Baris PO tetap tercatat sebagai cancelled."
+    );
+    if (!ok) return;
+    cancelLineMut.mutate(it.purchase_item_id);
+  }
+
+  function handleSavePrices() {
+    const rows = items
+      .filter((it) => !it.cancelled)
+      .map((it) => ({
+      id: it.purchase_item_id,
+      unit_price: Number(priceDraft[it.purchase_item_id] ?? it.unit_price),
+    }));
+    if (rows.some((r) => !Number.isFinite(r.unit_price) || r.unit_price < 0)) {
+      toast.error("Unit price harus angka ≥ 0");
+      return;
+    }
+    savePricesMut.mutate({ items: rows });
+  }
 
   async function handleDownload() {
     if (!purchase) return;
@@ -210,6 +315,18 @@ export default function PurchaseDetailDrawer({
               </span>
             </button>
 
+            {purchase && (
+              <button
+                type="button"
+                onClick={() => onOpenHistory?.(purchase)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-slate-800 hover:bg-slate-50"
+                title="Riwayat GR / cost adjustment"
+              >
+                <History className="w-4 h-4" />
+                <span className="hidden md:inline">Riwayat GR</span>
+              </button>
+            )}
+
             <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100" aria-label="Close">
               <X className="w-5 h-5" />
             </button>
@@ -240,7 +357,7 @@ export default function PurchaseDetailDrawer({
                       <Calendar className="w-4 h-4 text-gray-400" />
                       <span>Expected: {formatDate(purchase.expected_date)}</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span>Status:</span>
                       <Pill
                         variant={
@@ -253,15 +370,22 @@ export default function PurchaseDetailDrawer({
                       >
                         {purchase.status}
                       </Pill>
+                      {story.has_reversed && <Pill variant="warn">GR reversed</Pill>}
+                      {story.has_cost_adjustment && <Pill variant="default">Cost adjustment</Pill>}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-start gap-2">
                       <span>Total:</span>
-                      <span className="font-medium">
+                      <span className="font-medium text-right">
                         {Number(purchase.grand_total || 0).toLocaleString("id-ID", {
                           style: "currency",
                           currency: "IDR",
                           maximumFractionDigits: 0,
                         })}
+                        {story.has_cost_adjustment && (
+                          <div className="text-[11px] font-normal text-slate-500">
+                            Total order, bukan COGS
+                          </div>
+                        )}
                       </span>
                     </div>
                   </div>
@@ -275,26 +399,98 @@ export default function PurchaseDetailDrawer({
                           <th className="p-3 text-right whitespace-nowrap">Qty Order</th>
                           <th className="p-3 text-left whitespace-nowrap">Satuan</th>
                           <th className="p-3 text-right whitespace-nowrap">Received</th>
+                          {showReversedCol && (
+                            <th className="p-3 text-right whitespace-nowrap">Reversed</th>
+                          )}
                           <th className="p-3 text-right whitespace-nowrap">Remain</th>
-                          <th className="p-3 text-right whitespace-nowrap">Unit Price</th>
-                          <th className="p-3 text-right whitespace-nowrap">Line Total</th>
+                          <th className="p-3 text-right whitespace-nowrap">Harga PO</th>
+                          <th className="p-3 text-right whitespace-nowrap">
+                            Line Total
+                            {story.has_cost_adjustment && (
+                              <div className="text-[10px] font-normal text-slate-400">qty order × harga PO</div>
+                            )}
+                          </th>
                           <th className="p-3 text-center sticky right-0 bg-gray-50 whitespace-nowrap z-10">GR</th>
+                          {canManage && (
+                            <th className="p-3 text-center whitespace-nowrap">Hapus</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
                         {items.map((it) => {
-                          const remain = it.qty_remaining;
-                          const canGRItem = approvedOrPartial && remain > 0;
+                          const remain = it.cancelled ? 0 : it.qty_remaining;
+                          const canGRItem = !it.cancelled && approvedOrPartial && remain > 0;
+                          const draftPrice = Number(priceDraft[it.purchase_item_id] ?? it.unit_price);
+                          const linePreview = Number.isFinite(draftPrice)
+                            ? it.qty_order * draftPrice
+                            : it.line_total;
+                          const canDelete = canManage && !it.cancelled && it.delete_lock?.deletable === true;
+                          const deleteTitle = it.cancelled
+                            ? "Baris sudah dibatalkan"
+                            : it.delete_lock?.message || "Batalkan baris PO";
 
                           return (
-                            <tr key={it.key} className="border-t">
-                              <td className="p-3">{it.product_label}</td>
+                            <tr key={it.key} className={"border-t" + (it.cancelled ? " bg-slate-50 text-slate-400" : "")}>
+                              <td className="p-3">
+                                <div className={it.cancelled ? "line-through" : ""}>{it.product_label}</div>
+                                {it.cancelled && (
+                                  <div className="text-[11px] text-rose-600 mt-0.5 no-underline">
+                                    Dibatalkan
+                                    {it.cancelled_note ? ` · ${it.cancelled_note}` : ""}
+                                  </div>
+                                )}
+                              </td>
                               <td className="p-3 text-right whitespace-nowrap">{it.qty_order}</td>
                               <td className="p-3 whitespace-nowrap">{it.unit}</td>
                               <td className="p-3 text-right whitespace-nowrap">{it.qty_received_so_far}</td>
+                              {showReversedCol && (
+                                <td className="p-3 text-right whitespace-nowrap text-amber-800">
+                                  {it.qty_reversed > 0 ? it.qty_reversed : "—"}
+                                </td>
+                              )}
                               <td className="p-3 text-right whitespace-nowrap">{remain}</td>
-                              <td className="p-3 text-right whitespace-nowrap">{it.unit_price.toLocaleString("id-ID")}</td>
-                              <td className="p-3 text-right whitespace-nowrap">{it.line_total.toLocaleString("id-ID")}</td>
+                              <td className="p-3 text-right whitespace-nowrap">
+                                {priceEditable && !it.cancelled ? (
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    className="w-32 text-right border rounded-lg px-2 py-1"
+                                    value={priceDraft[it.purchase_item_id] ?? it.unit_price}
+                                    onChange={(e) =>
+                                      setPriceDraft((prev) => ({
+                                        ...prev,
+                                        [it.purchase_item_id]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                ) : (
+                                  <div>
+                                    <div>{it.unit_price.toLocaleString("id-ID")}</div>
+                                    {it.adjusted_unit_cost != null &&
+                                      Number.isFinite(it.adjusted_unit_cost) &&
+                                      Math.abs(it.adjusted_unit_cost - it.unit_price) > 0.000001 && (
+                                        <div className="text-[11px] text-slate-500 mt-0.5">
+                                          Koreksi COGS: {IDR(it.adjusted_unit_cost)}
+                                        </div>
+                                      )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-3 text-right whitespace-nowrap">
+                                <div>{linePreview.toLocaleString("id-ID")}</div>
+                                {story.has_cost_adjustment && (
+                                  <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                                    Total order, tidak diubah
+                                    {Math.abs(it.cogs_delta) > 0.000001 && (
+                                      <>
+                                        <br />
+                                        Selisih COGS: {IDR(it.cogs_delta)}
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
                               <td className="p-3 text-center sticky right-0 bg-white z-10">
                                 <button
                                   disabled={!canGRItem}
@@ -328,12 +524,30 @@ export default function PurchaseDetailDrawer({
                                   Receive
                                 </button>
                               </td>
+                              {canManage && (
+                                <td className="p-3 text-center">
+                                  <button
+                                    type="button"
+                                    disabled={!canDelete || cancelLineMut.isPending}
+                                    onClick={() => handleCancelLine(it)}
+                                    className={
+                                      "inline-flex items-center justify-center p-1.5 rounded-lg border " +
+                                      (canDelete
+                                        ? "text-rose-600 border-rose-200 hover:bg-rose-50"
+                                        : "text-slate-300 border-slate-200 cursor-not-allowed")
+                                    }
+                                    title={deleteTitle}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
                         {items.length === 0 && (
                           <tr>
-                            <td className="p-3 text-center text-gray-500" colSpan={8}>
+                            <td className="p-3 text-center text-gray-500" colSpan={colCount}>
                               Tidak ada item.
                             </td>
                           </tr>
@@ -341,6 +555,66 @@ export default function PurchaseDetailDrawer({
                       </tbody>
                     </table>
                   </div>
+
+                  {hasStory ? (
+                    <div className="mt-3 text-xs p-3 rounded-lg bg-sky-50 text-sky-950 border border-sky-200 space-y-2">
+                      <div className="font-medium">{story.headline}</div>
+                      <p>{story.message}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sky-900/80">
+                        {story.has_reversed && (
+                          <span>
+                            Reversed {Number(story.qty_reversed || 0).toLocaleString("id-ID")}
+                          </span>
+                        )}
+                        {story.has_cost_adjustment && (
+                          <span>
+                            {story.cost_adjustment_count} cost adjustment
+                            {Number(story.cogs_delta_total || 0) !== 0
+                              ? ` · selisih COGS ${IDR(story.cogs_delta_total)}`
+                              : ""}
+                          </span>
+                        )}
+                      </div>
+                      {Array.isArray(story.receipts) && story.receipts.length > 0 && (
+                        <p className="text-sky-900/80">
+                          GR:{" "}
+                          {story.receipts
+                            .map((gr) => `${gr.gr_number || `#${gr.id}`} (${gr.status})`)
+                            .join(", ")}
+                        </p>
+                      )}
+                      {onOpenHistory && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenHistory(purchase)}
+                          className="inline-flex items-center gap-1.5 text-sky-800 hover:underline font-medium"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          Buka Riwayat GR untuk melihat cost adjustment
+                        </button>
+                      )}
+                    </div>
+                  ) : priceEditable ? (
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <p className="text-xs text-slate-500">
+                        Harga PO masih bisa diubah karena belum ada GR.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleSavePrices}
+                        disabled={savePricesMut.isPending}
+                        className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {savePricesMut.isPending ? "Menyimpan..." : "Simpan harga"}
+                      </button>
+                    </div>
+                  ) : (
+                    priceLock?.message && (
+                      <div className="mt-3 text-xs p-3 rounded-lg bg-amber-50 text-amber-900 border border-amber-200">
+                        {priceLock.message}
+                      </div>
+                    )
+                  )}
                 </>
               )}
             </div>

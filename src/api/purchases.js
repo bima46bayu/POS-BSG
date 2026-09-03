@@ -108,6 +108,16 @@ export const cancelPurchase = async (id, signal) => {
   return data;
 };
 
+export const cancelPurchaseItem = async (purchaseId, itemId, signal) => {
+  const { data } = await api.delete(`/api/purchases/${purchaseId}/items/${itemId}`, { signal });
+  return data;
+};
+
+export const updatePurchase = async (id, payload, signal) => {
+  const { data } = await api.put(`/api/purchases/${id}`, payload, { signal });
+  return data?.data ?? data;
+};
+
 /* ===================== GOODS RECEIPT (GR) ===================== */
 
 export const getForReceipt = async (id, signal) => {
@@ -128,4 +138,24 @@ export const listReceipts = async (params = {}, signal) => {
 export const getReceipt = async (id, signal) => {
   const { data } = await api.get(`/api/receipts/${id}`, { signal });
   return data?.data ?? data;
+};
+
+export const voidReceipt = async (id, payload = {}, signal) => {
+  const { data } = await api.post(`/api/receipts/${id}/void`, payload, { signal });
+  return data;
+};
+
+export const costAdjustReceipt = async (id, payload, signal) => {
+  const { data } = await api.post(`/api/receipts/${id}/cost-adjustments`, payload, { signal });
+  return data;
+};
+
+export const flagReceiptReview = async (id, payload, signal) => {
+  const { data } = await api.post(`/api/receipts/${id}/review`, payload, { signal });
+  return data;
+};
+
+export const resolveReceiptReview = async (id, signal) => {
+  const { data } = await api.post(`/api/receipts/${id}/review/resolve`, {}, { signal });
+  return data;
 };
