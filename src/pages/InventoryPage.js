@@ -25,6 +25,7 @@ import StoreScopeFilter from "../components/common/StoreScopeFilter";
 import { useStoreScopeFilter } from "../hooks/useStoreScopeFilter";
 import { IDR as formatIDR } from "../lib/fmt";
 import { hasManagementAccess } from "../utils/roles";
+import { getAuth } from "../api/auth";
 
 const PER_PAGE = 10;
 const STORAGE_KEY = "inventory_store_id";
@@ -60,7 +61,7 @@ export default function InventoryProductsPage() {
   const navigate = useNavigate();
 
   // ===== USER / STORE SCOPE =====
-  const [me, setMe] = useState(null);
+  const [me, setMe] = useState(() => getAuth()?.user ?? null);
   const [stores, setStores] = useState([]);
 
   const {
@@ -68,7 +69,6 @@ export default function InventoryProductsPage() {
     storeFilterId,
     effectiveStoreId,
     canPickStore,
-    needsStoreSelection,
     activeStoreLabel,
     handleParentChange,
     handleBranchChange,
@@ -85,9 +85,11 @@ export default function InventoryProductsPage() {
       try {
         const profile = await getMe();
         if (cancelled) return;
-        setMe(profile);
+        setMe(profile || getAuth()?.user || null);
       } catch {
-        if (!cancelled) setMe(null);
+        // Keep the session user from localStorage so HQ store pickers
+        // still appear if /api/me is slow or fails.
+        if (!cancelled) setMe((prev) => prev || getAuth()?.user || null);
       }
     })();
     return () => {
@@ -160,7 +162,7 @@ export default function InventoryProductsPage() {
 
   // ===== load categories & subcategories for the selected store =====
   useEffect(() => {
-    if (needsStoreSelection || effectiveStoreId == null) {
+    if (effectiveStoreId == null) {
       setCategories([]);
       setSubCategories([]);
       return;
@@ -208,11 +210,14 @@ export default function InventoryProductsPage() {
     return () => {
       cancel = true;
     };
-  }, [effectiveStoreId, needsStoreSelection]);
+  }, [effectiveStoreId]);
 
   // ===== FETCH LIST (server paging vs client filter mode) =====
   useEffect(() => {
-    if (needsStoreSelection) {
+    // HQ must pick a branch before we can show per-store stock.
+    // Use effectiveStoreId (not parent-only) so a saved branch still loads
+    // even if the parent dropdown has not been inferred yet.
+    if (canPickStore && effectiveStoreId == null) {
       setRawRows([]);
       setServerMeta({
         current_page: 1,
@@ -279,7 +284,7 @@ export default function InventoryProductsPage() {
     categoryId,
     subCategoryId,
     effectiveStoreId,
-    needsStoreSelection,
+    canPickStore,
   ]);
 
   // ===== maps for labels =====
@@ -515,11 +520,41 @@ export default function InventoryProductsPage() {
     setShowFilters((s) => !s);
   };
 
-  // ===== Export CSV =====
-  const exportCSV = async () => {
+  // ===== Export Excel (all pages for the current store + filters) =====
+  const exportExcel = async () => {
+    if (canPickStore && effectiveStoreId == null) {
+      toast.error("Pilih cabang terlebih dahulu.");
+      return;
+    }
     try {
-      toast.loading("Menyiapkan CSV...", { id: "exp" });
-      const data = clientFilterActive ? filteredSorted : rawRows;
+      toast.loading("Menyiapkan Excel...", { id: "exp" });
+      const XLSX = await import("xlsx");
+
+      const CHUNK_SIZE = 100;
+      const MAX_ROWS = 50000;
+      const list = [];
+      let page = 1;
+      let lastPage = 1;
+      do {
+        const { items, meta: m } = await getProducts({
+          page,
+          per_page: CHUNK_SIZE,
+          search: searchTerm.trim() || undefined,
+          category_id: categoryId || undefined,
+          sub_category_id: subCategoryId || undefined,
+          sort: sortKey || undefined,
+          dir: sortKey ? sortDir : undefined,
+          ...(effectiveStoreId != null
+            ? { store_location_id: effectiveStoreId }
+            : {}),
+        });
+        list.push(...(items || []));
+        lastPage = Number(m?.last_page ?? 1);
+        page += 1;
+        if (list.length >= MAX_ROWS) break;
+      } while (page <= lastPage);
+
+      const data = list;
 
       const headers = [
         "SKU",
@@ -531,44 +566,57 @@ export default function InventoryProductsPage() {
         "Price",
         "Total",
       ];
-      const escape = (v) => {
-        if (v == null) return "";
-        const s = String(v);
-        return /[\",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      const csvRows = (data || []).map((r) => {
-        const cat = categoryLabel(r, catMap);
-        const sub = subCategoryLabel(r, subMap);
-        return [
-          r.sku || "-",
-          r.name || "-",
-          uomLabel(r),
-          cat,
-          sub,
-          toNum(stockQty(r)),
-          formatIDR(r.price),
-          formatIDR(lineTotal(r)),
-        ]
-          .map(escape)
-          .join(",");
-      });
+      const rows = (data || []).map((r) => [
+        r.sku || "-",
+        r.name || "-",
+        uomLabel(r),
+        categoryLabel(r, catMap),
+        subCategoryLabel(r, subMap),
+        stockQty(r),
+        Number(r.price) || 0,
+        lineTotal(r),
+      ]);
 
-      const csv = [headers.join(","), ...csvRows].join("\n");
-      const blob = new Blob([csv], {
-        type: "text/csv;charset=utf-8;",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+      const currencyFmt = '"Rp"#,##0';
+      const stockFmt = "#,##0.####";
+      for (let R = 1; R <= range.e.r; R += 1) {
+        const stockCell = ws[XLSX.utils.encode_cell({ r: R, c: 5 })];
+        if (stockCell) {
+          stockCell.t = "n";
+          stockCell.z = stockFmt;
+        }
+        const priceCell = ws[XLSX.utils.encode_cell({ r: R, c: 6 })];
+        if (priceCell) {
+          priceCell.t = "n";
+          priceCell.z = currencyFmt;
+        }
+        const totalCell = ws[XLSX.utils.encode_cell({ r: R, c: 7 })];
+        if (totalCell) {
+          totalCell.t = "n";
+          totalCell.z = currencyFmt;
+        }
+      }
+      ws["!cols"] = [
+        { wch: 16 },
+        { wch: 36 },
+        { wch: 10 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 12 },
+        { wch: 16 },
+        { wch: 16 },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Inventory Products");
       const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-      a.download = `inventory-products-${ts}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success("CSV berhasil diunduh", { id: "exp" });
-    } catch {
-      toast.error("Gagal mengekspor CSV", { id: "exp" });
+      XLSX.writeFile(wb, `inventory-products-${ts}.xlsx`);
+      toast.success(`Excel berhasil diunduh (${list.length} produk)`, { id: "exp" });
+    } catch (err) {
+      console.error(err);
+      toast.error("Gagal mengekspor Excel", { id: "exp" });
     }
   };
 
@@ -592,6 +640,12 @@ export default function InventoryProductsPage() {
           />
         </div>
       </div>
+
+      {canPickStore && effectiveStoreId == null && (
+        <div className="mt-4 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+          Pilih parent store dan branch store untuk melihat stok inventory cabang tersebut.
+        </div>
+      )}
 
       {/* Controls */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mt-4">
@@ -640,9 +694,9 @@ export default function InventoryProductsPage() {
             </button>
 
             <button
-              onClick={exportCSV}
+              onClick={exportExcel}
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-              title="Export CSV"
+              title="Export Excel"
             >
               <Download className="w-4 h-4" />
               Export
