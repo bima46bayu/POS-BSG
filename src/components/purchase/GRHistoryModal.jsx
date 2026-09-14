@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
+import { Download } from "lucide-react";
 
 import { IDR } from "../../lib/fmt";
+import { exportGoodsReceiptPdf } from "../../lib/exportGoodsReceiptPdf";
+import { getStoreLocation } from "../../api/storeLocations";
+import { getMe } from "../../api/users";
 import {
   listReceipts,
   getReceipt,
@@ -43,6 +47,26 @@ export default function GRHistoryModal({
   const [reason, setReason] = useState("");
   const [newCosts, setNewCosts] = useState({});
   const [busy, setBusy] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+
+  const { data: me } = useQuery({
+    enabled: open,
+    queryKey: ["me"],
+    queryFn: ({ signal }) => getMe(signal),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const purchaseStoreId =
+    purchase?.store_location_id ?? storeLocationId ?? null;
+
+  const { data: purchaseStoreLoc } = useQuery({
+    enabled: open && purchaseStoreId != null,
+    queryKey: ["store-location", purchaseStoreId],
+    queryFn: ({ queryKey, signal }) => getStoreLocation(queryKey[1], signal),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
 
   const detailQuery = useQuery({
     enabled: open && selectedId != null,
@@ -176,6 +200,52 @@ export default function GRHistoryModal({
     }
   };
 
+  const handleDownloadPdf = async (gr) => {
+    if (!gr?.id) return;
+    setDownloadingId(gr.id);
+    try {
+      const detail = await getReceipt(gr.id);
+      const po = detail?.purchase || purchase || {};
+      const supplier = po?.supplier || {};
+      const storeLoc =
+        po?.store_location ||
+        po?.storeLocation ||
+        purchaseStoreLoc ||
+        me?.store_location ||
+        null;
+
+      const company = {
+        name: storeLoc?.name ?? window.APP_COMPANY?.name ?? "PT. BUANA SELARAS GLOBALINDO",
+        address:
+          storeLoc?.address ??
+          window.APP_COMPANY?.address ??
+          "TamanTekno BSD City Sektor XI\nBlok A2 No. 28, Setu, Tangerang Selatan 15314",
+        phone: storeLoc?.phone
+          ? `Tel. ${storeLoc.phone}`
+          : (window.APP_COMPANY?.phone ?? "Tel. +62 21 7567217/270 (hunting)"),
+        fax: window.APP_COMPANY?.fax ?? "",
+      };
+
+      await exportGoodsReceiptPdf({
+        logoUrl: storeLoc?.logo_url || storeLoc?.brand_logo_url || "/images/LogoBSG.png",
+        company,
+        receipt: {
+          ...detail,
+          received_by_name: detail?.received_by?.name || detail?.receivedBy?.name,
+        },
+        purchase: { ...po, supplier },
+        items: detail?.items || [],
+        printedBy: me?.name || "Warehouse",
+      });
+      toast.success("GR report berhasil diunduh.");
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.response?.data?.message || err?.message || "Gagal membuat GR report.");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
       <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] my-6 flex flex-col shadow-xl">
@@ -233,7 +303,17 @@ export default function GRHistoryModal({
                           </span>
                         )}
                       </td>
-                      <td className="p-2.5 text-right">
+                      <td className="p-2.5 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          disabled={downloadingId === gr.id}
+                          onClick={() => handleDownloadPdf(gr)}
+                          className="inline-flex items-center gap-1 text-blue-600 hover:underline text-sm disabled:opacity-60 mr-3"
+                          title="Download GR (PDF)"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          {downloadingId === gr.id ? "..." : "Download"}
+                        </button>
                         <button
                           type="button"
                           onClick={() => setSelectedId(gr.id)}
@@ -255,13 +335,24 @@ export default function GRHistoryModal({
                 <h4 className="font-semibold text-sm">
                   Detail {detail?.gr_number || `GR #${selectedId}`}
                 </h4>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(null)}
-                  className="text-xs text-slate-500 hover:text-slate-800"
-                >
-                  Sembunyikan
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={downloadingId === selectedId}
+                    onClick={() => handleDownloadPdf(detail || { id: selectedId })}
+                    className="inline-flex items-center gap-1 text-blue-600 hover:underline text-xs disabled:opacity-60"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {downloadingId === selectedId ? "..." : "Download PDF"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(null)}
+                    className="text-xs text-slate-500 hover:text-slate-800"
+                  >
+                    Sembunyikan
+                  </button>
+                </div>
               </div>
               {detailQuery.isLoading && <p className="text-sm text-slate-600">Memuat detail...</p>}
               {detailQuery.isError && (
