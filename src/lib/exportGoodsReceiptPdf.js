@@ -25,12 +25,15 @@ export async function exportGoodsReceiptPdf({
   const fmtNum = (n) => Number(n || 0).toLocaleString("id-ID");
   const fmtDate = (s) => {
     if (!s) return "-";
-    const raw = String(s);
-    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) {
-      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const raw = String(s).trim();
+    // Date-only (YYYY-MM-DD): keep the calendar day, do not parse as UTC.
+    const dateOnly = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateOnly) {
+      const d = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
       return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
     }
+    // ISO datetime from Laravel date casts is UTC midnight of that local day
+    // (e.g. 2026-09-04 WIB → 2026-09-03T17:00:00.000000Z). Use local time.
     const d = new Date(raw);
     if (Number.isNaN(d.getTime())) return safe(s);
     return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
