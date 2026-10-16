@@ -12,6 +12,7 @@ import {
 import GRModal from '../components/purchase/GRModal';
 import GRHistoryModal from '../components/purchase/GRHistoryModal';
 import StoreScopeFilter from '../components/common/StoreScopeFilter';
+import Highlight from '../components/common/Highlight';
 import { useStoreScopeFilter } from '../hooks/useStoreScopeFilter';
 import { getMe } from '../api/users';
 import { listStoreLocations } from '../api/storeLocations';
@@ -22,10 +23,162 @@ const PARENT_STORAGE_KEY = 'gr_parent_store_id';
 
 const DONE_STATUSES = new Set(['closed', 'completed']);
 const SKIP_STATUSES = new Set(['canceled', 'cancelled']);
-const OPEN_STATUSES = new Set(['approved', 'partially_received', 'partial']);
+
+const PO_PAGE_SIZE = 10;
 
 const isDone = (status) => DONE_STATUSES.has(String(status || '').toLowerCase());
-const isOpenForGr = (status) => OPEN_STATUSES.has(String(status || '').toLowerCase());
+
+function itemLabel(item) {
+  const product = item?.product || {};
+  const name = String(product.name || item?.product_name || '').trim();
+  const sku = String(product.sku || item?.sku || '').trim();
+  return { name, sku, label: sku ? `${sku} ${name}`.trim() : name };
+}
+
+function qtyText(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(n);
+}
+
+function isCancelledStatus(status) {
+  const value = String(status || '').toLowerCase();
+  return value === 'canceled' || value === 'cancelled';
+}
+
+function receiptStats(purchases) {
+  const stats = { qtyOrder: 0, qtyReceived: 0 };
+  for (const purchase of purchases || []) {
+    if (isCancelledStatus(purchase?.status)) continue;
+    for (const item of purchase.items || []) {
+      if (isCancelledStatus(item?.status)) continue;
+      stats.qtyOrder += Number(item.qty_order || 0);
+      stats.qtyReceived += Number(item.qty_received || 0);
+    }
+  }
+  return stats;
+}
+
+function matchedItems(purchase, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return [];
+  const rows = [];
+  const seen = new Set();
+  for (const item of purchase?.items || []) {
+    const { name, sku, label } = itemLabel(item);
+    if (!name.toLowerCase().includes(q) && !sku.toLowerCase().includes(q)) continue;
+    const key = item.id ?? `${label}-${rows.length}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const qtyOrder = Number(item.qty_order || 0);
+    const qtyReceived = Number(item.qty_received || 0);
+    const unitPrice = Number(item.unit_price || 0);
+    const discount = Number(item.discount || 0);
+    const tax = Number(item.tax || 0);
+    const lineTotal = item.line_total == null
+      ? qtyOrder * unitPrice - discount + tax
+      : Number(item.line_total);
+    rows.push({
+      key,
+      label: label || name || '-',
+      qtyOrder,
+      qtyReceived,
+      unit: item.product?.unit?.name || item.unit_name || '',
+      unitPrice,
+      discount,
+      tax,
+      lineTotal,
+    });
+  }
+  return rows;
+}
+
+function purchaseMatches(purchase, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  if (String(purchase?.purchase_number || purchase?.id || '').toLowerCase().includes(q)) return true;
+  if (String(purchase?.notes || '').toLowerCase().includes(q)) return true;
+  return matchedItems(purchase, q).length > 0;
+}
+
+function supplierTextMatches(supplier, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  return (
+    String(supplier?.name || '').toLowerCase().includes(q) ||
+    String(supplier?.code || '').toLowerCase().includes(q)
+  );
+}
+
+function SummaryCards({ supplier }) {
+  const cards = [
+    { label: 'Pending PO', value: String(supplier.pendingPOs || 0), tone: 'bg-amber-50 border-amber-200 text-amber-800' },
+    { label: 'Selesai', value: String(supplier.donePOs || 0), tone: 'bg-emerald-50 border-emerald-200 text-emerald-800' },
+    { label: 'Total PO', value: IDR(supplier.totalAmount || 0), tone: 'bg-blue-50 border-blue-200 text-blue-800' },
+    { label: 'Qty dipesan', value: qtyText(supplier.qtyOrder), tone: 'bg-violet-50 border-violet-200 text-violet-800' },
+    { label: 'Qty diterima', value: qtyText(supplier.qtyReceived), tone: 'bg-teal-50 border-teal-200 text-teal-800' },
+  ];
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+      {cards.map((card) => (
+        <div key={card.label} className={`rounded-xl border px-4 py-3 ${card.tone}`}>
+          <p className="text-xs font-medium opacity-80">{card.label}</p>
+          <p className="mt-1 text-base font-semibold break-words">{card.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PoPager({ page, lastPage, total, onPage }) {
+  const from = total === 0 ? 0 : (page - 1) * PO_PAGE_SIZE + 1;
+  const to = Math.min(total, page * PO_PAGE_SIZE);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 bg-white rounded-xl border border-slate-200 px-4 py-3">
+      <p className="text-sm text-slate-600">
+        {from}–{to} dari {total} · 10 per halaman
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => onPage(page - 1)}
+          className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <span className="text-sm font-medium text-slate-800 min-w-[88px] text-center">
+          Page {page} / {lastPage}
+        </span>
+        <button
+          type="button"
+          disabled={page >= lastPage}
+          onClick={() => onPage(page + 1)}
+          className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SearchBox({ value, onChange, placeholder }) {
+  return (
+    <div className="mb-6 bg-white rounded-xl border border-slate-200 p-5">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+        />
+      </div>
+    </div>
+  );
+}
 
 function ManualReviewQueue({ enabled, storeLocationId, onOpen }) {
   const { data, isLoading } = useQuery({
@@ -127,6 +280,7 @@ export default function GRPage() {
   const [view, setView] = useState(initialView);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [poPage, setPoPage] = useState(1);
 
   const [grModalOpen, setGrModalOpen] = useState(false);
   const [selectedPurchaseId, setSelectedPurchaseId] = useState(null);
@@ -181,7 +335,7 @@ export default function GRPage() {
   });
 
   const purchaseParams = React.useMemo(() => {
-    const params = { per_page: 500 };
+    const params = { per_page: 500, with_items: 1 };
     if (effectiveStoreId != null) {
       params.store_location_id = effectiveStoreId;
     }
@@ -193,7 +347,19 @@ export default function GRPage() {
   const { data: purchasesData, isLoading, isError, error } = useQuery({
     enabled: canLoadPurchases,
     queryKey: ['purchases', 'gr', purchaseParams],
-    queryFn: ({ signal, queryKey }) => listPurchases(queryKey[2], signal),
+    queryFn: async ({ signal, queryKey }) => {
+      const params = { ...queryKey[2], per_page: 100 };
+      const first = await listPurchases({ ...params, page: 1 }, signal);
+      const items = [...(first.items || [])];
+      const lastPage = Number(first.meta?.last_page || 1);
+      for (let page = 2; page <= lastPage && page <= 50; page += 1) {
+        const next = await listPurchases({ ...params, page }, signal);
+        const rows = next.items || [];
+        items.push(...rows);
+        if (rows.length === 0) break;
+      }
+      return { ...first, data: items, items };
+    },
     retry: 1,
     refetchOnWindowFocus: false,
   });
@@ -210,6 +376,7 @@ export default function GRPage() {
     setSelectedSupplier(null);
     setView('suppliers');
     setSearchTerm('');
+    setPoPage(1);
     setHistoryPurchase(null);
     setHistoryReceiptId(null);
     setGrModalOpen(false);
@@ -253,12 +420,12 @@ export default function GRPage() {
       groups[supplierId].purchases.push(purchase);
       groups[supplierId].totalAmount += Number(purchase.grand_total || 0);
       if (isDone(status)) groups[supplierId].donePOs += 1;
-      else if (isOpenForGr(status) || status === 'draft') groups[supplierId].pendingPOs += 1;
       else groups[supplierId].pendingPOs += 1;
     }
 
     return Object.values(groups).map((g) => ({
       ...g,
+      ...receiptStats(g.purchases),
       purchases: [...g.purchases].sort((a, b) => {
         const aDone = isDone(a.status) ? 1 : 0;
         const bDone = isDone(b.status) ? 1 : 0;
@@ -292,6 +459,7 @@ export default function GRPage() {
   const handleSupplierClick = (supplier) => {
     setSelectedSupplier(supplier);
     setView('orders');
+    setPoPage(1);
     navigate({ pathname: '/gr', search: `?view=orders&supplier_id=${supplier.id}` });
   };
 
@@ -324,8 +492,8 @@ export default function GRPage() {
 
   const filteredSuppliers = (supplierGroups || []).filter(
     (s) =>
-      (s.name || '').toLowerCase().includes((searchTerm || '').toLowerCase()) ||
-      (s.code || '').toLowerCase().includes((searchTerm || '').toLowerCase())
+      supplierTextMatches(s, searchTerm) ||
+      (s.purchases || []).some((po) => purchaseMatches(po, searchTerm))
   );
 
   const getStatusBadge = (status) => {
@@ -437,18 +605,11 @@ export default function GRPage() {
 
         {canLoadPurchases && !isLoading && !isError && view === 'suppliers' && (
           <div>
-            <div className="mb-6 bg-white rounded-xl border border-slate-200 p-5">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Cari supplier..."
-                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                />
-              </div>
-            </div>
+            <SearchBox
+              value={searchTerm}
+              onChange={setSearchTerm}
+              placeholder="Cari supplier / item..."
+            />
 
             {filteredSuppliers.length === 0 && (
               <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
@@ -475,26 +636,36 @@ export default function GRPage() {
                       </div>
                       <div>
                         <h3 className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
-                          {supplier.name}
+                          <Highlight text={supplier.name} query={searchTerm} />
                         </h3>
-                        <p className="text-sm text-slate-500">{supplier.code}</p>
+                        <p className="text-sm text-slate-500">
+                          <Highlight text={supplier.code} query={searchTerm} />
+                        </p>
                       </div>
                     </div>
                     <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-blue-600 transition-colors" />
                   </div>
 
                   <div className="space-y-2 pt-4 border-t border-slate-100">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-slate-600">Pending PO:</span>
-                      <span className="font-semibold text-slate-900">{supplier.pendingPOs}</span>
+                    <div className="flex justify-between items-center rounded-lg bg-amber-50 px-3 py-2">
+                      <span className="text-sm text-amber-800">Pending PO:</span>
+                      <span className="font-semibold text-amber-900">{supplier.pendingPOs}</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-slate-600">Selesai (riwayat):</span>
-                      <span className="font-semibold text-green-700">{supplier.donePOs}</span>
+                    <div className="flex justify-between items-center rounded-lg bg-emerald-50 px-3 py-2">
+                      <span className="text-sm text-emerald-800">Selesai (riwayat):</span>
+                      <span className="font-semibold text-emerald-800">{supplier.donePOs}</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-slate-600">Total Amount:</span>
-                      <span className="font-semibold text-blue-600">{IDR(supplier.totalAmount)}</span>
+                    <div className="flex justify-between items-center rounded-lg bg-blue-50 px-3 py-2">
+                      <span className="text-sm text-blue-800">Total Amount:</span>
+                      <span className="font-semibold text-blue-800">{IDR(supplier.totalAmount)}</span>
+                    </div>
+                    <div className="flex justify-between items-center rounded-lg bg-violet-50 px-3 py-2">
+                      <span className="text-sm text-violet-800">Qty dipesan:</span>
+                      <span className="font-semibold text-violet-900">{qtyText(supplier.qtyOrder)}</span>
+                    </div>
+                    <div className="flex justify-between items-center rounded-lg bg-teal-50 px-3 py-2">
+                      <span className="text-sm text-teal-800">Qty diterima:</span>
+                      <span className="font-semibold text-teal-900">{qtyText(supplier.qtyReceived)}</span>
                     </div>
                   </div>
                 </div>
@@ -507,8 +678,36 @@ export default function GRPage() {
           <>
             {selectedSupplier ? (
               <div className="space-y-5">
-                {selectedSupplier.purchases.map((po) => {
+                <SummaryCards supplier={selectedSupplier} />
+                <SearchBox
+                  value={searchTerm}
+                  onChange={(value) => {
+                    setSearchTerm(value);
+                    setPoPage(1);
+                  }}
+                  placeholder="Cari PO / item..."
+                />
+                {(() => {
+                  const supplierHit = supplierTextMatches(selectedSupplier, searchTerm);
+                  const visible = supplierHit
+                    ? selectedSupplier.purchases
+                    : selectedSupplier.purchases.filter((po) => purchaseMatches(po, searchTerm));
+                  if (visible.length === 0) {
+                    return (
+                      <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
+                        <Package className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                        <p className="text-slate-600">Tidak ada PO atau item yang cocok</p>
+                      </div>
+                    );
+                  }
+                  const lastPage = Math.max(1, Math.ceil(visible.length / PO_PAGE_SIZE));
+                  const page = Math.min(Math.max(poPage, 1), lastPage);
+                  const rows = visible.slice((page - 1) * PO_PAGE_SIZE, page * PO_PAGE_SIZE);
+                  return (
+                    <>
+                      {rows.map((po) => {
                   const done = isDone(po.status);
+                  const hits = matchedItems(po, searchTerm);
                   return (
                     <div
                       key={po.id}
@@ -520,7 +719,7 @@ export default function GRPage() {
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                           <div>
                             <h3 className="text-lg font-semibold text-slate-900">
-                              {po.purchase_number || po.id}
+                              <Highlight text={po.purchase_number || po.id} query={searchTerm} />
                             </h3>
                             <div className="flex gap-4 mt-2 text-sm text-slate-600 flex-wrap">
                               {po.order_date && (
@@ -569,6 +768,53 @@ export default function GRPage() {
                             </button>
                           </div>
                         </div>
+                        {hits.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {hits.map((item) => (
+                              <div
+                                key={item.key}
+                                className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2"
+                              >
+                                <p className="text-sm font-medium text-slate-900">
+                                  <Highlight text={item.label} query={searchTerm} />
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+                                  <span>
+                                    Qty:{' '}
+                                    <b className="text-slate-900">
+                                      {qtyText(item.qtyOrder)}
+                                      {item.unit ? ` ${item.unit}` : ''}
+                                    </b>
+                                  </span>
+                                  <span>
+                                    Diterima:{' '}
+                                    <b className="text-slate-900">{qtyText(item.qtyReceived)}</b>
+                                  </span>
+                                  <span>
+                                    Harga:{' '}
+                                    <b className="text-slate-900">{IDR(item.unitPrice)}</b>
+                                  </span>
+                                  {item.discount > 0 && (
+                                    <span>
+                                      Diskon:{' '}
+                                      <b className="text-slate-900">{IDR(item.discount)}</b>
+                                    </span>
+                                  )}
+                                  {item.tax > 0 && (
+                                    <span>
+                                      Pajak:{' '}
+                                      <b className="text-slate-900">{IDR(item.tax)}</b>
+                                    </span>
+                                  )}
+                                  <span>
+                                    Total:{' '}
+                                    <b className="text-slate-900">{IDR(item.lineTotal)}</b>
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       <div className="p-6 bg-white border-b border-slate-200">
@@ -588,7 +834,9 @@ export default function GRPage() {
                           {po.notes && (
                             <div className="md:col-span-1">
                               <span className="text-slate-600">Notes:</span>
-                              <p className="text-slate-900 mt-1 truncate">{po.notes}</p>
+                              <p className="text-slate-900 mt-1 truncate">
+                                <Highlight text={po.notes} query={searchTerm} />
+                              </p>
                             </div>
                           )}
                         </div>
@@ -596,6 +844,15 @@ export default function GRPage() {
                     </div>
                   );
                 })}
+                      <PoPager
+                        page={page}
+                        lastPage={lastPage}
+                        total={visible.length}
+                        onPage={setPoPage}
+                      />
+                    </>
+                  );
+                })()}
               </div>
             ) : (
               <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
