@@ -3,6 +3,7 @@ import React, { useMemo, useState, useEffect } from "react";
 import { Package, X } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getForReceipt, createReceipt } from "../../api/purchases";
+import Highlight from "../common/Highlight";
 import toast from "react-hot-toast";
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
@@ -38,12 +39,14 @@ export default function GRModal({ open, onClose, purchaseId, onOpenHistory }) {
   const [headerNotes, setHeaderNotes] = useState("");
   const [qtyMap, setQtyMap] = useState({});
   const [condMap, setCondMap] = useState({});
+  const [itemQuery, setItemQuery] = useState("");
   useEffect(() => {
     if (open) {
       setReceivedDate(new Date().toISOString().slice(0, 10));
       setHeaderNotes("");
       setQtyMap({});
       setCondMap({});
+      setItemQuery("");
       if (purchaseId != null && purchaseId !== "") refetch();
     }
   }, [open, purchaseId, refetch]);
@@ -60,6 +63,16 @@ export default function GRModal({ open, onClose, purchaseId, onOpenHistory }) {
 
   // tampilkan hanya yang masih ada sisa
   const remainRows = useMemo(() => allRows.filter((r) => remainOf(r) > 0), [allRows]);
+
+  const visibleRows = useMemo(() => {
+    const q = itemQuery.trim().toLowerCase();
+    if (!q) return remainRows;
+    return remainRows.filter((row) => {
+      const label = String(row?.product_label ?? "").toLowerCase();
+      const sku = String(row?.sku ?? "").toLowerCase();
+      return label.includes(q) || sku.includes(q);
+    });
+  }, [remainRows, itemQuery]);
 
   const totalRemain = useMemo(
     () => remainRows.reduce((sum, row) => sum + remainOf(row), 0),
@@ -215,6 +228,15 @@ export default function GRModal({ open, onClose, purchaseId, onOpenHistory }) {
 
           {remainRows.length > 0 && (
             <div className="border rounded overflow-x-auto">
+              <div className="p-2 border-b bg-white">
+                <input
+                  type="text"
+                  value={itemQuery}
+                  onChange={(e) => setItemQuery(e.target.value)}
+                  placeholder="Cari item..."
+                  className="w-full px-3 py-2 border rounded text-sm"
+                />
+              </div>
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 text-gray-600">
                   <tr>
@@ -226,13 +248,13 @@ export default function GRModal({ open, onClose, purchaseId, onOpenHistory }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {remainRows.map((row, idx) => {
+                  {visibleRows.map((row, idx) => {
                     const key = row.purchase_item_id ?? `${row.product_id}-${idx}`;
                     const remain = remainOf(row);
                     return (
                       <tr key={key} className="border-t">
                         <td className="p-2">
-                          {row?.product_label ?? `#${row.product_id}`}
+                          <Highlight text={row?.product_label ?? `#${row.product_id}`} query={itemQuery} />
                           {/* Receiving is counted in the stock unit (e.g. Pack),
                               so state the contents to confirm the right goods
                               without implying the number must be converted. */}
@@ -287,6 +309,9 @@ export default function GRModal({ open, onClose, purchaseId, onOpenHistory }) {
                   })}
                 </tbody>
               </table>
+              {visibleRows.length === 0 && (
+                <p className="p-3 text-sm text-gray-600">Item tidak ditemukan</p>
+              )}
             </div>
           )}
         </div>

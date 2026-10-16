@@ -15,6 +15,7 @@ import {
   flagReceiptReview,
   resolveReceiptReview,
 } from "../../api/purchases";
+import Highlight from "../common/Highlight";
 
 export default function GRHistoryModal({
   open,
@@ -48,6 +49,7 @@ export default function GRHistoryModal({
   const [newCosts, setNewCosts] = useState({});
   const [busy, setBusy] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [itemQuery, setItemQuery] = useState("");
 
   const { data: me } = useQuery({
     enabled: open,
@@ -87,6 +89,7 @@ export default function GRHistoryModal({
   useEffect(() => {
     setReason("");
     setNewCosts({});
+    setItemQuery("");
   }, [selectedId]);
 
   if (!open) return null;
@@ -95,6 +98,13 @@ export default function GRHistoryModal({
   const lifecycle = detail?.lifecycle || {};
   const action = lifecycle.action;
   const allowed = lifecycle.allowed_actions || [];
+  const itemQueryText = itemQuery.trim().toLowerCase();
+  const visibleDetailItems = (detail?.items || []).filter((it) => {
+    if (!itemQueryText) return true;
+    const product = it.purchase_item?.product || {};
+    const label = `${product.sku || ""} ${product.name || ""}`.toLowerCase();
+    return label.includes(itemQueryText);
+  });
 
   const invalidate = async () => {
     await qc.invalidateQueries({ queryKey: ["receipts"] });
@@ -372,6 +382,15 @@ export default function GRHistoryModal({
                     </p>
                   )}
                   <div className="border rounded overflow-hidden bg-white overflow-x-auto">
+                    <div className="p-2 border-b">
+                      <input
+                        type="text"
+                        value={itemQuery}
+                        onChange={(e) => setItemQuery(e.target.value)}
+                        placeholder="Cari item..."
+                        className="w-full px-3 py-2 border rounded text-sm"
+                      />
+                    </div>
                     <table className="w-full text-sm">
                       <thead className="bg-white text-slate-600 border-b">
                         <tr>
@@ -389,7 +408,7 @@ export default function GRHistoryModal({
                         </tr>
                       </thead>
                       <tbody>
-                        {(detail.items || []).map((it) => {
+                        {visibleDetailItems.map((it) => {
                           const layer = (lifecycle.layers || []).find(
                             (l) => Number(l.goods_receipt_item_id) === Number(it.id)
                           );
@@ -402,7 +421,7 @@ export default function GRHistoryModal({
                             : `Item #${it.purchase_item_id}`;
                           return (
                             <tr key={it.id} className="border-t">
-                              <td className="p-2">{label}</td>
+                              <td className="p-2"><Highlight text={label} query={itemQuery} /></td>
                               <td className="p-2 text-right">{it.qty_received}</td>
                               <td className="p-2 text-right">{layer ? consumed : "-"}</td>
                               {(action === "cost_adjustment" || allowed.includes("cost_adjustment")) && (
@@ -443,6 +462,9 @@ export default function GRHistoryModal({
                         })}
                       </tbody>
                     </table>
+                    {itemQueryText && visibleDetailItems.length === 0 && (
+                      <p className="p-3 text-sm text-slate-600">Item tidak ditemukan</p>
+                    )}
                   </div>
 
                   {(lifecycle.cost_adjustments || []).length > 0 && (
