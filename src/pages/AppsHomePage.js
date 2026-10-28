@@ -13,6 +13,7 @@ import {
   LogOut,
   ChevronLeft,
   Scale,
+  Calculator,
   Trash2,
   PackageCheck,
   FileText,
@@ -28,6 +29,7 @@ import {
   MapPin,
   KeyRound,
   Gift,
+  Megaphone,
   ScrollText,
 } from "lucide-react";
 import { isHqAdmin } from "../utils/roles";
@@ -162,6 +164,14 @@ const FOLDERS = {
         icon: Scale,
         color: "#6AA84F",
         path: "/inventory/reconciliation",
+        need: "master",
+      },
+      {
+        id: "inv-cogs",
+        label: "COGS per SKU",
+        icon: Calculator,
+        color: "#0F6E56",
+        path: "/inventory/cogs",
         need: "master",
       },
       {
@@ -314,6 +324,14 @@ const FOLDERS = {
         icon: Gift,
         color: "#674EA7",
         path: "/master/loyalty-rewards",
+        need: "master",
+      },
+      {
+        id: "s-home-promos",
+        label: "Promo Beranda",
+        icon: Megaphone,
+        color: "#1E6B3C",
+        path: "/master/home-promos",
         need: "master",
       },
     ],
