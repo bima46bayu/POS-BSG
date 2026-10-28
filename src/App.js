@@ -9,6 +9,7 @@ import POSPage from "./pages/POSPage";
 import ProductPage from "./pages/ProductPage";
 import InventoryProductsPage from "./pages/InventoryPage";
 import InventoryProductSummaryPage from "./pages/InventorySummaryPage";
+import CogsPerSkuPage from "./pages/CogsPerSkuPage";
 import PurchasePage from "./pages/PurchasePage";
 import HistoryPage from "./pages/HistoryPage";
 import HomePage from "./pages/HomePage";
@@ -41,6 +42,7 @@ import AdditionalChargePage from "./pages/master/AdditionalChargePage";
 import MasterProductOptionPage from "./pages/master/MasterProductOptionPage";
 import MasterMemberPage from "./pages/master/MasterMemberPage";
 import MasterLoyaltyRewardPage from "./pages/master/MasterLoyaltyRewardPage";
+import MasterHomePromoPage from "./pages/master/MasterHomePromoPage";
 import VoidSecurityCodePage from "./pages/master/VoidSecurityCodePage";
 import ActivityLogPage from "./pages/master/ActivityLogPage";
 
@@ -176,6 +178,7 @@ function AppShell() {
     if (p === PAGE_PATH.dashboard) return "Dashboard";
     if (p === PAGE_PATH.pos) return "Point of Sale";
     if (p === PAGE_PATH.products) return "Catalog";
+    if (p.startsWith("/inventory/cogs")) return "COGS per SKU";
     if (p.startsWith("/inventory/write-off")) return "Waste / Write-off";
     if (p.startsWith("/inventory/reconciliation")) return "Reconciliation";
     if (p.startsWith("/inventory")) return "Inventory";
@@ -194,6 +197,7 @@ function AppShell() {
     if (p.startsWith("/master/additional-charge")) return "Additional Charge";
     if (p.startsWith("/master/discount")) return "Discount";
     if (p.startsWith("/master/loyalty-rewards")) return "Point Rewards";
+    if (p.startsWith("/master/home-promos")) return "Promo Beranda";
     if (p.startsWith("/master/supplier")) return "Supplier";
     if (p.startsWith("/master/store-location")) return "Store Location";
     if (p.startsWith("/master/void-security-code")) return "Kode Void";
@@ -313,6 +317,14 @@ function AppShell() {
 
           {/* ===== INVENTORY ===== */}
           <Route
+            path="/inventory/cogs"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <CogsPerSkuPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/inventory/products"
             element={
               <ProtectedRoute pageKey="inventory" allowedPages={allowedPages}>
@@ -412,6 +424,14 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterLoyaltyRewardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/home-promos"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <MasterHomePromoPage />
               </ProtectedRoute>
             }
           />
