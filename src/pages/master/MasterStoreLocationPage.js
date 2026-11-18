@@ -381,6 +381,8 @@ export default function MasterStoreLocationPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [deleteStep, setDeleteStep] = useState("warn");
+  const [deletePassword, setDeletePassword] = useState("");
 
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
@@ -505,10 +507,12 @@ export default function MasterStoreLocationPage() {
   });
 
   const mDelete = useMutation({
-    mutationFn: ({ id, signal }) => deleteStoreLocation(id, signal),
+    mutationFn: ({ id, password }) => deleteStoreLocation(id, { password }),
     onSuccess: () => {
       toast.success("Store deleted");
       setConfirmDel(null);
+      setDeleteStep("warn");
+      setDeletePassword("");
       qc.invalidateQueries({ queryKey: ["store-locations"] });
     },
     onError: (e) =>
@@ -690,7 +694,11 @@ export default function MasterStoreLocationPage() {
                           Edit
                         </button>
                         <button
-                          onClick={() => setConfirmDel(r)}
+                          onClick={() => {
+                            setDeletePassword("");
+                            setDeleteStep("warn");
+                            setConfirmDel(r);
+                          }}
                           className="inline-flex items-center justify-center h-8 w-8 bg-red-500 text-white rounded-lg hover:bg-red-600"
                           title="Delete"
                         >
@@ -741,15 +749,53 @@ export default function MasterStoreLocationPage() {
       <ConfirmDialog
         open={!!confirmDel}
         title="Hapus Store"
+        confirmText={deleteStep === "warn" ? "Lanjutkan" : "Delete"}
+        loading={mDelete.isPending}
         message={
-          confirmDel ? (
-            <>
-              Yakin hapus store <b>{confirmDel.name}</b>?
-            </>
+          confirmDel && deleteStep === "warn" ? (
+            <p className="text-sm text-gray-700">
+              Hapus store <b>{confirmDel.name}</b> beserta penjualan, produk,
+              stok, pembelian, dan data lain di store ini. Akun user yang
+              terpasang dilepas, tidak dihapus. Cabang di bawah store ini
+              harus dihapus lebih dulu.
+            </p>
+          ) : confirmDel ? (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-700">
+                Ketik password Anda untuk menghapus <b>{confirmDel.name}</b>.
+              </p>
+              <label className="block text-sm font-medium text-gray-700">
+                Password
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  autoFocus
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border rounded-lg text-sm"
+                />
+              </label>
+            </div>
           ) : null
         }
-        onClose={() => setConfirmDel(null)}
-        onConfirm={() => mDelete.mutate({ id: confirmDel.id })}
+        onClose={() => {
+          if (mDelete.isPending) return;
+          setConfirmDel(null);
+          setDeleteStep("warn");
+          setDeletePassword("");
+        }}
+        onConfirm={() => {
+          if (deleteStep === "warn") {
+            setDeletePassword("");
+            setDeleteStep("password");
+            return;
+          }
+          if (!deletePassword.trim()) {
+            toast.error("Password wajib diisi.");
+            return;
+          }
+          mDelete.mutate({ id: confirmDel.id, password: deletePassword });
+        }}
       />
     </div>
   );

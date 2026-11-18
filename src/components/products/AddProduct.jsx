@@ -32,7 +32,6 @@ export default function AddProduct({
     pack_label: "",
     category_id: "",
     sub_category_id: "",
-    stock: "",
     sku: "",
     description: "",
     unit_id: "",
@@ -155,7 +154,6 @@ export default function AddProduct({
         pack_label: "",
         category_id: "",
         sub_category_id: "",
-        stock: "",
         sku: "",
         description: "",
         unit_id: "",
@@ -246,7 +244,8 @@ export default function AddProduct({
         // product stay "unpacked" rather than storing a meaningless 1.
         pack_size: effectivePackSize,
         pack_label: effectivePackSize ? packLabel || null : null,
-        stock: form.stock ? Number(form.stock) : 0,
+        // Opening qty is not set here. Stock only moves through GR / opname.
+        stock: 0,
         images: files.map((f) => f.file),
         store_location_id: storeLocationId,
         // ✅ flag untuk backend: 1 = produk stock, 0 = non-stock (jasa, photobooth, dll)
@@ -396,16 +395,20 @@ export default function AddProduct({
 
           {/* Stock + Unit */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Stock">
+            <Field label="Stock (baca saja)">
               <Input
-                type="number"
-                inputMode="numeric"
-                placeholder="10"
-                value={form.stock}
-                onChange={onChange("stock")}
-                min="0"
-                disabled={!trackInventory} // ✅ non-stock → stok opsional
+                type="text"
+                value="0"
+                readOnly
+                disabled
+                tabIndex={-1}
+                aria-readonly="true"
+                title="Stok diubah via GR — bukan saat tambah produk"
+                className="bg-gray-50 text-gray-500 cursor-not-allowed"
               />
+              <p className="mt-1 text-xs text-gray-500">
+                Stok per cabang dikelola di Inventory / GR / opname.
+              </p>
             </Field>
 
             <Field label="Unit">
