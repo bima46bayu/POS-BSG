@@ -89,8 +89,11 @@ export async function updateStoreLocation(id, payload, signal) {
   return data;
 }
 
-export async function deleteStoreLocation(id, signal) {
-  const { data } = await api.delete(`/api/store-locations/${id}`, { signal });
+export async function deleteStoreLocation(id, { password, signal } = {}) {
+  const { data } = await api.delete(`/api/store-locations/${id}`, {
+    data: { password },
+    signal,
+  });
   return data;
 }
 

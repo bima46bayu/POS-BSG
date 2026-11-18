@@ -434,8 +434,12 @@ export default function UpdateProduct({
                 inputMode="decimal"
                 placeholder="0.00"
                 value={form.stock}
+                readOnly
                 disabled
+                tabIndex={-1}
+                aria-readonly="true"
                 title="Stok diubah via GR, stock opname, atau import — bukan edit produk"
+                className="bg-gray-50 text-gray-500 cursor-not-allowed"
               />
               <p className="mt-1 text-xs text-gray-500">
                 Stok per cabang dikelola di Inventory / GR / opname.

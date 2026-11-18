@@ -24,6 +24,7 @@ import {
   BadgeDollarSign,
   ChefHat,
   KeyRound,
+  Server,
   SlidersHorizontal,
   Layers,
   LayoutGrid,
@@ -42,6 +43,7 @@ const MASTER_PATHS = new Set([
   "/master/supplier",
   "/master/store-location",
   "/master/void-security-code",
+  "/master/app-servers",
 ]);
 
 const SETUP_PATHS = new Set([
@@ -194,6 +196,7 @@ export default function Sidebar({
     { label: "Supplier", path: "/master/supplier", icon: Truck },
     { label: "Store Location", path: "/master/store-location", icon: MapPin },
     { label: "Kode Void", path: "/master/void-security-code", icon: KeyRound },
+    { label: "Alamat Server", path: "/master/app-servers", icon: Server },
   ];
 
   // Menu / product configuration (split from Master — list was too long)

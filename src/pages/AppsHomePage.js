@@ -28,6 +28,7 @@ import {
   Truck,
   MapPin,
   KeyRound,
+  Server,
   Gift,
   Megaphone,
   ScrollText,
@@ -254,6 +255,14 @@ const FOLDERS = {
         icon: KeyRound,
         color: "#990000",
         path: "/master/void-security-code",
+        need: "master",
+      },
+      {
+        id: "m-server",
+        label: "Alamat Server",
+        icon: Server,
+        color: "#1D4ED8",
+        path: "/master/app-servers",
         need: "master",
       },
       {

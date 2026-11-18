@@ -44,6 +44,7 @@ import MasterMemberPage from "./pages/master/MasterMemberPage";
 import MasterLoyaltyRewardPage from "./pages/master/MasterLoyaltyRewardPage";
 import MasterHomePromoPage from "./pages/master/MasterHomePromoPage";
 import VoidSecurityCodePage from "./pages/master/VoidSecurityCodePage";
+import AppServerPage from "./pages/master/AppServerPage";
 import ActivityLogPage from "./pages/master/ActivityLogPage";
 
 /* ===== AUTH / API ===== */
@@ -201,6 +202,7 @@ function AppShell() {
     if (p.startsWith("/master/supplier")) return "Supplier";
     if (p.startsWith("/master/store-location")) return "Store Location";
     if (p.startsWith("/master/void-security-code")) return "Kode Void";
+    if (p.startsWith("/master/app-servers")) return "Alamat Server";
     if (p.startsWith("/master/otp-log")) return "Activity Log";
     if (p.startsWith("/master/activity-log")) return "Activity Log";
     if (p.startsWith("/master")) return "Master";
@@ -480,6 +482,14 @@ function AppShell() {
             element={
               <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
                 <MasterStoreLocationPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master/app-servers"
+            element={
+              <ProtectedRoute pageKey="master" allowedPages={allowedPages}>
+                <AppServerPage />
               </ProtectedRoute>
             }
           />
